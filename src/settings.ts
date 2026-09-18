@@ -35,6 +35,8 @@ export class SettingsPresenter {
       { id: "advisory", title: "Compaction advisory", description: "Note warm-cache compactions that re-write the prefix", value: on(opts.advisory) },
       { id: "autoCompact", title: "Auto-compaction", description: "Compact in cold-window turns (cache already lost) at idle", value: on(opts.autoCompact) },
       { id: "softCompact", title: "Soft compaction", description: "Per-turn compaction that never touches cached segments", value: opts.softCompactMode },
+      { id: "softFast", title: "Fast compaction", description: "Replace the uncached delta with a fixed stub; no summarizer call", value: on(opts.softFast) },
+      { id: "softAutoResume", title: "Auto-resume", description: "Continue the agent once after a soft compaction", value: on(opts.softAutoResume) },
     ];
   }
 

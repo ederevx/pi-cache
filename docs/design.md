@@ -141,7 +141,7 @@ and models. Compare `cache_ratio`, `$` saved, `cacheWrite` churn, plus
 non-regression signals (tool-call success, answer diff). pi-ai's `faux`
 provider (simulated cache) gives offline harness tests.
 
-## Soft compaction (cache-first, opt-in) — SPEC
+## Soft compaction (cache-first, FAST by default) — SPEC
 
 **Definition.** Per-turn "soft" compaction whose ONLY purposes are better
 cache hits and fewer input tokens. Invariant, by the user's requirement:
@@ -153,55 +153,57 @@ Consequences of the invariant:
   span stay byte-identical in every request, forever, and keep being
   billed at cached-read price.
 - Only the **uncached delta tail** (turns written after the last soft
-  compaction) may be summarized.
+  compaction) is ever replaced.
 
 **Mechanism (uses pi's extension-visible compaction machinery):**
 1. Track the cache boundary = the entry id of the last soft-compaction
-   summary entry (recorded at `session_compact`).
-2. On cadence (`agent_settled`, every turn or when the delta exceeds a
-   token budget), call `ctx.compact()`.
+   entry (recorded at `session_compact`).
+2. On cadence (`agent_settled`, every turn or cold windows), call
+   `ctx.compact()`; on success the agent is **auto-resumed once** with a
+   fixed `Continue.` prompt (one user turn -> one compaction -> one
+   continuation run; the continuation's settle consumes a skip guard, so
+   the cadence cannot loop).
 3. Our `session_before_compact` handler returns a custom proposal ONLY
-   when WE triggered it (reason "manual" + our pending flag — built-in
-   threshold/overflow compactions pass through untouched):
-   `{ summary: incrementalSummary, firstKeptEntryId: <boundary>,
-   tokensBefore, usage }` where boundary = the later of pi's own cut and
-   the tracked last-soft-compaction entry — the summarized span never
-   extends before what is already cached. Summary text appends to
-   `previousSummary`, composing without rewriting history.
-4. **Summarizer economics (audit-corrected):** the built-in summarizer is
-   hardcoded `cacheRetention:"none"` + fresh routing id and a different
-   system prompt, so IT inherits no warm-cache benefit — and
-   `before_provider_request` does not fire for it; `ctx.compact()` cannot
-   change it. The custom proposal is therefore the ONLY place to do
-   cache-aware summarization: WE call `ctx.modelRegistry.complete`
-   ourselves with the session's system prompt + a copied cached prefix
-   (byte-identical for automatic OpenAI/DeepSeek caching; explicit
-   cache_control markers for Anthropic) so the summarizer reads the warm
-   prefix at read price and only the small delta + instruction are fresh.
+   when WE triggered it (built-in threshold/overflow compactions pass
+   through untouched). **FAST path (default):** the proposal is
+   `{ summary: FAST_COMPACTION_STUB, firstKeptEntryId: <pi's own cut>,
+   tokensBefore }` — a fixed, byte-stable stub in place of the uncached
+   delta, with pi's recent window kept verbatim. No model call, no
+   `messagesToSummarize` read-back; O(1). The stub is a byte constant
+   (`FAST_COMPACTION_STUB`): changing it would shift every following byte
+   and invalidate the cached prefix, so it is part of the cache contract.
+4. **Smart path (`PI_CACHE_SOFT_FAST=0`):** cache-aware LLM proposal — WE
+   call the summarizer with the session's system prompt; proposal uses
+   `firstKeptEntryId = later-of(boundary, pi cut)`, summary appends to
+   `previousSummary`, composing without rewriting history. The built-in
+   summarizer is hardcoded `cacheRetention:"none"` + fresh routing id and
+   a different system prompt, so it inherits no warm-cache benefit; the
+   custom proposal is the only cache-aware summarize point.
 
 **Economics.** Without it, every long-context turn re-sends (and re-reads)
-all history at read price (or full price where reads are unbilled, e.g.
-DeepSeek-at-1.0x per OpenRouter's table); with it, history is compressed
-once into a small delta write and then re-cheap. Each turn saves roughly
-`(summarizedTokens - summaryTokens) x readRate x turnsUntilNextCut`
-minus the (cache-aware) summarize call. Web evidence: literal per-turn
-compaction loses to append-and-cache in small-context/warm-cache regimes
-and wins for very long histories, latency/context-rot budgets, and
-no-read-discount providers — which is exactly why this is opt-in with
-cadence modes.
+all history at read price (or full price where reads are unbilled); with it,
+history is compressed once into a small delta write and then re-cheap.
+Fast mode costs zero summarize tokens outright; web evidence (Claude Code
+docs, OpenRouter best practices): compacting "replaces your message history
+with a summary" via a warm-prefix read; `/rewind` truncates back to a cached
+prefix; breakpoints themselves cost nothing — replace in place, never above
+a breakpoint, and keep dynamic content out of the cached block. Per-turn
+appending loses to this in warm-cache/read-discount regimes and wins for
+very long histories and no-read-discount providers — hence opt-in cadence
+modes.
 
 **Guardrails.** Same as auto-compact: fire at `agent_settled`, never
-during streaming/overflow, cooldowns, opt-in env
-`PI_CACHE_SOFT_COMPACT` (`off` | `cold` = only on cold windows |
-`always`), delta budget `PI_CACHE_SOFT_COMPACT_DELTA_TOKENS` (default
-~12k), keep-last-N-turns verbatim floor, and the already-compacted-span
-invariant enforced by `firstKeptEntryId = trackedBoundary`.
+during streaming/overflow, cooldowns, opt-in env `PI_CACHE_SOFT_COMPACT`
+(`off` | `cold` = only on cold windows | `always`), min uncached turns
+`PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1), keep-recent floor, the
+already-compacted-span invariant enforced via pi's cut, and the autoresume
+skip guard.
 
 **Telemetry visibility.** `session_compact` -> appendEntry("pi-cache-compaction",
-{tokensBefore, keptEntryId, summaryChars, contextPercentBefore}); ledger
-rows already capture every request incl. the summarizer; `/cache-stats`
-gains a `compactions: N` counter. Context-window telemetry stays honest:
-`getContextUsage()` reflects the compacted context per pi's own gates.
+{ok}); ledger rows already capture every request incl. the summarizer;
+`/cache-stats` gains a `compactions: N` counter. Context-window telemetry
+stays honest: `getContextUsage()` reflects the compacted context per pi's
+own gates.
 
 ## Non-goals
 

@@ -41,6 +41,19 @@ export interface PiCacheOptions {
   softCompactMode: "off" | "cold" | "always";
   /** Minimum uncached turns before the soft cadence acts (default: every turn). */
   softCompactMinDeltaTurns: number;
+  /**
+   * Fast soft compaction: replace the uncached delta with a fixed stub
+   * (no summarizer LLM call). Default on; set to 0 to restore the
+   * cache-aware LLM-summary proposal path.
+   */
+  softFast: boolean;
+  /**
+   * Auto-resume: continue the agent once after a successful soft
+   * compaction so the model reacts to the compacted context immediately
+   * (one user turn -> one compaction -> one continuation run). Default on;
+   * set to 0 to disable.
+   */
+  softAutoResume: boolean;
 }
 
 const envBool = (name: string, fallback: boolean): boolean => {
@@ -89,5 +102,7 @@ export function loadOptions(): PiCacheOptions {
     minGapSeconds: parseFloat(process.env["PI_CACHE_MIN_GAP_SECONDS"] ?? "240"),
     softCompactMode: parseSoftMode(process.env["PI_CACHE_SOFT_COMPACT"]),
     softCompactMinDeltaTurns: parseInt(process.env["PI_CACHE_SOFT_MIN_DELTA_TURNS"] ?? "1", 10),
+    softFast: envBool("PI_CACHE_SOFT_FAST", true),
+    softAutoResume: envBool("PI_CACHE_SOFT_AUTORESUME", true),
   };
 }

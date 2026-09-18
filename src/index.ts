@@ -12,7 +12,8 @@
  *   before_provider_request— opt-in tools sort/dedup + head-churn watch
  *   turn_end               — turn bookkeeping for auto/soft compaction
  *   agent_settled          — cadence point: cache-aware auto-compact (cold
- *                            window) and/or soft per-turn compaction
+ *                            window) and/or soft per-turn compaction (fast
+ *                            stub; auto-resumes the agent once after)
  *   session_before_compact — warm-cache advisory + soft-compaction proposal
  *   session_compact        — boundary tracking + compaction telemetry
  *
@@ -31,7 +32,7 @@ import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
 import { AutocompactController } from "./autocompact.ts";
-import { SoftCompactionController } from "./softcompact.ts";
+import { SoftCompactionController, SOFT_RESUME_PROMPT } from "./softcompact.ts";
 import { SettingsPresenter } from "./settings.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -61,6 +62,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
   const softcompact = new SoftCompactionController({
     mode: opts.softCompactMode,
+    fast: opts.softFast,
     minDeltaTurns: opts.softCompactMinDeltaTurns,
     keepRecentFloor: 2,
   });
@@ -121,6 +123,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         }
       }
       if (opts.softCompactMode !== "off") {
+        // The auto-resumed continuation run settles right after the
+        // compaction; let it pass without re-compacting (one user turn -> one
+        // compaction -> one continuation). Consumed here before any trigger.
+        if (softcompact.consumeSkipNextSettle()) return;
         // Warmth signal from the ledger's last turn (soft cadence mode
         // "cold" only acts when the cache is already cold).
         const last = ledger.lastUsage();
@@ -130,8 +136,20 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         if (softcompact.shouldTrigger(opts.softCompactMode, warm)) {
           softcompact.markTriggered();
           ctx.compact?.({
-            onComplete: () =>
-              pi.appendEntry("pi-cache-compaction", { ok: true }),
+            onComplete: () => {
+              pi.appendEntry("pi-cache-compaction", { ok: true });
+              if (opts.softAutoResume) {
+                softcompact.markResumed();
+                try {
+                  // Always triggers a turn; expandPromptTemplates stays
+                  // false so the literal continuation text reaches the model.
+                  pi.sendUserMessage(SOFT_RESUME_PROMPT, {});
+                } catch {
+                  // Never strand the next user message without compaction.
+                  softcompact.clearResumed();
+                }
+              }
+            },
             onError: () =>
               pi.appendEntry("pi-cache-advisory", { message: "soft-compact failed" }),
           });
@@ -153,7 +171,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
       // Soft-compaction path: override ONLY compactions we triggered; the
       // built-in threshold/overflow compactions pass through untouched.
-      if (!softcompact.consumeTrigger()) return;
+      // Peek here; propose() is the single consumer of the trigger flag.
+      if (!softcompact.isTriggered()) return;
       const proposal = await softcompact.propose(
         {
           firstKeptEntryId: event.preparation.firstKeptEntryId,
