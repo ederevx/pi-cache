@@ -106,6 +106,15 @@ export class SoftCompactionController {
   }
 
   /**
+   * Release an armed trigger without consuming it as a proposal. Used when
+   * the compact() call itself failed before the hook ran, so a later
+   * user-initiated compaction is never overridden by a stale flag.
+   */
+  clearTrigger(): void {
+    this.pendingTrigger = false;
+  }
+
+  /**
    * Auto-resume bookkeeping. Called right before the continuation prompt is
    * injected; the continuation run's own settle must not re-compact, which
    * keeps the cadence at exactly one compaction per real user message.
@@ -165,36 +174,46 @@ export class SoftCompactionController {
   ): Promise<SoftCompactProposal | undefined> {
     if (!this.consumeTrigger()) return undefined;
     if (this.opts.fast) return this.fastProposal(preparation);
-
-    // Smart path (PI_CACHE_SOFT_FAST=0): fail-open to pi's default
+    // Smart path (PI_CACHE_SOFT_FAST=0); fail-open to pi's default
     // summarization whenever no summary service is wired.
-    if (!summary) return undefined;
+    return this.smartProposal(preparation, systemPrompt, summary);
+  }
 
-    // Never summarize earlier than pi's own cut; never before our boundary.
+  /**
+   * Smart proposal: cache-aware LLM summary of the uncached delta. Never
+   * summarizes earlier than pi's own cut nor before our boundary; any
+   * failure (no service, throw, empty text) fails open to pi's default.
+   */
+  private async smartProposal(
+    preparation: {
+      firstKeptEntryId: string;
+      tokensBefore: number;
+      messagesToSummarize: unknown[];
+      previousSummary?: string;
+    },
+    systemPrompt: string,
+    summary: SummaryService | undefined,
+  ): Promise<SoftCompactProposal | undefined> {
+    if (!summary) return undefined;
     const floor = this.latestId(this.boundaryEntryId, preparation.firstKeptEntryId);
-    const messages = preparation.messagesToSummarize;
-    let text = "";
-    let usage: Usage | undefined;
     try {
       const result = await summary.summarize({
-        messages,
+        messages: preparation.messagesToSummarize,
         systemPrompt,
         previousSummary: preparation.previousSummary,
       });
-      text = result.text;
-      usage = result.usage;
-    } catch (error) {
+      if (!result.text.trim()) return undefined;
+      this.lastTurnsCompact = 0;
+      return {
+        summary: result.text,
+        firstKeptEntryId: floor,
+        tokensBefore: preparation.tokensBefore,
+        usage: result.usage,
+      };
+    } catch {
       // Fail-open: keep pi's normal behavior instead of a broken proposal.
       return undefined;
     }
-    if (!text.trim()) return undefined;
-    this.lastTurnsCompact = 0;
-    return {
-      summary: text,
-      firstKeptEntryId: floor,
-      tokensBefore: preparation.tokensBefore,
-      usage,
-    };
   }
 
   /**
