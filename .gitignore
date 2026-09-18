@@ -1,0 +1,13 @@
+# Node / pi extension scratch
+node_modules/
+*.tsbuildinfo
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local runtime state
+*.log
+core
