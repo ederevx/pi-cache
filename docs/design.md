@@ -68,7 +68,41 @@ system/developer + first non-system message):
 - Respect pi's built-in behavior (compaction's own summary request already
   disables cache writes).
 
-### 5. Affinity guardrails (always on, observational)
+### 5. Cache-aware auto-compaction (opt-in, off by default)
+
+Question under evaluation/implementation: use the telemetry itself to drive
+compaction timing, and trigger it automatically.
+
+**Policy (cold-window clustering).** Compaction invalidates the prefix at
+its cut point, and the summarizer + next full re-write are the expensive
+part. Paying those costs inside a *warm* window wastes the hits; the
+optimal time to compact is when the cache is already cold:
+
+1. At `turn_end`, if the just-completed turn showed ~0 `cacheRead` (the
+   provider prefix was lost anyway: TTL expiry after a gap, provider move,
+   head churn) AND `getContextUsage().percent` is at/above the threshold,
+   call `ctx.compact()` — the re-write lands in a window that would be
+   charged fresh regardless.
+2. While the cache is warm and context is below the threshold, do nothing
+   (keep harvesting hits; defer the inevitable compaction).
+3. Strict guardrails: opt-in via `PI_CACHE_AUTO_COMPACT=1`; cooldown
+   (min turns + min seconds after any compaction/summary); never fire
+   while streaming or when core reports overflow recovery (`willRetry`);
+   never fire when a compaction is already in progress; all decisions in
+   one `AutocompactController` class owned by the factory.
+
+**Expected effect.** Avoid the common pattern of a forced compaction
+mid-warm-cache plus full re-write shortly after; the write churn is moved
+into already-cold windows. Side benefit: fewer `1h`/`30m` TTL expiries on
+idle-with-growth. Risk: an extra summarizer call per event (~few k tokens)
+and task-coherence churn if triggered mid-task — mitigated by threshold +
+cooldown + opt-in, validated by comparing `cacheWrite` before/after.
+
+Feasibility depends on the capability audit
+(`docs/implementation-reference.md`): `ctx.compact()` signature,
+in-progress guards, and `turn_end` idleness.
+
+### 6. Affinity guardrails (always on, observational)
 
 - Detect per-turn `session_id` / prefix-identity churn and report it
   (`/cache-stats`), keyed to OpenRouter's sticky-routing identity hash.
