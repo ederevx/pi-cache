@@ -34,7 +34,8 @@ export class SettingsPresenter {
       { id: "affinity", title: "Affinity watch", description: "Observe x-session-id stability (OpenRouter sticky routing)", value: "on" },
       { id: "advisory", title: "Compaction advisory", description: "Note warm-cache compactions that re-write the prefix", value: on(opts.advisory) },
       { id: "autoCompact", title: "Auto-compaction", description: "Compact in cold-window turns (cache already lost) at idle", value: on(opts.autoCompact) },
-      { id: "softCompact", title: "Soft compaction", description: "Per-turn compaction that never touches cached segments", value: opts.softCompactMode },
+      { id: "softCompact", title: "Soft compaction", description: "Cadence: once (default) = one fast compaction right after output, then never again; always/cold = deprecated per-turn", value: opts.softCompactMode },
+      { id: "softOnceMinTokens", title: "Once min context", description: "One-shot compaction fires when live context reaches this (approx. pi keepRecentTokens); 0 = first output", value: String(opts.softOnceMinTokens) },
       { id: "softFast", title: "Fast compaction", description: "Replace the uncached delta with a fixed stub; no summarizer call", value: on(opts.softFast) },
       { id: "softAutoResume", title: "Auto-resume", description: "Continue the agent once after a soft compaction", value: on(opts.softAutoResume) },
     ];

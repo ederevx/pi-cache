@@ -13,8 +13,8 @@
  *   turn_end               — turn bookkeeping for auto/soft compaction
  *   agent_settled          — cadence point, two listeners: cache-aware
  *                            auto-compact (cold window; soft-off fallback)
- *                            and soft per-turn compaction (fast stub;
- *                            hidden-continues the turn once after)
+ *                            and soft compaction (fast stub; once-per-session
+ *                            by default, hidden-continues the turn after)
  *   session_before_compact — two listeners: warm-cache advisory, then the
  *                            soft-compaction proposal (last-truthy wins)
  *   session_compact        — boundary tracking + compaction telemetry
@@ -66,6 +66,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     mode: opts.softCompactMode,
     fast: opts.softFast,
     minDeltaTurns: opts.softCompactMinDeltaTurns,
+    onceMinTokens: opts.softOnceMinTokens,
     keepRecentFloor: 2,
   });
   const settingsPresenter = new SettingsPresenter();
@@ -130,7 +131,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    // Listener 2 of 2: soft per-turn compaction (the every-turn cadence).
+    // Listener 2 of 2: soft compaction cadence. mode "once" (default):
+    // exactly one fast compaction per session, at the first settle after
+    // an output where the live context has grown to where older turns
+    // would first be swept into summarized history (right before they
+    // become "history"); thereafter the hard latch in the controller
+    // stops any further trigger, so the compacted prefix stays
+    // byte-stable and warm forever. "always"/"cold" keep the deprecated
+    // per-turn cadences for A/B.
     try {
       if (opts.softCompactMode === "off") return;
       // The auto-resumed continuation run settles right after the
@@ -143,7 +151,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const warm = last !== undefined && last.cacheRead + last.input > 0
         ? last.cacheRead / (last.cacheRead + last.input) > 0.05
         : false;
-      if (softcompact.shouldTrigger(opts.softCompactMode, warm)) {
+      // Context size signal: the once-trigger fires right when older turns
+      // are about to become summarized history.
+      const contextTokens = ctx.getContextUsage?.()?.tokens;
+      if (softcompact.shouldTrigger(opts.softCompactMode, warm, contextTokens)) {
         softcompact.markTriggered();
         ctx.compact?.({
           onComplete: () => {
