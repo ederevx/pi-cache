@@ -21,7 +21,7 @@
 
 import type { Usage } from "@earendil-works/pi-ai";
 
-export type SoftCompactMode = "off" | "cold" | "always";
+export type SoftCompactMode = "off" | "cold" | "once" | "always";
 
 export interface SoftCompactOptions {
   mode: SoftCompactMode;
@@ -31,8 +31,14 @@ export interface SoftCompactOptions {
    * so the next request's prefix stays warm. Default on.
    */
   fast: boolean;
-  /** Minimum turns of uncached delta before the every-turn cadence acts. */
+  /** Minimum turns of uncached delta before the cadence acts. */
   minDeltaTurns: number;
+  /**
+   * One-shot trigger (mode "once"): context tokens at/above this value
+   * authorize the single compaction — the point where older turns would
+   * first be swept into summarized history.
+   */
+  onceMinTokens: number;
   /** Keep this many of the newest entries verbatim on top of the boundary. */
   keepRecentFloor: number;
 }
@@ -80,6 +86,13 @@ export class SoftCompactionController {
   private compactions = 0;
   /** Auto-resume guard: skip the next settle (the continuation run). */
   private skipNextSettle = false;
+  /**
+   * Hard latch for mode "once": after the single compaction (or any
+   * compaction recorded by pi), pi-cache never triggers compaction again.
+   * The compacted span stays byte-identical forever — never re-summarized,
+   * boundary never moved — so the provider prefix stays warm.
+   */
+  private onceCompacted = false;
 
   constructor(private readonly opts: SoftCompactOptions) {}
 
@@ -141,14 +154,28 @@ export class SoftCompactionController {
   /** After a successful compaction, record the new boundary + telemetry. */
   recordCompaction(compactionEntry: { id?: string; firstKeptEntryId?: string } | undefined): void {
     this.compactions++;
+    if (this.opts.mode === "once") this.onceCompacted = true;
     const id = compactionEntry?.id ?? compactionEntry?.firstKeptEntryId;
     if (id) this.boundaryEntryId = id;
     this.lastTurnsCompact = 0;
   }
-  /** Cadence gate for the agent_settled trigger. Also feed bumpTurn() per turn. */
-  shouldTrigger(mode: SoftCompactMode, cacheWarm: boolean): boolean {
+  /**
+   * Cadence gate for the agent_settled trigger. Also feed bumpTurn() per
+   * turn. Mode "once": allow exactly one compaction, and only once the
+   * live context is large enough that older turns are about to become
+   * summarized history (right before "history", after the output).
+   */
+  shouldTrigger(
+    mode: SoftCompactMode,
+    cacheWarm: boolean,
+    contextTokens: number | undefined,
+  ): boolean {
     if (mode === "off") return false;
     if (this.lastTurnsCompact < this.opts.minDeltaTurns) return false;
+    if (mode === "once") {
+      if (this.onceCompacted) return false;
+      return (contextTokens ?? 0) >= this.opts.onceMinTokens;
+    }
     if (mode === "cold" && cacheWarm) return false;
     return true;
   }
@@ -242,7 +269,11 @@ export class SoftCompactionController {
     return a;
   }
 
-  stats(): { compactions: number; boundary: string | undefined } {
-    return { compactions: this.compactions, boundary: this.boundaryEntryId };
+  stats(): { compactions: number; boundary: string | undefined; onceCompacted: boolean } {
+    return {
+      compactions: this.compactions,
+      boundary: this.boundaryEntryId,
+      onceCompacted: this.onceCompacted,
+    };
   }
 }

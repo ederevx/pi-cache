@@ -141,12 +141,13 @@ and models. Compare `cache_ratio`, `$` saved, `cacheWrite` churn, plus
 non-regression signals (tool-call success, answer diff). pi-ai's `faux`
 provider (simulated cache) gives offline harness tests.
 
-## Soft compaction (cache-first, FAST by default) — SPEC
+## Soft compaction (cache-first, one-shot FAST by default) — SPEC
 
-**Definition.** Per-turn "soft" compaction whose ONLY purposes are better
-cache hits and fewer input tokens. Invariant, by the user's requirement:
-**soft compaction must never touch already-soft-compacted segments — they
-are already cached; touching them would invalidate their prefix.**
+**Definition.** One fast "soft" compaction per session whose ONLY purposes
+are better cache hits and fewer input tokens. Invariant, by the user's
+requirement: **soft compaction must never touch already-soft-compacted
+segments — they are already cached; touching them would invalidate their
+prefix.**
 
 Consequences of the invariant:
 - Stable prefix (system + tools) and every previously soft-compacted
@@ -155,10 +156,34 @@ Consequences of the invariant:
 - Only the **uncached delta tail** (turns written after the last soft
   compaction) is ever replaced.
 
+**Cadence: `once` (default).** Compacting per turn self-defeats: each
+compaction rewrites the prefix at its cut, and providers cache on the
+serialized prefix — Anthropic's cumulative breakpoint hash changes whenever
+any block at or before a breakpoint changes (full miss from there, walking
+backward block by block); DeepSeek caches independent prefix-units that need
+an *exact full match*. A sliding per-turn cut therefore re-writes most of the
+context every turn: the cache resets every turn. The fix: compact exactly
+ONCE. Trigger (`agent_settled`, i.e. immediately after that turn's output):
+the first settle at which `getContextUsage().tokens` has reached
+`PI_CACHE_ONCE_MIN_TOKENS` (default 20000 ≈ pi's `keepRecentTokens`) — the
+first moment older turns would be swept into summarized history, so the
+sweep lands *right before becoming history*. After the one compaction a
+hard latch (`onceCompacted`) disables pi-cache's trigger forever; any
+compaction recorded meanwhile (including pi's own manual/threshold
+compaction) latches too. The compacted span is never re-summarized and the
+boundary never moves, so the prefix `[stable head][stub][recent window]`
+stays byte-identical for the rest of the session and every later request
+hits the cache below its fresh tail. The only later writer is pi's built-in
+threshold/overflow compaction at ~window-reserve tokens — rare, and
+pi-cache does not interfere with it. `PI_CACHE_SOFT_COMPACT=always|cold`
+opt back into the deprecated per-turn cadences (moving cut) for A/B;
+`off` disables this feature.
+
 **Mechanism (uses pi's extension-visible compaction machinery):**
 1. Track the cache boundary = the entry id of the last soft-compaction
    entry (recorded at `session_compact`).
-2. On cadence (`agent_settled`, every turn or cold windows), call
+2. On cadence (`agent_settled` — once per session in mode `once`; every
+   turn or cold windows in the deprecated modes), call
    `ctx.compact()`; on success the turn is **continued once** via a hidden
    custom message (`display: false`, content = the fixed `Continue.`
    text): TUI-invisible, but the model still reads it as a user-role
@@ -196,11 +221,12 @@ very long histories and no-read-discount providers — hence opt-in cadence
 modes.
 
 **Guardrails.** Same as auto-compact: fire at `agent_settled`, never
-during streaming/overflow, cooldowns, opt-in env `PI_CACHE_SOFT_COMPACT`
-(`off` | `cold` = only on cold windows | `always`), min uncached turns
-`PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1), keep-recent floor, the
-already-compacted-span invariant enforced via pi's cut, and the continuation
-skip guard. One platform constraint: pi's TUI renders its own compaction
+during streaming/overflow, opt-in env `PI_CACHE_SOFT_COMPACT` (`off` |
+`cold` = cold-window only | `always` = per-turn | `once` = one-shot,
+default), min uncached turns `PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1),
+one-shot token gate `PI_CACHE_ONCE_MIN_TOKENS` (default 20000), keep-recent
+floor, the already-compacted-span invariant enforced via pi's cut, and the
+continuation skip guard. One platform constraint: pi's TUI renders its own compaction
 indicator and summary row unconditionally (pi 0.85.1: `interactive-mode.js`
 `compaction_start`/`compaction_end` handlers, no silent option in
 `CompactionPreparation`/`SessionBeforeCompactResult`/`CompactionSettings`);

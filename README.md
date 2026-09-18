@@ -18,14 +18,19 @@ Copy the `src/` files into the auto-discovered extensions directory:
 
 Then run `/reload` in pi (or restart). No config file needed. All
 cache-favoring features are ON by default (tools sort/dedup,
-auto-compaction, soft per-turn compaction in `always` mode, telemetry);
-disable any with its `PI_CACHE_*` env var, e.g. `PI_CACHE_SOFT_COMPACT=off`
-(see `src/constants.ts` and `/cache-settings`). Soft compaction is FAST by
-default: the uncached delta is replaced by a fixed byte-stable stub (no
-summarizer LLM call — see design), and the turn is continued once after
-each soft compaction via a hidden custom message (no visible "Continue."
-row; `PI_CACHE_SOFT_FAST=0` / `PI_CACHE_SOFT_AUTORESUME=0` to disable
-either).
+auto-compaction, one-shot fast compaction, telemetry); disable any with
+its `PI_CACHE_*` env var, e.g. `PI_CACHE_SOFT_COMPACT=off` (see
+`src/constants.ts` and `/cache-settings`). Compaction is FAST and happens
+ONCE per session — immediately after the output whose context reach up to
+`PI_CACHE_ONCE_MIN_TOKENS` (right as older turns would first be swept into
+summarized history). The uncached delta is replaced by a fixed byte-stable
+stub (no summarizer LLM call); from then on pi-cache never compacts again
+(the compacted span stays byte-identical and cache-warm, and per-turn
+re-compaction's cache-reset is avoided), and the turn is continued once
+after via a hidden custom message (no visible "Continue." row;
+`PI_CACHE_SOFT_FAST=0` / `PI_CACHE_SOFT_AUTORESUME=0` to disable either).
+`PI_CACHE_SOFT_COMPACT=always|cold` restores the deprecated per-turn
+cadences for A/B.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
 
@@ -46,6 +51,16 @@ reloads. Live views: `/cache-stats` and `/cache-settings`.
    `session_before_compact`.
 5. **Affinity guardrails** — keep OpenRouter sticky routing warm: one
    `session_id` per thread, never per turn; detect prefix-identity churn.
+6. **One-shot fast compaction** — compact ONCE, immediately after the
+   output whose context first crosses `PI_CACHE_ONCE_MIN_TOKENS` (the
+   moment older turns would become summarized "history"), to a fixed
+   byte-stable stub; then a hard latch guarantees pi-cache never touches
+   the transcript again. Providers cache on the serialized prefix
+   (Anthropic cumulative breakpoint hashes; DeepSeek exact prefix-units),
+   so any later rewrite of a compacted span is a full cache reset —
+   per-turn compaction therefore self-defeats; one early compaction is the
+   only cadence that lands the session on a small, permanently warm
+   prefix.
 
 ## Repo layout
 
