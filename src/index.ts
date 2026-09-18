@@ -10,12 +10,14 @@
  *   message_end            — record assistant usage in the ledger
  *   before_provider_headers— observe session-affinity header stability
  *   before_provider_request— opt-in tools sort/dedup + head-churn watch
- *   turn_end               — turn bookkeeping for auto-compaction
- *   agent_settled          — opt-in cache-aware auto-compaction trigger
- *   session_before_compact — observational warm-cache advisory
+ *   turn_end               — turn bookkeeping for auto/soft compaction
+ *   agent_settled          — cadence point: cache-aware auto-compact (cold
+ *                            window) and/or soft per-turn compaction
+ *   session_before_compact — warm-cache advisory + soft-compaction proposal
+ *   session_compact        — boundary tracking + compaction telemetry
  *
  * Command:
- *   /cache-stats           — session cache-ratio and write churn
+ *   /cache-stats           — session cache-ratio, churn, affinity, compactions
  *
  * Config: PI_CACHE_* environment variables only (no config JSON — house
  * rule); durable telemetry to the `.pi-cache/` dot-dir under the agent
@@ -29,6 +31,7 @@ import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
 import { AutocompactController } from "./autocompact.ts";
+import { SoftCompactionController } from "./softcompact.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Normalize unknown handler payload shapes with a safe local view. */
@@ -54,6 +57,11 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     cooldownSeconds: opts.cooldownSeconds,
     cooldownTurns: opts.cooldownTurns,
     minGapSeconds: opts.minGapSeconds,
+  });
+  const softcompact = new SoftCompactionController({
+    mode: opts.softCompactMode,
+    minDeltaTurns: opts.softCompactMinDeltaTurns,
+    keepRecentFloor: 2,
   });
 
   pi.on("message_end", async (event, ctx) => {
@@ -87,6 +95,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   pi.on("turn_end", async (event) => {
     try {
       autocompact.noteTurn(event.turnIndex);
+      softcompact.bumpTurn();
     } catch {
       /* bookkeeping only */
     }
@@ -94,23 +103,42 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_settled", async (_event, ctx) => {
     try {
-      if (!opts.autoCompact) return;
       // agent_settled is the guaranteed-idle point (no retry/compaction/
       // continuation will run), so compact() cannot abort live work here.
-      const usage = ctx.getContextUsage?.();
-      const verdict = autocompact.decide(usage?.percent, ledger);
-      if (!verdict.shouldCompact) return;
-      ctx.compact?.({
-        onComplete: () => autocompact.markCompacted(),
-        onError: () =>
-          pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" }),
-      });
+      if (opts.autoCompact) {
+        const usage = ctx.getContextUsage?.();
+        const verdict = autocompact.decide(usage?.percent, ledger);
+        if (verdict.shouldCompact) {
+          ctx.compact?.({
+            onComplete: () => autocompact.markCompacted(),
+            onError: () =>
+              pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" }),
+          });
+        }
+      }
+      if (opts.softCompactMode !== "off") {
+        // Warmth signal from the ledger's last turn (soft cadence mode
+        // "cold" only acts when the cache is already cold).
+        const last = ledger.lastUsage();
+        const warm = last !== undefined && last.cacheRead + last.input > 0
+          ? last.cacheRead / (last.cacheRead + last.input) > 0.05
+          : false;
+        if (softcompact.shouldTrigger(opts.softCompactMode, warm)) {
+          softcompact.markTriggered();
+          ctx.compact?.({
+            onComplete: () =>
+              pi.appendEntry("pi-cache-compaction", { ok: true }),
+            onError: () =>
+              pi.appendEntry("pi-cache-advisory", { message: "soft-compact failed" }),
+          });
+        }
+      }
     } catch {
       /* automatic control must never break a turn */
     }
   });
 
-  pi.on("session_before_compact", async (event) => {
+  pi.on("session_before_compact", async (event, ctx) => {
     try {
       const tip = advisor.suggest(
         ledger.totals(),
@@ -118,18 +146,49 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         event.preparation.tokensBefore,
       );
       if (tip) pi.appendEntry("pi-cache-advisory", { message: tip });
+
+      // Soft-compaction path: override ONLY compactions we triggered; the
+      // built-in threshold/overflow compactions pass through untouched.
+      if (!softcompact.consumeTrigger()) return;
+      const proposal = await softcompact.propose(
+        {
+          firstKeptEntryId: event.preparation.firstKeptEntryId,
+          tokensBefore: event.preparation.tokensBefore,
+          messagesToSummarize: event.preparation.messagesToSummarize,
+          previousSummary: event.preparation.previousSummary,
+        },
+        typeof ctx.getSystemPrompt === "function" ? ctx.getSystemPrompt() : "",
+        undefined, // v1: no model-backed summarizer yet (docs/design.md)
+      );
+      if (!proposal) return; // fail-open: pi's default summarization runs
+      return { compaction: proposal };
     } catch {
-      /* advisory only */
+      /* never break compaction */
+    }
+  });
+
+  pi.on("session_compact", async (event) => {
+    try {
+      softcompact.recordCompaction(event.compactionEntry ?? undefined);
+      if (event.compactionEntry) {
+        pi.appendEntry("pi-cache-compaction", {
+          keptEntryId: event.compactionEntry.firstKeptEntryId,
+          tokensBefore: event.compactionEntry.tokensBefore,
+          fromExtension: event.compactionEntry.fromHook,
+        });
+      }
+    } catch {
+      /* telemetry only */
     }
   });
 
   pi.registerCommand("cache-stats", {
-    description: "Show pi-cache usage, cache ratio, and head churn",
+    description: "Show pi-cache usage, cache ratio, churn, affinity, compactions",
     handler: async (_args, ctx) => {
       const base = ledger.summary();
       const churn = normalizer.churn();
       const line = churn > 0 ? `${base}, head churn ${churn}` : base;
-      const text = `${line}, ${affinity.status()}`;
+      const text = `${line}, ${affinity.status()}, compactions ${softcompact.stats().compactions}`;
       // Command output is emitted through ctx (handler return values are
       // discarded by pi); toast in UI mode, fall back to stderr otherwise.
       try {
