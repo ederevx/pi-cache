@@ -1,11 +1,12 @@
 /**
  * pi-cache — settings presenter.
  *
- * One responsibility: render the resolved PI_CACHE_* options in the
- * settings-UI layout pi uses for its own settings — a selectable list
- * where each row shows the option name, a one-line description, and the
- * current value. In non-UI modes it prints the same lines to stderr; it
- * never mutates options (read-only view of resolved state).
+ * One responsibility: render the resolved PI_CACHE_* options in pi's
+ * settings-UI layout. pi's extension selector takes PLAIN STRING options
+ * (select(title, options: string[], opts?) -> Promise<string|undefined>),
+ * so each row is formatted as "title — description (current: value)".
+ * Fire-and-forget with a rejection guard; non-UI modes print the same
+ * lines to stderr. Never mutates options (read-only view).
  */
 
 import type { PiCacheOptions } from "./constants.ts";
@@ -17,11 +18,9 @@ export interface SettingRow {
   value: string;
 }
 
-/** Settings-UI item shape used by pi's extension selectors. */
-export interface SelectorItem {
-  id: string;
-  title: string;
-  description: string;
+/** Formatted strings in pi's settings-row layout for the selector. */
+function formatRows(rows: SettingRow[]): string[] {
+  return rows.map((r) => `${r.description} — current: ${r.value}`);
 }
 
 export class SettingsPresenter {
@@ -39,28 +38,24 @@ export class SettingsPresenter {
     ];
   }
 
-  /** Present via pi's settings-selector UI when available; else print. */
+  /** Present via pi's selector UI when available; else print the rows. */
   present(opts: PiCacheOptions, ui: { select?: unknown } | undefined, mode: string | undefined): void {
     const rows = this.rows(opts);
+    const lines = formatRows(rows);
     if (mode === "tui" && ui && typeof ui.select === "function") {
-      const items: SelectorItem[] = rows.map((r) => ({
-        id: r.id,
-        title: r.title,
-        description: `${r.description} — current: ${r.value}`,
-      }));
       try {
-        (ui.select as (t: string, o: SelectorItem[], _opts?: unknown) => unknown)(
+        const promise = (ui.select as (t: string, o: string[], _opts?: unknown) => Promise<unknown>)(
           "pi-cache settings",
-          items,
-          { showDescription: true },
+          lines,
         );
+        void Promise.resolve(promise).catch(() => {
+          console.error("pi-cache-settings:\n  " + lines.join("\n  "));
+        });
         return;
       } catch {
         /* fall through to stderr listing */
       }
     }
-    for (const r of rows) {
-      console.error(`${r.id.padEnd(12)} ${r.description} — current: ${r.value}`);
-    }
+    console.error("pi-cache-settings:\n  " + lines.join("\n  "));
   }
 }
