@@ -88,11 +88,18 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("cache-stats", {
     description: "Show pi-cache usage, cache ratio, and head churn",
-    handler: async () => {
+    handler: async (_args, ctx) => {
       const base = ledger.summary();
       const churn = normalizer.churn();
       const line = churn > 0 ? `${base}, head churn ${churn}` : base;
-      return `${line}, ${affinity.status()}`;
+      const text = `${line}, ${affinity.status()}`;
+      // Command output is emitted through ctx (handler return values are
+      // discarded by pi); toast in UI mode, fall back to stderr otherwise.
+      try {
+        ctx.ui?.notify?.(text, "info");
+      } catch {
+        console.error(text);
+      }
     },
   });
 }
