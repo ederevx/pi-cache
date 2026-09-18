@@ -13,8 +13,8 @@
  *   turn_end               — turn bookkeeping for auto/soft compaction
  *   agent_settled          — cadence point, two listeners: cache-aware
  *                            auto-compact (cold window; soft-off fallback)
- *                            and soft compaction (fast stub; once-per-session
- *                            by default, hidden-continues the turn after)
+ *                            and soft compaction (fast stub, repeated
+ *                            cadence)
  *   session_before_compact — two listeners: warm-cache advisory, then the
  *                            soft-compaction proposal (last-truthy wins)
  *   session_compact        — compaction telemetry
@@ -34,7 +34,7 @@ import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
 import { AutocompactController } from "./autocompact.ts";
-import { SoftCompactionController, SOFT_RESUME_PROMPT } from "./softcompact.ts";
+import { SoftCompactionController } from "./softcompact.ts";
 import { SettingsPresenter } from "./settings.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -103,7 +103,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     // Listener 1 of 2: cache-aware auto-compaction (cold-window). Runs only
     // as soft cadence's fallback — the two listeners never double-fire
     // (soft "off" <=> auto active, by mode). agent_settled is the
-    // guaranteed-idle point (no retry/compaction/continuation will run), so
+    // guaranteed-idle point (no retry or output pending), so
     // compact() cannot abort live work here.
     try {
       if (!(opts.autoCompact && opts.softCompactMode === "off")) return;
@@ -132,42 +132,12 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     // threshold compaction (LLM summarizer, full-prefix re-write).
     try {
       if (opts.softCompactMode === "off") return;
-      // The auto-resumed continuation run settles right after the
-      // compaction; let it pass without re-compacting (one user turn -> one
-      // compaction -> one continuation). Consumed here before any trigger.
-      if (softcompact.consumeSkipNextSettle()) return;
       // Context size signal: the re-arm trigger fires right when older
       // turns are about to become summarized history.
       const contextTokens = ctx.getContextUsage?.()?.tokens;
       if (softcompact.shouldTrigger(opts.softCompactMode, contextTokens)) {
         softcompact.markTriggered();
         ctx.compact?.({
-          onComplete: () => {
-            if (!opts.softAutoResume) return;
-            softcompact.markResumed();
-            try {
-              // Hidden continuation: a custom message with display:false
-              // is TUI-invisible (interactive-mode renders custom rows
-              // only when display is truthy) while the model still reads
-              // its content as a user-role message (convertToLlm maps
-              // role "custom" -> "user" regardless of display). So the
-              // post-compaction request re-sends the compacted payload
-              // plus this fixed content, with no visible "Continue."
-              // row. triggerTurn without deliverAs is the idle branch:
-              // it re-runs the agent immediately.
-              pi.sendMessage(
-                {
-                  customType: "pi-cache-soft-continue",
-                  content: SOFT_RESUME_PROMPT,
-                  display: false,
-                },
-                { triggerTurn: true },
-              );
-            } catch {
-              // Never strand the next user message without compaction.
-              softcompact.clearResumed();
-            }
-          },
           onError: () => {
             // If compact() failed before the hook ran, release the armed
             // trigger so no later (user) compaction gets a stale override.

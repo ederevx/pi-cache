@@ -44,13 +44,6 @@ export interface PiCacheOptions {
    * as content is about to become history.
    */
   softMinTokens: number;
-  /**
-   * Auto-resume: continue the agent once after a successful soft
-   * compaction so the model reacts to the compacted context immediately
-   * (one user turn -> one compaction -> one continuation run). Default on;
-   * set to 0 to disable.
-   */
-  softAutoResume: boolean;
 }
 
 const envBool = (name: string, fallback: boolean): boolean => {
@@ -122,6 +115,5 @@ export function loadOptions(): PiCacheOptions {
       process.env["PI_CACHE_SOFT_MIN_TOKENS"] ??
         process.env["PI_CACHE_ONCE_MIN_TOKENS"] ??        String(resolveKeepRecentTokens(20000)),
     ),
-    softAutoResume: envBool("PI_CACHE_SOFT_AUTORESUME", true),
   };
 }

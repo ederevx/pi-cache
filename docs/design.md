@@ -102,8 +102,8 @@ Feasibility confirmed by the capability audit (`the pi 0.86 extension API`):
 `ctx.compact({customInstructions, onComplete, onError})` is fire-and-forget
 (`void`); compaction summaries are cache-transparent (`cacheRetention:"none"`,
 fresh routing session), so the trigger only times the *next* turn's re-write.
-The safe point is `agent_settled` (guaranteed idle — no pending retry,
-overflow recovery, or continuation), not `turn_end` (compact() aborts live
+The safe point is `agent_settled` (guaranteed idle — no pending retry or
+overflow recovery), not `turn_end` (compact() aborts live
 work). Guards in code: `agent_settled` + `ctx.isIdle()` + cooldown
 (turns/seconds) + last-entry-compaction check via pi's own stale guards;
 opt-in `PI_CACHE_AUTO_COMPACT`.
@@ -179,9 +179,8 @@ uncached delta with the SAME stub at pi's own cut point; the
 `[stable head][stub][recent window]` head is byte-identical across all
 compactions and stays cache-warm, while input stays bounded near
 2x `keepRecentTokens` forever. Natural hysteresis prevents churn: a
-compaction drops live context far below the threshold, the continuation
-run's settle consumes the skip guard, and the min-delta-turns gate must
-elapse — so the trigger cannot loop within a turn and only re-fires after
+compaction drops live context far below the threshold, and the
+min-delta-turns gate must elapse — so the trigger cannot loop within a turn and only re-fires after
 real growth. (DeepSeek additionally persists *common prefixes* across
 requests as their own cache prefix units, so the repeated-stub head is
 exactly the shape that stays cached there.) `PI_CACHE_SOFT_COMPACT=off`
@@ -189,13 +188,9 @@ disables this feature.
 
 **Mechanism (uses pi's extension-visible compaction machinery):**
 1. On cadence (`agent_settled`, re-armed in mode `auto`), call
-   `ctx.compact()`; on success the turn is **continued once** via a hidden
-   custom message (`display: false`, content = `SOFT_RESUME_PROMPT`):
-   TUI-invisible, but the model still reads it as a user-role message, so
-   pi re-issues the compacted payload with no visible prompt row (one user
-   turn -> at most one compaction -> one continuation run; the
-   continuation's settle consumes a skip guard, so the cadence cannot
-   loop).
+   `ctx.compact()`. agent_settled is the guaranteed-idle point right after
+   a turn's output; no hidden continuation is injected — the next user
+   message simply re-runs the agent on the compacted context.
 2. Our `session_before_compact` handler returns a custom proposal ONLY
    when WE triggered it (built-in threshold/overflow compactions pass
    through untouched). The proposal is
@@ -236,14 +231,12 @@ during streaming/overflow, opt-in env `PI_CACHE_SOFT_COMPACT` (`off` |
 since the last compaction `PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1),
 re-arm token gate `PI_CACHE_SOFT_MIN_TOKENS` (default 20000 ≈ pi's
 `keepRecentTokens`; legacy `PI_CACHE_ONCE_MIN_TOKENS` accepted), the
-already-compacted-span invariant enforced via pi's cut, and the
-continuation skip guard. One platform constraint: pi's TUI renders its own compaction
+already-compacted-span invariant enforced via pi's cut. One platform constraint: pi's TUI renders its own compaction
 indicator and summary row unconditionally (pi 0.85.1: `interactive-mode.js`
 `compaction_start`/`compaction_end` handlers, no silent option in
 `CompactionPreparation`/`SessionBeforeCompactResult`/`CompactionSettings`);
 only the cost line is gated, by the `showCacheMissNotices` user setting
-(default off). The extension therefore cannot hide those core rows; it only
-controls the continuation message (hidden via `display: false`).
+(default off). The extension therefore cannot hide those core rows.
 
 **Telemetry visibility.** `session_compact` records entry id, tokens and
 `fromExtension`; ledger rows already capture every request incl. the
