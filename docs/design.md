@@ -141,6 +141,54 @@ and models. Compare `cache_ratio`, `$` saved, `cacheWrite` churn, plus
 non-regression signals (tool-call success, answer diff). pi-ai's `faux`
 provider (simulated cache) gives offline harness tests.
 
+## Soft compaction (cache-first, opt-in) — SPEC
+
+**Definition.** Per-turn "soft" compaction whose ONLY purposes are better
+cache hits and fewer input tokens. Invariant, by the user's requirement:
+**soft compaction must never touch already-soft-compacted segments — they
+are already cached; touching them would invalidate their prefix.**
+
+Consequences of the invariant:
+- Stable prefix (system + tools) and every previously soft-compacted
+  span stay byte-identical in every request, forever, and keep being
+  billed at cached-read price.
+- Only the **uncached delta tail** (turns written after the last soft
+  compaction) may be summarized.
+
+**Mechanism (uses pi's extension-visible compaction machinery):**
+1. Track the cache boundary = the entry id of the last soft-compaction
+   summary entry (recorded at `session_compact`).
+2. On cadence (`agent_settled`, every turn or when the delta exceeds a
+   token budget), call `ctx.compact()`.
+3. Our `session_before_compact` handler returns a custom proposal:
+   `{ summary: incrementalSummary, firstKeptEntryId: <boundary>,
+   tokensBefore, usage }` — the summarized span is ONLY the delta after
+   the boundary, so cached segments are never in the span (they are
+   either before it or untouched). The summary text is an append to the
+   previous summary (`previousSummary + new-delta condensation`), so it
+   composes without rewriting history.
+4. The summarizer call itself follows the example pattern (fresh
+   sessionId, `cacheRetention:"none"`) with input = the small delta only
+   — full-price writes stay proportional to the delta, not the history.
+
+**Economics.** Without it, every long-context turn re-sends (and re-reads)
+all history at read price; with it, history is compressed once into a
+small delta write and then read cheaply. Each turn saves
+`(summarizedTokens - summaryTokens) x readRate − summarizeCallCost`.
+
+**Guardrails.** Same as auto-compact: fire at `agent_settled`, never
+during streaming/overflow, cooldowns, opt-in env
+`PI_CACHE_SOFT_COMPACT` (`off` | `cold` = only on cold windows |
+`always`), delta budget `PI_CACHE_SOFT_COMPACT_DELTA_TOKENS` (default
+~12k), keep-last-N-turns verbatim floor, and the already-compacted-span
+invariant enforced by `firstKeptEntryId = trackedBoundary`.
+
+**Telemetry visibility.** `session_compact` -> appendEntry("pi-cache-compaction",
+{tokensBefore, keptEntryId, summaryChars, contextPercentBefore}); ledger
+rows already capture every request incl. the summarizer; `/cache-stats`
+gains a `compactions: N` counter. Context-window telemetry stays honest:
+`getContextUsage()` reflects the compacted context per pi's own gates.
+
 ## Non-goals
 
 - No response/semantic caching (GPTCache et al. cache answers, not
