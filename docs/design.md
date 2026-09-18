@@ -245,6 +245,27 @@ telemetry stays honest: `getContextUsage()` reflects the compacted context
 per pi's
 own gates.
 
+**Compaction artifact store.** Each soft pass that fires our proposal
+(proposal stashed only when our session_before_compact listener consumed
+the trigger — built-in compactions are never captured) derives the
+compacted-out span from `event.branchEntries` at proposal time and, on a
+successful `session_compact`, writes it verbatim (full entry JSON —
+tool_use arguments, thinking signatures, base64 images, and tool_result
+text blocks that carry subagent output) to a temporary store under
+`~/tmp/pi-cache/compacts`. Schema: JSONL with a header record, one
+`entry` line per dropped message (whole SessionEntry JSON, verbatim), a
+`compaction-ref` line pointing at the previous stub by id + constant
+(the stub text is never duplicated), and a `footer` (or an `overflow`
+record when a 16 MiB per-artifact cap is hit); a `LATEST` pointer at the
+store root and per session names the newest artifact, and the
+`pi-cache-compaction` entry surfaces both paths. Access channel is that
+fixed well-known `LATEST` because appendEntry is out of LLM context: the
+agent or user reads the file to recover what was compacted. GC is strict
+and confined to the owned root: a per-session ring of 3 artifacts, a
+global cap of 200, a 7-day TTL, pruned after each write and at session
+start, factory load, and shutdown; a realpath ownership guard ensures it
+can never delete a file outside the store.
+
 ## Non-goals
 
 - No response/semantic caching (GPTCache et al. cache answers, not

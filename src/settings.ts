@@ -35,6 +35,7 @@ export class SettingsPresenter {
       { id: "autoCompact", title: "Auto-compaction", description: "Compact in cold-window turns (cache already lost) at idle", value: on(opts.autoCompact) },
       { id: "softCompact", title: "Soft compaction", description: "Cadence: auto (default) = fast stub compaction whenever live context crosses the threshold again (repeated, input stays bounded); off = disable (arms the cold-window auto-compact fallback)", value: opts.softCompactMode },
       { id: "softMinTokens", title: "Min context", description: "Re-compact when live context reaches this since the last soft compaction (approx. pi keepRecentTokens); 0 = every settle", value: String(opts.softMinTokens) },
+      { id: "compactCapture", title: "Compact capture", description: "Persist fast-compacted entries to ~/tmp/pi-cache/compacts (LATEST) for the agent to inspect", value: on(opts.compactCapture) },
     ];
   }
 

@@ -9,6 +9,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
@@ -44,12 +45,38 @@ export interface PiCacheOptions {
    * as content is about to become history.
    */
   softMinTokens: number;
+  /** Persist fast-compacted entries to a temporary store for recovery. */
+  compactCapture: boolean;
+  /** Owned store root ("~" expanded to the home dir at load time). */
+  compactDir: string;
+  /** Per-session ring: newest N artifacts kept per session. */
+  compactRing: number;
+  /** TTL in days before artifacts are pruned. */
+  compactTtlDays: number;
+  /** Global cap on artifacts across all sessions. */
+  compactMaxArtifacts: number;
+  /** Per-artifact cap in MiB (overflow records drop trailing entries). */
+  compactMaxMb: number;
 }
 
 const envBool = (name: string, fallback: boolean): boolean => {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
   return raw === "1" || raw === "true" || raw === "yes";
+};
+
+/** parseInt with a guarded default: unset/unparsable values fall back. */
+const envInt = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+/** Expand a leading "~" to the home dir (used for the compact store). */
+const expandHome = (path: string): string => {
+  if (path === "~") return homedir();
+  return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 };
 
 const SOFT_DEFAULT: "off" | "auto" = "auto";
@@ -115,5 +142,13 @@ export function loadOptions(): PiCacheOptions {
       process.env["PI_CACHE_SOFT_MIN_TOKENS"] ??
         process.env["PI_CACHE_ONCE_MIN_TOKENS"] ??        String(resolveKeepRecentTokens(20000)),
     ),
+    // Compacted-entry capture: on by default, strict GC inside the owned
+    // root at ~/tmp/pi-cache/compacts (see compactstore.ts).
+    compactCapture: envBool("PI_CACHE_COMPACT_CAPTURE", true),
+    compactDir: expandHome(process.env["PI_CACHE_COMPACT_DIR"] ?? "~/tmp/pi-cache/compacts"),
+    compactRing: envInt("PI_CACHE_COMPACT_RING", 3),
+    compactTtlDays: envInt("PI_CACHE_COMPACT_TTL_DAYS", 7),
+    compactMaxArtifacts: envInt("PI_CACHE_COMPACT_MAX_ARTIFACTS", 200),
+    compactMaxMb: envInt("PI_CACHE_COMPACT_MAX_MB", 16),
   };
 }
