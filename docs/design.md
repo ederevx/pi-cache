@@ -141,13 +141,16 @@ and models. Compare `cache_ratio`, `$` saved, `cacheWrite` churn, plus
 non-regression signals (tool-call success, answer diff). pi-ai's `faux`
 provider (simulated cache) gives offline harness tests.
 
-## Soft compaction (cache-first, one-shot FAST by default) — SPEC
+## Soft compaction (cache-first, repeated FAST by default) — SPEC
 
-**Definition.** One fast "soft" compaction per session whose ONLY purposes
-are better cache hits and fewer input tokens. Invariant, by the user's
-requirement: **soft compaction must never touch already-soft-compacted
-segments — they are already cached; touching them would invalidate their
-prefix.**
+**Definition.** Fast "soft" compaction whose ONLY purposes are better cache
+hits and fewer input tokens, re-armed whenever the live context grows back
+to the threshold. Invariant, by the user's requirement: **soft compaction
+must never touch already-soft-compacted segments — they are already cached;
+touching them would invalidate their prefix.** The repeated cadence keeps
+that invariant: every pass replaces ONLY the newest uncached delta (the span
+pi's own cut marks for summarization) with the SAME byte-stable stub, so the
+[stable head][stub] prefix never moves.
 
 Consequences of the invariant:
 - Stable prefix (system + tools) and every previously soft-compacted
@@ -156,34 +159,41 @@ Consequences of the invariant:
 - Only the **uncached delta tail** (turns written after the last soft
   compaction) is ever replaced.
 
-**Cadence: `once` (default).** Compacting per turn self-defeats: each
-compaction rewrites the prefix at its cut, and providers cache on the
-serialized prefix — Anthropic's cumulative breakpoint hash changes whenever
-any block at or before a breakpoint changes (full miss from there, walking
-backward block by block); DeepSeek caches independent prefix-units that need
-an *exact full match*. A sliding per-turn cut therefore re-writes most of the
-context every turn: the cache resets every turn. The fix: compact exactly
-ONCE. Trigger (`agent_settled`, i.e. immediately after that turn's output):
-the first settle at which `getContextUsage().tokens` has reached
-`PI_CACHE_ONCE_MIN_TOKENS` (default 20000 ≈ pi's `keepRecentTokens`) — the
-first moment older turns would be swept into summarized history, so the
-sweep lands *right before becoming history*. After the one compaction a
-hard latch (`onceCompacted`) disables pi-cache's trigger forever; any
-compaction recorded meanwhile (including pi's own manual/threshold
-compaction) latches too. The compacted span is never re-summarized, so the
-prefix `[stable head][stub][recent window]` stays byte-identical for the rest of the session and every later request
-hits the cache below its fresh tail. The only later writer is pi's built-in
-threshold/overflow compaction at ~window-reserve tokens — rare, and
-pi-cache does not interfere with it. `PI_CACHE_SOFT_COMPACT=off` disables
-this feature.
+**Cadence: `auto` (default) — repeated.** Providers cache on the exact
+serialized prefix: Anthropic hashes the prefix up to the cache breakpoint
+("the system computes the prefix hash at your breakpoint and checks for a
+matching cache entry... walking backward one block at a time"); DeepSeek
+matches *independent prefix units* only on an exact full match. So
+rewriting an already-cached span resets the cache from there. The original
+`once` cadence compacted exactly once and then latched, but that only
+bounded the context once: as the session grew back, pi's own built-in
+threshold/overflow compaction eventually fired — an LLM summarizer call and
+a full-prefix re-write (cache nuked), repeating on every later crossing.
+The repeated cadence re-arms at every crossing instead: trigger
+(`agent_settled`, i.e. immediately after that turn's output) at each settle
+where `getContextUsage().tokens` has reached `PI_CACHE_SOFT_MIN_TOKENS`
+(default 20000 ≈ pi's `keepRecentTokens`) since the last compaction — the
+first moment older turns would be swept into summarized history, so every
+sweep lands *right before becoming history*. Each pass replaces the newest
+uncached delta with the SAME stub at pi's own cut point; the
+`[stable head][stub][recent window]` head is byte-identical across all
+compactions and stays cache-warm, while input stays bounded near
+2x `keepRecentTokens` forever. Natural hysteresis prevents churn: a
+compaction drops live context far below the threshold, the continuation
+run's settle consumes the skip guard, and the min-delta-turns gate must
+elapse — so the trigger cannot loop within a turn and only re-fires after
+real growth. (DeepSeek additionally persists *common prefixes* across
+requests as their own cache prefix units, so the repeated-stub head is
+exactly the shape that stays cached there.) `PI_CACHE_SOFT_COMPACT=off`
+disables this feature.
 
 **Mechanism (uses pi's extension-visible compaction machinery):**
-1. On cadence (`agent_settled`, once per session in mode `once`), call
+1. On cadence (`agent_settled`, re-armed in mode `auto`), call
    `ctx.compact()`; on success the turn is **continued once** via a hidden
-   custom message (`display: false`, content = the fixed `Continue.`
-   text): TUI-invisible, but the model still reads it as a user-role
-   message, so pi re-issues the compacted payload with no visible prompt
-   row (one user turn -> one compaction -> one continuation run; the
+   custom message (`display: false`, content = `SOFT_RESUME_PROMPT`):
+   TUI-invisible, but the model still reads it as a user-role message, so
+   pi re-issues the compacted payload with no visible prompt row (one user
+   turn -> at most one compaction -> one continuation run; the
    continuation's settle consumes a skip guard, so the cadence cannot
    loop).
 2. Our `session_before_compact` handler returns a custom proposal ONLY
@@ -199,23 +209,35 @@ this feature.
    removed — it was never wired and had no surviving configuration.)
 
 **Economics.** Without it, every long-context turn re-sends (and re-reads)
-all history at read price (or full price where reads are unbilled); with it,
-history is compressed once into a small delta write and then re-cheap.
-Fast mode costs zero summarize tokens outright; web evidence (Claude Code
-docs, OpenRouter best practices): compacting "replaces your message history
-with a summary" via a warm-prefix read; `/rewind` truncates back to a cached
-prefix; breakpoints themselves cost nothing — replace in place, never above
-a breakpoint, and keep dynamic content out of the cached block. Per-turn
-appending loses to this in warm-cache/read-discount regimes and wins for
-very long histories and no-read-discount providers — hence the single
-opt-in once-cadence.
+all history at read price (or full price where reads are unbilled); with a
+single compaction, history is compressed once but then grows back toward
+pi's own cold threshold compaction — an LLM summarizer call plus a
+full-prefix re-write at full input price, repeating at every later
+crossing. The repeated cadence compresses every crossing instead: the
+dropped span was uncached anyway, the bounded `[stable head][stub][recent
+window]` request is almost entirely cache reads (Anthropic 0.1x; DeepSeek
+0.1x native), and the summarizer never runs. The one re-write cost per
+pass: after a compaction the kept window's bytes sit at a new position, so
+the next request re-writes them once (Anthropic's walk-back finds prior
+writes up to the stub; DeepSeek's common-prefix persistence re-arms the
+head unit); after that the window is warm again until the next crossing.
+Web evidence (fetched 2026-09-18): Anthropic — "Because the hash is
+cumulative, covering everything up to and including the breakpoint,
+changing any block at or before the breakpoint produces a different hash
+on the next request"; DeepSeek — "Each cached prefix is an independent,
+complete unit. A subsequent request can only hit the cache if it fully
+matches a cache prefix unit", plus "Common prefix detection persistence".
+Full verbatim quotes and URLs:
+`docs/research/internet-prompt-caching-2026-09-18.md`.
 
 **Guardrails.** Same as auto-compact: fire at `agent_settled`, never
 during streaming/overflow, opt-in env `PI_CACHE_SOFT_COMPACT` (`off` |
-`once` = one-shot, default), min uncached turns
-`PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1), one-shot token gate
-`PI_CACHE_ONCE_MIN_TOKENS` (default 20000), the already-compacted-span
-invariant enforced via pi's cut, and the continuation skip guard. One platform constraint: pi's TUI renders its own compaction
+`auto` = repeated, default; legacy `once` accepted as an alias), min turns
+since the last compaction `PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1),
+re-arm token gate `PI_CACHE_SOFT_MIN_TOKENS` (default 20000 ≈ pi's
+`keepRecentTokens`; legacy `PI_CACHE_ONCE_MIN_TOKENS` accepted), the
+already-compacted-span invariant enforced via pi's cut, and the
+continuation skip guard. One platform constraint: pi's TUI renders its own compaction
 indicator and summary row unconditionally (pi 0.85.1: `interactive-mode.js`
 `compaction_start`/`compaction_end` handlers, no silent option in
 `CompactionPreparation`/`SessionBeforeCompactResult`/`CompactionSettings`);

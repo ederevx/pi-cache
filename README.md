@@ -18,18 +18,19 @@ Copy the `src/` files into the auto-discovered extensions directory:
 
 Then run `/reload` in pi (or restart). No config file needed. All
 cache-favoring features are ON by default (tools sort/dedup,
-auto-compaction, one-shot fast compaction, telemetry); disable any with
+auto-compaction, repeated fast compaction, telemetry); disable any with
 its `PI_CACHE_*` env var, e.g. `PI_CACHE_SOFT_COMPACT=off` (see
-`src/constants.ts` and `/cache-settings`). Compaction is FAST and happens
-ONCE per session — immediately after the output whose context reach up to
-`PI_CACHE_ONCE_MIN_TOKENS` (right as older turns would first be swept into
-summarized history). The uncached delta is replaced by a fixed byte-stable
-stub (no summarizer LLM call); from then on pi-cache never compacts again
-(the compacted span stays byte-identical and cache-warm, and per-turn
-re-compaction's cache-reset is avoided), and the turn is continued once
-after via a hidden custom message (no visible "Continue." row;
-`PI_CACHE_SOFT_AUTORESUME=0` to disable). `PI_CACHE_SOFT_COMPACT=off`
-disables this feature.
+`src/constants.ts` and `/cache-settings`). Compaction is FAST and
+re-arms whenever the live context grows back to `PI_CACHE_SOFT_MIN_TOKENS`
+(default ≈ pi's keepRecentTokens; right as older turns would first be
+swept into summarized history). Each pass replaces the newest uncached
+delta with the SAME fixed byte-stable stub (no summarizer LLM call), so
+the `[stable head][stub]` prefix stays byte-identical across all
+compactions and cache-warm, while input stays bounded near 2x
+keepRecentTokens instead of growing into pi's cold threshold compaction;
+the turn is continued once after each pass via a hidden custom message
+(no visible "Continue." row; `PI_CACHE_SOFT_AUTORESUME=0` to disable).
+`PI_CACHE_SOFT_COMPACT=off` disables this feature.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
 
@@ -50,16 +51,18 @@ reloads. Live views: `/cache-stats` and `/cache-settings`.
    `session_before_compact`.
 5. **Affinity guardrails** — keep OpenRouter sticky routing warm: one
    `session_id` per thread, never per turn; detect prefix-identity churn.
-6. **One-shot fast compaction** — compact ONCE, immediately after the
-   output whose context first crosses `PI_CACHE_ONCE_MIN_TOKENS` (the
-   moment older turns would become summarized "history"), to a fixed
-   byte-stable stub; then a hard latch guarantees pi-cache never touches
-   the transcript again. Providers cache on the serialized prefix
-   (Anthropic cumulative breakpoint hashes; DeepSeek exact prefix-units),
-   so any later rewrite of a compacted span is a full cache reset —
-   per-turn compaction therefore self-defeats; one early compaction is the
-   only cadence that lands the session on a small, permanently warm
-   prefix.
+6. **Repeated fast compaction** — re-arms whenever live context grows
+   back to `PI_CACHE_SOFT_MIN_TOKENS` (default ≈ pi's keepRecentTokens,
+   the moment older turns would become summarized "history"). Each pass
+   replaces only the newest uncached delta with the same fixed byte-stable
+   stub, so the `[stable head][stub]` prefix stays byte-identical and
+   cache-warm forever while input stays bounded near 2x keepRecentTokens.
+   Providers cache on the serialized prefix (Anthropic cumulative
+   breakpoint hashes; DeepSeek exact prefix-units + common-prefix
+   persistence), so rewriting a compacted span would reset the cache —
+   the repeated cadence never does: it only ever drops spans that were
+   uncached anyway, and never runs the LLM summarizer that pi's own cold
+   threshold compaction would.
 
 ## Repo layout
 

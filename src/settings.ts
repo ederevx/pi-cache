@@ -33,8 +33,8 @@ export class SettingsPresenter {
       { id: "dedupTools", title: "Dedup tools", description: "Drop exact-duplicate tool schemas from the payload", value: on(opts.dedupTools) },
       { id: "advisory", title: "Compaction advisory", description: "Note warm-cache compactions that re-write the prefix", value: on(opts.advisory) },
       { id: "autoCompact", title: "Auto-compaction", description: "Compact in cold-window turns (cache already lost) at idle", value: on(opts.autoCompact) },
-      { id: "softCompact", title: "Soft compaction", description: "Cadence: once (default) = one fast compaction right after output, then never again; off = disable (arms the cold-window auto-compact fallback)", value: opts.softCompactMode },
-      { id: "softOnceMinTokens", title: "Once min context", description: "One-shot compaction fires when live context reaches this (approx. pi keepRecentTokens); 0 = first output", value: String(opts.softOnceMinTokens) },
+      { id: "softCompact", title: "Soft compaction", description: "Cadence: auto (default) = fast stub compaction whenever live context crosses the threshold again (repeated, input stays bounded); off = disable (arms the cold-window auto-compact fallback)", value: opts.softCompactMode },
+      { id: "softMinTokens", title: "Min context", description: "Re-compact when live context reaches this since the last soft compaction (approx. pi keepRecentTokens); 0 = every settle", value: String(opts.softMinTokens) },
       { id: "softAutoResume", title: "Auto-resume", description: "Continue the agent once after a soft compaction", value: on(opts.softAutoResume) },
     ];
   }

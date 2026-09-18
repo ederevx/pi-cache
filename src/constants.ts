@@ -30,18 +30,20 @@ export interface PiCacheOptions {
   autoCompact: boolean;
   cooldownSeconds: number;
   minGapSeconds: number;
-  /** Soft compaction cadence (default once; env overrides). */
-  softCompactMode: "off" | "once";
-  /** Minimum uncached turns before the soft cadence acts (default: every turn). */
+  /** Soft compaction cadence (default auto/repeated; env overrides). */
+  softCompactMode: "off" | "auto";
+  /** Minimum turns since the last compaction before the soft cadence acts. */
   softCompactMinDeltaTurns: number;
   /**
-   * One-shot trigger (mode "once"): fire the single fast compaction at the
-   * first output after the live context reaches this many tokens — the
-   * moment older turns would first be swept into summarized history — then
-   * never compact again. Default mirrors pi's keepRecentTokens so the sweep
-   * happens exactly as content is about to become history.
+   * Re-arm trigger (mode "auto"): each time the live context grows back to
+   * this many tokens after the previous compaction, fire another fast
+   * compaction — the moment older turns would first be swept into
+   * summarized history. Natural hysteresis (the compaction drops context
+   * below the threshold) keeps the cadence from looping within a turn.
+   * Default mirrors pi's keepRecentTokens so every sweep happens exactly
+   * as content is about to become history.
    */
-  softOnceMinTokens: number;
+  softMinTokens: number;
   /**
    * Auto-resume: continue the agent once after a successful soft
    * compaction so the model reacts to the compacted context immediately
@@ -57,15 +59,17 @@ const envBool = (name: string, fallback: boolean): boolean => {
   return raw === "1" || raw === "true" || raw === "yes";
 };
 
-const SOFT_DEFAULT: "off" | "once" = "once";
+const SOFT_DEFAULT: "off" | "auto" = "auto";
 
 /**
- * Parse PI_CACHE_SOFT_COMPACT: "0"/"off"/"false"/"no" disable; "once"
- * (default) compacts a single time right after output, then never again.
- * Any other value honors the "once" default (the per-turn cadences
- * "cold"/"always" were removed — they self-defeated the cache).
+ * Parse PI_CACHE_SOFT_COMPACT: "0"/"off"/"false"/"no" disable; "auto"
+ * (default) re-arms the fast stub compaction every time live context
+ * crosses the threshold again. The legacy "once" value is accepted as an
+ * alias for "auto" (the one-shot cadence was removed — with a hard latch
+ * the context simply grows back to pi's cold threshold compaction, which
+ * runs an LLM summarizer and re-writes the whole prefix).
  */
-const parseSoftMode = (raw: string | undefined): "off" | "once" => {
+const parseSoftMode = (raw: string | undefined): "off" | "auto" => {
   if (raw === undefined || raw === "") return SOFT_DEFAULT;
   switch (raw.toLowerCase()) {
     case "0":
@@ -74,13 +78,13 @@ const parseSoftMode = (raw: string | undefined): "off" | "once" => {
     case "no":
       return "off";
     default:
-      return "once";
+      return "auto";
   }
 };
 
 /**
  * Resolve pi's compaction.keepRecentTokens from the global agent
- * settings.json so the one-shot trigger fires exactly when older turns
+ * settings.json so the re-arm trigger fires exactly when older turns
  * would first be swept into summarized history. Read-only and
  * fail-open: any parse error or missing key falls back to `fallback`.
  */
@@ -114,9 +118,9 @@ export function loadOptions(): PiCacheOptions {
     minGapSeconds: parseFloat(process.env["PI_CACHE_MIN_GAP_SECONDS"] ?? "240"),
     softCompactMode: parseSoftMode(process.env["PI_CACHE_SOFT_COMPACT"]),
     softCompactMinDeltaTurns: parseInt(process.env["PI_CACHE_SOFT_MIN_DELTA_TURNS"] ?? "1", 10),
-    softOnceMinTokens: parseFloat(
-      process.env["PI_CACHE_ONCE_MIN_TOKENS"] ??
-        String(resolveKeepRecentTokens(20000)),
+    softMinTokens: parseFloat(
+      process.env["PI_CACHE_SOFT_MIN_TOKENS"] ??
+        process.env["PI_CACHE_ONCE_MIN_TOKENS"] ??        String(resolveKeepRecentTokens(20000)),
     ),
     softAutoResume: envBool("PI_CACHE_SOFT_AUTORESUME", true),
   };
