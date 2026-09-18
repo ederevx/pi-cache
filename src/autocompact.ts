@@ -29,14 +29,8 @@ export interface AutocompactSignal {
 
 export interface AutocompactOptions {
   enabled: boolean;
-  /** cacheRead / (cacheRead + input) at or below this = the cache is cold. */
-  coldRatio: number;
-  /** getContextUsage().percent at or above this is required to trigger. */
-  minContextPercent: number;
   /** Minimum seconds between automatic compactions. */
   cooldownSeconds: number;
-  /** Minimum turns between automatic compactions. */
-  cooldownTurns: number;
   /** Minimum idle-so-far gap (s) that indicates a provider TTL expired. */
   minGapSeconds: number;
 }
@@ -47,6 +41,13 @@ export interface AutocompactVerdict {
 }
 
 export class AutocompactController {
+  /** cacheRead / (cacheRead + input) at or below this = the cache is cold. */
+  private static readonly COLD_RATIO = 0.05;
+  /** getContextUsage().percent at or above this is required to trigger. */
+  private static readonly MIN_CONTEXT_PERCENT = 60;
+  /** Minimum turns between automatic compactions. */
+  private static readonly COOLDOWN_TURNS = 5;
+
   private lastCompactedAt = 0;
   private lastCompactedTurn = -1;
   private lastTurnIndex = 0;
@@ -67,10 +68,13 @@ export class AutocompactController {
     const usage = signals.lastUsage();
     if (!usage) return { shouldCompact: false, reason: "no usage yet" };
     const cold = usage.cacheRead + usage.input > 0
-      ? usage.cacheRead / (usage.cacheRead + usage.input) <= this.opts.coldRatio
+      ? usage.cacheRead / (usage.cacheRead + usage.input) <= AutocompactController.COLD_RATIO
       : false;
     if (!cold) return { shouldCompact: false, reason: "cache warm" };
-    if (typeof contextPercent !== "number" || contextPercent < this.opts.minContextPercent) {
+    if (
+      typeof contextPercent !== "number" ||
+      contextPercent < AutocompactController.MIN_CONTEXT_PERCENT
+    ) {
       return { shouldCompact: false, reason: "context below threshold" };
     }
     const gapMs = signals.msSinceLastTurn();
@@ -79,7 +83,7 @@ export class AutocompactController {
       (neverCompacted ||
         Date.now() - this.lastCompactedAt >= this.opts.cooldownSeconds * 1000) &&
       (neverCompacted ||
-        this.lastTurnIndex - this.lastCompactedTurn >= this.opts.cooldownTurns);
+        this.lastTurnIndex - this.lastCompactedTurn >= AutocompactController.COOLDOWN_TURNS);
     if (!cooldownOk) return { shouldCompact: false, reason: "cooldown" };
     if (gapMs < this.opts.minGapSeconds * 1000) {
       return { shouldCompact: false, reason: "cold without a gap" };

@@ -28,9 +28,8 @@ stub (no summarizer LLM call); from then on pi-cache never compacts again
 (the compacted span stays byte-identical and cache-warm, and per-turn
 re-compaction's cache-reset is avoided), and the turn is continued once
 after via a hidden custom message (no visible "Continue." row;
-`PI_CACHE_SOFT_FAST=0` / `PI_CACHE_SOFT_AUTORESUME=0` to disable either).
-`PI_CACHE_SOFT_COMPACT=always|cold` restores the deprecated per-turn
-cadences for A/B.
+`PI_CACHE_SOFT_AUTORESUME=0` to disable). `PI_CACHE_SOFT_COMPACT=off`
+disables this feature.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
 

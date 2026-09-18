@@ -11,26 +11,18 @@
  *  - The built-in summarizer is hardcoded cold (cacheRetention:"none",
  *    fresh routing id, separate system prompt) and before_provider_request
  *    never fires for it — so `ctx.compact()` cannot make it cache-aware.
- *  - The only lever is the custom `session_before_compact` proposal, where
- *    WE call the model ourselves with the session's system prompt and a
- *    copied (byte-identical) cached prefix, so the summarizer reads the
- *    warm prefix at read price and only the delta is fresh.
- *  - Boundary: never summarize earlier than the later of pi's own cut and
- *    the last soft-compaction entry id — cached spans stay out of the span.
+ *  - The custom `session_before_compact` proposal replaces pi's own
+ *    summary call: the uncached delta is replaced by a fixed, byte-stable
+ *    stub (FAST_COMPACTION_STUB) at pi's own cut point, so the compaction
+ *    entry itself is cached and the next request's prefix stays warm — no
+ *    LLM summarizer call at all (the model-backed smart path was removed:
+ *    it was never wired and had no surviving configuration).
  */
 
-import type { Usage } from "@earendil-works/pi-ai";
-
-export type SoftCompactMode = "off" | "cold" | "once" | "always";
+export type SoftCompactMode = "off" | "once";
 
 export interface SoftCompactOptions {
   mode: SoftCompactMode;
-  /**
-   * Fast mode: the delta is replaced by a fixed stub instead of an LLM
-   * summary. Byte-stable stub -> the compaction entry itself is cached,
-   * so the next request's prefix stays warm. Default on.
-   */
-  fast: boolean;
   /** Minimum turns of uncached delta before the cadence acts. */
   minDeltaTurns: number;
   /**
@@ -39,15 +31,12 @@ export interface SoftCompactOptions {
    * first be swept into summarized history.
    */
   onceMinTokens: number;
-  /** Keep this many of the newest entries verbatim on top of the boundary. */
-  keepRecentFloor: number;
 }
 
 export interface SoftCompactProposal {
   summary: string;
   firstKeptEntryId: string;
   tokensBefore: number;
-  usage?: Usage;
 }
 
 /**
@@ -72,20 +61,7 @@ export const SOFT_RESUME_PROMPT =
   "pi-cache: fast compaction triggered, earlier turns are now a stub. " +
   "Continue any pending work; if none, just repeat your last message.";
 
-export interface SummaryJob {
-  /** The messages the summarizer should read (delta only). */
-  messages: unknown[];
-  /** System prompt to use for the summary call. */
-  systemPrompt: string;
-  previousSummary?: string;
-}
-
-export interface SummaryService {
-  summarize(job: SummaryJob): Promise<{ text: string; usage?: Usage }>;
-}
-
 export class SoftCompactionController {
-  private boundaryEntryId: string | undefined;
   private pendingTrigger = false;
   private lastTurnsCompact = 0;
   private compactions = 0;
@@ -156,12 +132,10 @@ export class SoftCompactionController {
     this.skipNextSettle = false;
   }
 
-  /** After a successful compaction, record the new boundary + telemetry. */
-  recordCompaction(compactionEntry: { id?: string; firstKeptEntryId?: string } | undefined): void {
+  /** After a successful compaction, record telemetry. */
+  recordCompaction(): void {
     this.compactions++;
     if (this.opts.mode === "once") this.onceCompacted = true;
-    const id = compactionEntry?.id ?? compactionEntry?.firstKeptEntryId;
-    if (id) this.boundaryEntryId = id;
     this.lastTurnsCompact = 0;
   }
   /**
@@ -170,82 +144,25 @@ export class SoftCompactionController {
    * live context is large enough that older turns are about to become
    * summarized history (right before "history", after the output).
    */
-  shouldTrigger(
-    mode: SoftCompactMode,
-    cacheWarm: boolean,
-    contextTokens: number | undefined,
-  ): boolean {
+  shouldTrigger(mode: SoftCompactMode, contextTokens: number | undefined): boolean {
     if (mode === "off") return false;
     if (this.lastTurnsCompact < this.opts.minDeltaTurns) return false;
-    if (mode === "once") {
-      if (this.onceCompacted) return false;
-      return (contextTokens ?? 0) >= this.opts.onceMinTokens;
-    }
-    if (mode === "cold" && cacheWarm) return false;
-    return true;
+    if (this.onceCompacted) return false;
+    return (contextTokens ?? 0) >= this.opts.onceMinTokens;
   }
 
   /**
    * Build the custom proposal for session_before_compact. Returns undefined
-   * unless we triggered this compaction and (fast mode) always, or (smart
-   * mode) a summary service is available.
-   *
-   * Fast mode: proposal with the fixed stub and pi's own cut point, so the
-   * LLM summarizer call is skipped entirely. Smart mode: cache-aware model
-   * proposal with the session's system prompt and the warm prefix.
+   * unless we triggered this compaction. The proposal replaces pi's own
+   * summary call with the fixed stub at pi's own cut point, so the LLM
+   * summarizer call is skipped entirely.
    */
-  async propose(
-    preparation: {
-      firstKeptEntryId: string;
-      tokensBefore: number;
-      messagesToSummarize: unknown[];
-      previousSummary?: string;
-    },
-    systemPrompt: string,
-    summary: SummaryService | undefined,
-  ): Promise<SoftCompactProposal | undefined> {
+  async propose(preparation: {
+    firstKeptEntryId: string;
+    tokensBefore: number;
+  }): Promise<SoftCompactProposal | undefined> {
     if (!this.consumeTrigger()) return undefined;
-    if (this.opts.fast) return this.fastProposal(preparation);
-    // Smart path (PI_CACHE_SOFT_FAST=0); fail-open to pi's default
-    // summarization whenever no summary service is wired.
-    return this.smartProposal(preparation, systemPrompt, summary);
-  }
-
-  /**
-   * Smart proposal: cache-aware LLM summary of the uncached delta. Never
-   * summarizes earlier than pi's own cut nor before our boundary; any
-   * failure (no service, throw, empty text) fails open to pi's default.
-   */
-  private async smartProposal(
-    preparation: {
-      firstKeptEntryId: string;
-      tokensBefore: number;
-      messagesToSummarize: unknown[];
-      previousSummary?: string;
-    },
-    systemPrompt: string,
-    summary: SummaryService | undefined,
-  ): Promise<SoftCompactProposal | undefined> {
-    if (!summary) return undefined;
-    const floor = this.latestId(this.boundaryEntryId, preparation.firstKeptEntryId);
-    try {
-      const result = await summary.summarize({
-        messages: preparation.messagesToSummarize,
-        systemPrompt,
-        previousSummary: preparation.previousSummary,
-      });
-      if (!result.text.trim()) return undefined;
-      this.lastTurnsCompact = 0;
-      return {
-        summary: result.text,
-        firstKeptEntryId: floor,
-        tokensBefore: preparation.tokensBefore,
-        usage: result.usage,
-      };
-    } catch {
-      // Fail-open: keep pi's normal behavior instead of a broken proposal.
-      return undefined;
-    }
+    return this.fastProposal(preparation);
   }
 
   /**
@@ -265,19 +182,9 @@ export class SoftCompactionController {
     };
   }
 
-  /** Entry-id upper bound that is later in the tree; entries are opaque ids. */
-  private latestId(a: string | undefined, b: string | undefined): string {
-    if (!a) return b ?? "";
-    if (!b) return a;
-    // Fallback when ids are not orderable: the caller's own cut takes
-    // priority only if no boundary is tracked yet.
-    return a;
-  }
-
-  stats(): { compactions: number; boundary: string | undefined; onceCompacted: boolean } {
+  stats(): { compactions: number; onceCompacted: boolean } {
     return {
       compactions: this.compactions,
-      boundary: this.boundaryEntryId,
       onceCompacted: this.onceCompacted,
     };
   }

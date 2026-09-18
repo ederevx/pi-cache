@@ -11,8 +11,6 @@
 
 export interface CompactionAdvisorOptions {
   enabled: boolean;
-  warmRatioThreshold: number;
-  advisoryMinTokens: number;
 }
 
 export interface LedgerTotals {
@@ -23,6 +21,15 @@ export interface LedgerTotals {
 }
 
 export class CompactionAdvisor {
+  /**
+   * Warm-cache threshold (cacheRead share of input+cacheRead) above which
+   * a pending compaction is worth an advisory, and the minimum context
+   * size (tokens) at which the advisory is useful. Fixed constants: the
+   * option surface carries only the on/off switch.
+   */
+  private static readonly WARM_RATIO_THRESHOLD = 0.6;
+  private static readonly ADVISORY_MIN_TOKENS = 50_000;
+
   constructor(private readonly opts: CompactionAdvisorOptions) {}
 
   /**
@@ -35,7 +42,10 @@ export class CompactionAdvisor {
     const denom = totals.input + totals.cacheRead;
     if (denom <= 0) return undefined;
     const ratio = totals.cacheRead / denom;
-    if (ratio >= this.opts.warmRatioThreshold && tokensBefore >= this.opts.advisoryMinTokens) {
+    if (
+      ratio >= CompactionAdvisor.WARM_RATIO_THRESHOLD &&
+      tokensBefore >= CompactionAdvisor.ADVISORY_MIN_TOKENS
+    ) {
       return (
         `pi-cache: warm cache (${(ratio * 100).toFixed(0)}%) with ${entryCount} ` +
         `entries ahead of compaction; consider raising keepRecentTokens to ` +
