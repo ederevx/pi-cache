@@ -61,11 +61,16 @@ export const FAST_COMPACTION_STUB =
   "soft compaction). The working context is in the turns below.";
 
 /**
- * Minimal continuation prompt for the auto-resume after a soft compaction.
- * Kept short and stable: this text reappears in the transcript every turn
+ * Auto-resume prompt for the hidden continuation after a soft compaction.
+ * Informs the agent that the fast compaction fired and instructs it to
+ * keep any pending work going; when nothing is pending it repeats its
+ * last message so the continuation turn still emits an output. Kept
+ * short and stable: this text reappears in the transcript every turn
  * and is itself swept into the stub on later compactions.
  */
-export const SOFT_RESUME_PROMPT = "Continue.";
+export const SOFT_RESUME_PROMPT =
+  "pi-cache: fast compaction triggered, earlier turns are now a stub. " +
+  "Continue any pending work; if none, just repeat your last message.";
 
 export interface SummaryJob {
   /** The messages the summarizer should read (delta only). */
