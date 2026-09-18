@@ -16,15 +16,22 @@
  *                            and soft compaction (fast stub, repeated
  *                            cadence)
  *   session_before_compact — two listeners: warm-cache advisory, then the
- *                            soft-compaction proposal (last-truthy wins)
- *   session_compact        — compaction telemetry
+ *                            soft-compaction proposal (last-truthy wins);
+ *                            our proposal also stashes a verbatim capture
+ *                            of the span this pass will drop
+ *   session_compact        — compaction telemetry + store write of the
+ *                            captured artifact (atomic, ring/GC'ed)
+ *   session_compact_failed — drop any pending capture (no write)
+ *   session_shutdown       — drop any pending capture (no write)
+ *   session_start          — idle fail-open GC pass over the compact store
  *
  * Command:
  *   /cache-stats           — session cache-ratio, churn, affinity, compactions
  *
  * Config: PI_CACHE_* environment variables only (no config JSON — house
  * rule); durable telemetry to the `.pi-cache/` dot-dir under the agent
- * dir (see constants.ts).
+ * dir (see constants.ts); soft-compaction captures reach a temporary
+ * store at ~/tmp/pi-cache/compacts (see compactstore.ts).
  */
 
 import { loadOptions } from "./constants.ts";
@@ -35,11 +42,52 @@ import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
 import { AutocompactController } from "./autocompact.ts";
 import { SoftCompactionController } from "./softcompact.ts";
+import { CompactStorePaths, CompactCapture, CompactGC, type BranchEntryView } from "./compactstore.ts";
 import { SettingsPresenter } from "./settings.ts";
+import { basename } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Normalize unknown handler payload shapes with a safe local view. */
 type ModelView = { model?: { id?: string } | undefined } | undefined;
+
+/** In-memory capture stashed at proposal time; written on session_compact. */
+type CapturedArtifact = {
+  sessionId: string;
+  seq: number;
+  reason: string;
+  tokensBefore: number;
+  firstKeptEntryId: string;
+  prevFirstKeptEntryId: string | undefined;
+  entryCount: number;
+  artifactPath: string;
+  text: string;
+};
+
+/** Resolve the previous compaction cut: parsed JSON summary if it carries
+ *  firstKeptEntryId, else the most recent compaction entry in the branch
+ *  (our own stubs are plain text, so the entry's cut is the authority). */
+function priorSummaryCut(
+  branchEntries: readonly BranchEntryView[],
+  previousSummary: string | undefined,
+): { firstKeptEntryId?: string } | undefined {
+  if (previousSummary) {
+    try {
+      const parsed = JSON.parse(previousSummary) as { firstKeptEntryId?: unknown };
+      if (typeof parsed.firstKeptEntryId === "string") {
+        return { firstKeptEntryId: parsed.firstKeptEntryId };
+      }
+    } catch {
+      /* not JSON: fall through to the branch scan */
+    }
+  }
+  for (let i = branchEntries.length - 1; i >= 0; i--) {
+    const entry = branchEntries[i];
+    if (entry.type === "compaction" && typeof entry.firstKeptEntryId === "string") {
+      return { firstKeptEntryId: entry.firstKeptEntryId };
+    }
+  }
+  return undefined;
+}
 
 export default function piCacheExtension(pi: ExtensionAPI): void {
   const opts = loadOptions();
@@ -61,6 +109,25 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     minTokens: opts.softMinTokens,
   });
   const settingsPresenter = new SettingsPresenter();
+
+  // Compacted-entry capture store (see compactstore.ts). Constructed even
+  // when capture is disabled (harmless no-op), and pruned fail-open once
+  // at load so no stale artifact survives a restart.
+  const storePaths = new CompactStorePaths(opts.compactDir);
+  const compactCapture = new CompactCapture();
+  const compactGC = new CompactGC(storePaths, {
+    ring: opts.compactRing,
+    maxArtifacts: opts.compactMaxArtifacts,
+    ttlMs: opts.compactTtlDays * 24 * 60 * 60 * 1000,
+  });
+  if (opts.compactCapture) {
+    try {
+      compactGC.prune();
+    } catch {
+      /* fail-open: the store must never block extension load */
+    }
+  }
+  let captured: CapturedArtifact | undefined;
 
   pi.on("message_end", async (event, ctx) => {
     try {
@@ -166,12 +233,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_before_compact", async (event) => {
+  pi.on("session_before_compact", async (event, ctx) => {
     // Listener 2 of 2: soft-compaction proposal. Override ONLY compactions
     // we triggered (ours via ctx.compact(), or pi's own threshold/overflow
     // compaction when it lands while the trigger is armed); built-in
     // compactions we did not arm pass through untouched. Peek here;
-    // propose() is the single consumer of the flag.
+    // propose() is the single consumer of the flag. When OUR proposal
+    // fired, also stash a verbatim capture of the span this pass drops —
+    // written to the compact store on session_compact (no I/O here).
     try {
       if (!softcompact.isTriggered()) return;
       const proposal = await softcompact.propose({
@@ -179,24 +248,121 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         tokensBefore: event.preparation.tokensBefore,
       });
       if (!proposal) return; // fail-open: pi's default summarization runs
+      if (opts.compactCapture) {
+        try {
+          const entries = event.branchEntries as unknown as readonly BranchEntryView[];
+          const sessionId = ctx.sessionManager.getSessionId();
+          const seq = storePaths.nextSeq(sessionId);
+          const delta = compactCapture.deriveDelta(
+            entries,
+            priorSummaryCut(entries, event.preparation.previousSummary),
+            { firstKeptEntryId: event.preparation.firstKeptEntryId },
+          );
+          const text = compactCapture.serialize({
+            sessionId,
+            sessionFile: ctx.sessionManager.getSessionFile?.(),
+            seq,
+            reason: event.reason,
+            tokensBefore: event.preparation.tokensBefore,
+            firstKeptEntryId: event.preparation.firstKeptEntryId,
+            prevFirstKeptEntryId: delta.prevFirstKeptEntryId,
+            prevStubId: delta.prevStubId,
+            entries: delta.entries,
+            maxBytes: opts.compactMaxMb * 1024 * 1024,
+          });
+          captured = {
+            sessionId,
+            seq,
+            reason: event.reason,
+            tokensBefore: event.preparation.tokensBefore,
+            firstKeptEntryId: event.preparation.firstKeptEntryId,
+            prevFirstKeptEntryId: delta.prevFirstKeptEntryId,
+            entryCount: delta.entries.length,
+            artifactPath: storePaths.artifactPath(
+              sessionId,
+              seq,
+              event.preparation.firstKeptEntryId,
+            ),
+            text,
+          };
+        } catch {
+          /* capture is best-effort: the compaction itself proceeds */
+        }
+      }
       return { compaction: proposal };
     } catch {
       /* never break compaction */
     }
   });
 
-  pi.on("session_compact", async (event) => {
+  pi.on("session_compact", async (event, ctx) => {
     try {
       softcompact.recordCompaction();
+      // Write the stashed capture (proposal-time span) atomically, refresh
+      // both LATEST pointers, then GC. Never lets the store break telemetry.
+      let artifact: string | undefined;
+      let latest: string | undefined;
+      if (
+        opts.compactCapture &&
+        captured !== undefined &&
+        captured.sessionId === ctx.sessionManager.getSessionId()
+      ) {
+        try {
+          storePaths.writeArtifact(captured.artifactPath, captured.text);
+          storePaths.writeLatest(
+            storePaths.latestFile(captured.sessionId),
+            captured.sessionId,
+            basename(captured.artifactPath),
+          );
+          storePaths.writeLatest(
+            storePaths.globalLatestFile(),
+            captured.sessionId,
+            storePaths.artifactRef(captured.sessionId, captured.artifactPath),
+          );
+          artifact = captured.artifactPath;
+          latest = storePaths.globalLatestFile();
+          try {
+            compactGC.prune();
+          } catch {
+            /* fail-open: GC must never break the turn */
+          }
+        } catch {
+          /* store write must never break the turn */
+        }
+        captured = undefined;
+      }
       if (event.compactionEntry) {
-        pi.appendEntry("pi-cache-compaction", {
+        const data: Record<string, unknown> = {
           keptEntryId: event.compactionEntry.firstKeptEntryId,
           tokensBefore: event.compactionEntry.tokensBefore,
           fromExtension: event.compactionEntry.fromHook,
-        });
+        };
+        if (artifact !== undefined) data.artifact = artifact;
+        if (latest !== undefined) data.latest = latest;
+        pi.appendEntry("pi-cache-compaction", data);
       }
     } catch {
       /* telemetry only */
+    }
+  });
+
+  pi.on("session_compact_failed", async () => {
+    // Nothing was compacted: drop the pending capture without writing.
+    captured = undefined;
+  });
+
+  pi.on("session_shutdown", async () => {
+    // No compaction can complete across a teardown: drop the pending stash.
+    captured = undefined;
+  });
+
+  pi.on("session_start", async () => {
+    // Idle GC pass: stale artifacts from a crashed run are pruned on the
+    // next start. Fail-open — GC must never break session start.
+    try {
+      if (opts.compactCapture) compactGC.prune();
+    } catch {
+      /* fail-open */
     }
   });
 

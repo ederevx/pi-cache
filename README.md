@@ -29,6 +29,12 @@ the `[stable head][stub]` prefix stays byte-identical across all
 compactions and cache-warm, while input stays bounded near 2x
 keepRecentTokens instead of growing into pi's cold threshold compaction.
 `PI_CACHE_SOFT_COMPACT=off` disables this feature.
+Each soft fast compaction now also persists the compacted-out entries
+(including subagent and tool output) to a temporary store at the
+well-known path `~/tmp/pi-cache/compacts/LATEST`: a per-session ring of
+up to 3 JSONL artifacts, a global cap of 200, and a 7-day TTL, GC'd at
+compaction, session start, extension load, and shutdown. The agent or
+user can read LATEST to recover exactly what a compaction dropped.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
 
