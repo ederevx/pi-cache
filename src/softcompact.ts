@@ -17,20 +17,33 @@
  *    entry itself is cached and the next request's prefix stays warm — no
  *    LLM summarizer call at all (the model-backed smart path was removed:
  *    it was never wired and had no surviving configuration).
+ *
+ * Cadence (mode "auto", default): REPEATED. The trigger re-arms every
+ * time the live context grows back to the threshold after the previous
+ * compaction (natural hysteresis: compaction drops context far below the
+ * threshold, so the gate cannot re-fire the same turn). Each pass replaces
+ * only the span pi's own cut marks for summarization — the newest uncached
+ * delta — with the SAME byte-stable stub, so the [stable head][stub]
+ * prefix of every request stays byte-identical across all compactions and
+ * keeps hitting the provider cache; the span that is dropped was uncached
+ * anyway. Input stays bounded near 2x keepRecentTokens instead of growing
+ * to pi's own cold threshold compaction (LLM summarizer + full-prefix
+ * re-write, cache nuked).
  */
 
-export type SoftCompactMode = "off" | "once";
+export type SoftCompactMode = "off" | "auto";
 
 export interface SoftCompactOptions {
   mode: SoftCompactMode;
-  /** Minimum turns of uncached delta before the cadence acts. */
+  /** Minimum turns since the last compaction before the cadence acts. */
   minDeltaTurns: number;
   /**
-   * One-shot trigger (mode "once"): context tokens at/above this value
-   * authorize the single compaction — the point where older turns would
-   * first be swept into summarized history.
+   * Re-arm threshold (mode "auto"): when live context tokens reach this
+   * value again after the previous compaction, authorize another fast
+   * compaction — the point where older turns would first be swept into
+   * summarized history.
    */
-  onceMinTokens: number;
+  minTokens: number;
 }
 
 export interface SoftCompactProposal {
@@ -67,13 +80,6 @@ export class SoftCompactionController {
   private compactions = 0;
   /** Auto-resume guard: skip the next settle (the continuation run). */
   private skipNextSettle = false;
-  /**
-   * Hard latch for mode "once": after the single compaction (or any
-   * compaction recorded by pi), pi-cache never triggers compaction again.
-   * The compacted span stays byte-identical forever — never re-summarized,
-   * boundary never moved — so the provider prefix stays warm.
-   */
-  private onceCompacted = false;
 
   constructor(private readonly opts: SoftCompactOptions) {}
 
@@ -135,20 +141,21 @@ export class SoftCompactionController {
   /** After a successful compaction, record telemetry. */
   recordCompaction(): void {
     this.compactions++;
-    if (this.opts.mode === "once") this.onceCompacted = true;
     this.lastTurnsCompact = 0;
   }
   /**
    * Cadence gate for the agent_settled trigger. Also feed bumpTurn() per
-   * turn. Mode "once": allow exactly one compaction, and only once the
-   * live context is large enough that older turns are about to become
-   * summarized history (right before "history", after the output).
+   * turn. Mode "auto": re-arm every time the live context has grown back
+   * to the threshold since the last compaction (natural hysteresis: the
+   * compaction just dropped context below it, and the continuation run's
+   * settle is consumed by the skip guard, so the gate cannot loop within
+   * a turn). Each pass only replaces the newest uncached delta with the
+   * same byte-stable stub, so the cached head never moves.
    */
   shouldTrigger(mode: SoftCompactMode, contextTokens: number | undefined): boolean {
     if (mode === "off") return false;
     if (this.lastTurnsCompact < this.opts.minDeltaTurns) return false;
-    if (this.onceCompacted) return false;
-    return (contextTokens ?? 0) >= this.opts.onceMinTokens;
+    return (contextTokens ?? 0) >= this.opts.minTokens;
   }
 
   /**
@@ -182,10 +189,7 @@ export class SoftCompactionController {
     };
   }
 
-  stats(): { compactions: number; onceCompacted: boolean } {
-    return {
-      compactions: this.compactions,
-      onceCompacted: this.onceCompacted,
-    };
+  stats(): { compactions: number } {
+    return { compactions: this.compactions };
   }
 }

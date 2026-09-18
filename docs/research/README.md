@@ -19,6 +19,7 @@ re-verify before relying on them economically.
 | `provider documentation` | Extension structure audit | House layout/style/OOP spec for pi-cache (index.ts wire-only, no module globals, env-var config idiom, appendEntry, dot-dirs) |
 | `the pi request serialization audit` | pi request-serialization audit | Wire bytes are already deterministic per (session, conversation, toolset); cwd + readdir-ordered skills are the only per-machine prefix churn; safe/risky before_provider_request transforms per API; cache_control pinned to last tool |
 | `provider prompt-caching documentation` | Semantic-preserving transforms | Determinism not canonicalism is the lever; template pinning; breakpoint layouts; TTL/retention knobs; 0→97.6% opencode precedent; illusions list |
+| `internet-prompt-caching-2026-09-18.md` | Provider prefix-cache semantics (fetched docs) | Verbatim quotes: Anthropic cumulative breakpoint hash + 20-block walk-back; DeepSeek exact-match prefix units + common-prefix persistence; OpenAI full-prefix match, 1024 min; context-engineering compaction guidance |
 
 ## Condensed key facts
 

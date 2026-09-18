@@ -58,7 +58,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const softcompact = new SoftCompactionController({
     mode: opts.softCompactMode,
     minDeltaTurns: opts.softCompactMinDeltaTurns,
-    onceMinTokens: opts.softOnceMinTokens,
+    minTokens: opts.softMinTokens,
   });
   const settingsPresenter = new SettingsPresenter();
 
@@ -122,21 +122,22 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    // Listener 2 of 2: soft compaction cadence. mode "once" (default):
-    // exactly one fast compaction per session, at the first settle after
-    // an output where the live context has grown to where older turns
-    // would first be swept into summarized history (right before they
-    // become "history"); thereafter the hard latch in the controller
-    // stops any further trigger, so the compacted prefix stays
-    // byte-stable and warm forever.
+    // Listener 2 of 2: soft compaction cadence. mode "auto" (default):
+    // re-arm every time the live context has grown back to the threshold
+    // since the last compaction. Each pass replaces only the newest
+    // uncached delta with the SAME byte-stable stub (pi's own cut point),
+    // so the [stable head][stub] prefix stays byte-identical across all
+    // compactions and keeps hitting the provider cache, while input stays
+    // bounded near 2x keepRecentTokens instead of growing into pi's cold
+    // threshold compaction (LLM summarizer, full-prefix re-write).
     try {
       if (opts.softCompactMode === "off") return;
       // The auto-resumed continuation run settles right after the
       // compaction; let it pass without re-compacting (one user turn -> one
       // compaction -> one continuation). Consumed here before any trigger.
       if (softcompact.consumeSkipNextSettle()) return;
-      // Context size signal: the once-trigger fires right when older turns
-      // are about to become summarized history.
+      // Context size signal: the re-arm trigger fires right when older
+      // turns are about to become summarized history.
       const contextTokens = ctx.getContextUsage?.()?.tokens;
       if (softcompact.shouldTrigger(opts.softCompactMode, contextTokens)) {
         softcompact.markTriggered();
@@ -197,8 +198,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.on("session_before_compact", async (event) => {
     // Listener 2 of 2: soft-compaction proposal. Override ONLY compactions
-    // we triggered; the built-in threshold/overflow compactions pass through
-    // untouched. Peek here; propose() is the single consumer of the flag.
+    // we triggered (ours via ctx.compact(), or pi's own threshold/overflow
+    // compaction when it lands while the trigger is armed); built-in
+    // compactions we did not arm pass through untouched. Peek here;
+    // propose() is the single consumer of the flag.
     try {
       if (!softcompact.isTriggered()) return;
       const proposal = await softcompact.propose({
