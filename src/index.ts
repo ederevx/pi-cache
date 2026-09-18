@@ -8,6 +8,7 @@
  *
  * Hooks:
  *   message_end            — record assistant usage in the ledger
+ *   before_provider_headers— observe session-affinity header stability
  *   before_provider_request— opt-in tools sort/dedup + head-churn watch
  *   session_before_compact — observational warm-cache advisory
  *
@@ -24,6 +25,7 @@ import { CacheLedger } from "./ledger.ts";
 import { FileRecordSink } from "./sink.ts";
 import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
+import { AffinityObserver } from "./affinity.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Normalize unknown handler payload shapes with a safe local view. */
@@ -41,6 +43,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     warmRatioThreshold: opts.warmRatioThreshold,
     advisoryMinTokens: opts.advisoryMinTokens,
   });
+  const affinity = new AffinityObserver();
 
   pi.on("message_end", async (event, ctx) => {
     try {
@@ -62,6 +65,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     }
   });
 
+  pi.on("before_provider_headers", async (event) => {
+    try {
+      affinity.note(event.headers ?? {});
+    } catch {
+      /* observational only */
+    }
+  });
+
   pi.on("session_before_compact", async (event) => {
     try {
       const tip = advisor.suggest(
@@ -80,7 +91,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     handler: async () => {
       const base = ledger.summary();
       const churn = normalizer.churn();
-      return churn > 0 ? `${base}, head churn ${churn}` : base;
+      const line = churn > 0 ? `${base}, head churn ${churn}` : base;
+      return `${line}, ${affinity.status()}`;
     },
   });
 }
