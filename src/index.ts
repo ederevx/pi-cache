@@ -11,10 +11,12 @@
  *   before_provider_headers— observe session-affinity header stability
  *   before_provider_request— opt-in tools sort/dedup + head-churn watch
  *   turn_end               — turn bookkeeping for auto/soft compaction
- *   agent_settled          — cadence point: cache-aware auto-compact (cold
- *                            window) and/or soft per-turn compaction (fast
- *                            stub; auto-resumes the agent once after)
- *   session_before_compact — warm-cache advisory + soft-compaction proposal
+ *   agent_settled          — cadence point, two listeners: cache-aware
+ *                            auto-compact (cold window; soft-off fallback)
+ *                            and soft per-turn compaction (fast stub;
+ *                            auto-resumes the agent once after)
+ *   session_before_compact — two listeners: warm-cache advisory, then the
+ *                            soft-compaction proposal (last-truthy wins)
  *   session_compact        — boundary tracking + compaction telemetry
  *
  * Command:
@@ -106,61 +108,74 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    // Listener 1 of 2: cache-aware auto-compaction (cold-window). Runs only
+    // as soft cadence's fallback — the two listeners never double-fire
+    // (soft "off" <=> auto active, by mode). agent_settled is the
+    // guaranteed-idle point (no retry/compaction/continuation will run), so
+    // compact() cannot abort live work here.
     try {
-      // agent_settled is the guaranteed-idle point (no retry/compaction/
-      // continuation will run), so compact() cannot abort live work here.
-      // When soft cadence is on it is the every-turn path; auto-compaction
-      // (cold-window) only runs as its fallback when soft is disabled.
-      if (opts.autoCompact && opts.softCompactMode === "off") {
-        const usage = ctx.getContextUsage?.();
-        const verdict = autocompact.decide(usage?.percent, ledger);
-        if (verdict.shouldCompact) {
-          ctx.compact?.({
-            onComplete: () => autocompact.markCompacted(),
-            onError: () =>
-              pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" }),
-          });
-        }
-      }
-      if (opts.softCompactMode !== "off") {
-        // The auto-resumed continuation run settles right after the
-        // compaction; let it pass without re-compacting (one user turn -> one
-        // compaction -> one continuation). Consumed here before any trigger.
-        if (softcompact.consumeSkipNextSettle()) return;
-        // Warmth signal from the ledger's last turn (soft cadence mode
-        // "cold" only acts when the cache is already cold).
-        const last = ledger.lastUsage();
-        const warm = last !== undefined && last.cacheRead + last.input > 0
-          ? last.cacheRead / (last.cacheRead + last.input) > 0.05
-          : false;
-        if (softcompact.shouldTrigger(opts.softCompactMode, warm)) {
-          softcompact.markTriggered();
-          ctx.compact?.({
-            onComplete: () => {
-              pi.appendEntry("pi-cache-compaction", { ok: true });
-              if (opts.softAutoResume) {
-                softcompact.markResumed();
-                try {
-                  // Always triggers a turn; expandPromptTemplates stays
-                  // false so the literal continuation text reaches the model.
-                  pi.sendUserMessage(SOFT_RESUME_PROMPT, {});
-                } catch {
-                  // Never strand the next user message without compaction.
-                  softcompact.clearResumed();
-                }
-              }
-            },
-            onError: () =>
-              pi.appendEntry("pi-cache-advisory", { message: "soft-compact failed" }),
-          });
-        }
+      if (!(opts.autoCompact && opts.softCompactMode === "off")) return;
+      const usage = ctx.getContextUsage?.();
+      const verdict = autocompact.decide(usage?.percent, ledger);
+      if (verdict.shouldCompact) {
+        ctx.compact?.({
+          onComplete: () => autocompact.markCompacted(),
+          onError: () =>
+            pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" }),
+        });
       }
     } catch {
       /* automatic control must never break a turn */
     }
   });
 
-  pi.on("session_before_compact", async (event, ctx) => {
+  pi.on("agent_settled", async (_event, ctx) => {
+    // Listener 2 of 2: soft per-turn compaction (the every-turn cadence).
+    try {
+      if (opts.softCompactMode === "off") return;
+      // The auto-resumed continuation run settles right after the
+      // compaction; let it pass without re-compacting (one user turn -> one
+      // compaction -> one continuation). Consumed here before any trigger.
+      if (softcompact.consumeSkipNextSettle()) return;
+      // Warmth signal from the ledger's last turn (soft cadence mode "cold"
+      // only acts when the cache is already cold).
+      const last = ledger.lastUsage();
+      const warm = last !== undefined && last.cacheRead + last.input > 0
+        ? last.cacheRead / (last.cacheRead + last.input) > 0.05
+        : false;
+      if (softcompact.shouldTrigger(opts.softCompactMode, warm)) {
+        softcompact.markTriggered();
+        ctx.compact?.({
+          onComplete: () => {
+            pi.appendEntry("pi-cache-compaction", { ok: true });
+            if (opts.softAutoResume) {
+              softcompact.markResumed();
+              try {
+                // Always triggers a turn; expandPromptTemplates stays
+                // false so the literal continuation text reaches the model.
+                pi.sendUserMessage(SOFT_RESUME_PROMPT, {});
+              } catch {
+                // Never strand the next user message without compaction.
+                softcompact.clearResumed();
+              }
+            }
+          },
+          onError: () => {
+            // If compact() failed before the hook ran, release the armed
+            // trigger so no later (user) compaction gets a stale override.
+            softcompact.clearTrigger();
+            pi.appendEntry("pi-cache-advisory", { message: "soft-compact failed" });
+          },
+        });
+      }
+    } catch {
+      /* automatic control must never break a turn */
+    }
+  });
+
+  pi.on("session_before_compact", async (event) => {
+    // Listener 1 of 2: warm-cache advisory (observational only). Returns
+    // nothing, so the proposal listener's result below is preserved.
     try {
       const tip = advisor.suggest(
         ledger.totals(),
@@ -168,10 +183,16 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         event.preparation.tokensBefore,
       );
       if (tip) pi.appendEntry("pi-cache-advisory", { message: tip });
+    } catch {
+      /* never break compaction */
+    }
+  });
 
-      // Soft-compaction path: override ONLY compactions we triggered; the
-      // built-in threshold/overflow compactions pass through untouched.
-      // Peek here; propose() is the single consumer of the trigger flag.
+  pi.on("session_before_compact", async (event, ctx) => {
+    // Listener 2 of 2: soft-compaction proposal. Override ONLY compactions
+    // we triggered; the built-in threshold/overflow compactions pass through
+    // untouched. Peek here; propose() is the single consumer of the flag.
+    try {
       if (!softcompact.isTriggered()) return;
       const proposal = await softcompact.propose(
         {
