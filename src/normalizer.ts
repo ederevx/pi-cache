@@ -45,30 +45,56 @@ export class PrefixNormalizer {
   /** Sort/dedup tools in place; reports whether anything changed. */
   private transformTools(body: Record<string, unknown>): boolean {
     const tools = body.tools as ToolLike[];
+    const markerIndex = tools.findIndex((t) => t.cache_control !== undefined);
+    const hasMarker = markerIndex !== -1;
+    // Anthropic/OpenRouter pin cache_control to the LAST immediate tool;
+    // a mid-array marker means explicit breakpoints we must not disturb.
+    const markerOnLast = markerIndex === -1 || markerIndex === tools.length - 1;
+    if (hasMarker && !markerOnLast) return false;
+    const marker = hasMarker ? (tools[markerIndex].cache_control as unknown) : undefined;
+
+    let result = tools;
     let changed = false;
 
     if (this.opts.dedupTools) {
       const seen = new Set<string>();
       const deduped: ToolLike[] = [];
-      for (const tool of tools) {
+      for (const tool of result) {
         const key = JSON.stringify(tool);
         if (seen.has(key)) continue;
         seen.add(key);
         deduped.push(tool);
       }
-      if (deduped.length !== tools.length) {
-        body.tools = deduped;
+      if (deduped.length !== result.length) {
+        result = deduped;
         changed = true;
       }
     }
 
     if (this.opts.sortTools) {
-      const byName = [...(body.tools as ToolLike[])];
+      const byName = [...result];
       byName.sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
-      if (JSON.stringify(byName) !== JSON.stringify(body.tools)) {
-        body.tools = byName;
+      if (JSON.stringify(byName) !== JSON.stringify(result)) {
+        result = byName;
         changed = true;
       }
+    }
+
+    if (changed) {
+      // Re-pin a trailing Anthropic cache_control marker to the new last
+      // tool (sort/dedup move it otherwise, breaking the breakpoint).
+      if (hasMarker && marker !== undefined) {
+        result = result.map((t) => {
+          if (t.cache_control === undefined) return t;
+          const cleaned = { ...t };
+          delete cleaned.cache_control;
+          return cleaned;
+        });
+        const last = { ...result[result.length - 1] };
+        last.cache_control = marker;
+        result[result.length - 1] = last;
+      }
+      body.tools = result;
     }
     return changed;
   }
