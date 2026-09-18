@@ -25,6 +25,12 @@ export type SoftCompactMode = "off" | "cold" | "always";
 
 export interface SoftCompactOptions {
   mode: SoftCompactMode;
+  /**
+   * Fast mode: the delta is replaced by a fixed stub instead of an LLM
+   * summary. Byte-stable stub -> the compaction entry itself is cached,
+   * so the next request's prefix stays warm. Default on.
+   */
+  fast: boolean;
   /** Minimum turns of uncached delta before the every-turn cadence acts. */
   minDeltaTurns: number;
   /** Keep this many of the newest entries verbatim on top of the boundary. */
@@ -37,6 +43,23 @@ export interface SoftCompactProposal {
   tokensBefore: number;
   usage?: Usage;
 }
+
+/**
+ * Fixed, byte-stable stub that replaces the uncached delta in fast mode.
+ * A literal constant: any change here would shift every following byte and
+ * invalidate the whole cached prefix, so this text is part of the cache
+ * contract and must only ever change with a deliberate cache reset.
+ */
+export const FAST_COMPACTION_STUB =
+  "Earlier conversation turns were fast-compacted by pi-cache (cache-first " +
+  "soft compaction). The working context is in the turns below.";
+
+/**
+ * Minimal continuation prompt for the auto-resume after a soft compaction.
+ * Kept short and stable: this text reappears in the transcript every turn
+ * and is itself swept into the stub on later compactions.
+ */
+export const SOFT_RESUME_PROMPT = "Continue.";
 
 export interface SummaryJob {
   /** The messages the summarizer should read (delta only). */
@@ -55,6 +78,8 @@ export class SoftCompactionController {
   private pendingTrigger = false;
   private lastTurnsCompact = 0;
   private compactions = 0;
+  /** Auto-resume guard: skip the next settle (the continuation run). */
+  private skipNextSettle = false;
 
   constructor(private readonly opts: SoftCompactOptions) {}
 
@@ -75,6 +100,35 @@ export class SoftCompactionController {
     return was;
   }
 
+  /** Peek without consuming: the handler guard must not eat the flag. */
+  isTriggered(): boolean {
+    return this.pendingTrigger;
+  }
+
+  /**
+   * Auto-resume bookkeeping. Called right before the continuation prompt is
+   * injected; the continuation run's own settle must not re-compact, which
+   * keeps the cadence at exactly one compaction per real user message.
+   */
+  markResumed(): void {
+    this.skipNextSettle = true;
+  }
+
+  /** Consume the auto-resume skip (called at the next agent_settled). */
+  consumeSkipNextSettle(): boolean {
+    const was = this.skipNextSettle;
+    this.skipNextSettle = false;
+    return was;
+  }
+
+  /**
+   * Auto-resume injection failed: release the skip guard so the next real
+   * user message still compacts normally.
+   */
+  clearResumed(): void {
+    this.skipNextSettle = false;
+  }
+
   /** After a successful compaction, record the new boundary + telemetry. */
   recordCompaction(compactionEntry: { id?: string; firstKeptEntryId?: string } | undefined): void {
     this.compactions++;
@@ -92,7 +146,12 @@ export class SoftCompactionController {
 
   /**
    * Build the custom proposal for session_before_compact. Returns undefined
-   * unless we triggered this compaction and a summary service is available.
+   * unless we triggered this compaction and (fast mode) always, or (smart
+   * mode) a summary service is available.
+   *
+   * Fast mode: proposal with the fixed stub and pi's own cut point, so the
+   * LLM summarizer call is skipped entirely. Smart mode: cache-aware model
+   * proposal with the session's system prompt and the warm prefix.
    */
   async propose(
     preparation: {
@@ -105,6 +164,10 @@ export class SoftCompactionController {
     summary: SummaryService | undefined,
   ): Promise<SoftCompactProposal | undefined> {
     if (!this.consumeTrigger()) return undefined;
+    if (this.opts.fast) return this.fastProposal(preparation);
+
+    // Smart path (PI_CACHE_SOFT_FAST=0): fail-open to pi's default
+    // summarization whenever no summary service is wired.
     if (!summary) return undefined;
 
     // Never summarize earlier than pi's own cut; never before our boundary.
@@ -131,6 +194,23 @@ export class SoftCompactionController {
       firstKeptEntryId: floor,
       tokensBefore: preparation.tokensBefore,
       usage,
+    };
+  }
+
+  /**
+   * Fast proposal: replace exactly pi's chosen uncached span with the fixed
+   * stub, keeping pi's cut point (the recent window) verbatim. No model call,
+   * no messagesToSummarize read-back; O(1).
+   */
+  private fastProposal(preparation: {
+    firstKeptEntryId: string;
+    tokensBefore: number;
+  }): SoftCompactProposal {
+    this.lastTurnsCompact = 0;
+    return {
+      summary: FAST_COMPACTION_STUB,
+      firstKeptEntryId: preparation.firstKeptEntryId,
+      tokensBefore: preparation.tokensBefore,
     };
   }
 
