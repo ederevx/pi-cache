@@ -17,6 +17,8 @@ re-verify before relying on them economically.
 | `public web sources` | Web sweep | GitHub cache-injection proxies; pi-better-messages-cache deprecation precedent; aider rolling breakpoint + keepalive source-confirmed; corrected citation URLs |
 | `raw/provider documentation.md` | pi implementation reference | ExtensionAPI shapes, Usage, pi-ai cache internals (file:line), compaction contract, gaps/workarounds |
 | `provider documentation` | Extension structure audit | House layout/style/OOP spec for pi-cache (index.ts wire-only, no module globals, env-var config idiom, appendEntry, dot-dirs) |
+| `the pi request serialization audit` | pi request-serialization audit | Wire bytes are already deterministic per (session, conversation, toolset); cwd + readdir-ordered skills are the only per-machine prefix churn; safe/risky before_provider_request transforms per API; cache_control pinned to last tool |
+| `provider prompt-caching documentation` | Semantic-preserving transforms | Determinism not canonicalism is the lever; template pinning; breakpoint layouts; TTL/retention knobs; 0→97.6% opencode precedent; illusions list |
 
 ## Condensed key facts
 
