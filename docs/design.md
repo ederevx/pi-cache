@@ -76,21 +76,22 @@ system/developer + first non-system message):
   writes for fewer 1h expiries; recommend based on measured gap-vs-write
   patterns.
 
-## Config surface (`~/pi-cache/cache-opt.json`, extension-owned; pi's
-settings.json has no extension namespace)
+## Config surface
 
-    {
-      "enabled": true,
-      "telemetryJsonl": "~/.pi/agent/cache-opt.jsonl",
-      "normalizeSystemPrompt": false,
-      "splitSystemPrompt": false,
-      "sortTools": false,
-      "dedupTools": false,
-      "stripVolatileToolFields": false,
-      "pinnedToolSet": [],
-      "compactAdvisory": true,
-      "minCacheMissNoticeTokens": 1024
-    }
+House-consistent, not a config JSON: tunables live in
+`src/constants.ts` and are overridable with `PI_CACHE_*` environment
+variables (mirroring the env-var idiom of pi extensions):
+
+- `PI_CACHE_TELEMETRY` (default true), `PI_CACHE_SORT_TOOLS`,
+  `PI_CACHE_DEDUP_TOOLS`, `PI_CACHE_ADVISORY` (default true)
+- `PI_CACHE_LEDGER` (default `~/.pi/agent/.pi-cache/ledger.jsonl` —
+  hidden dot-dir, matching the `a local hook directory/` precedent)
+
+Durable per-session state also goes through `pi.appendEntry`
+(`pi-cache-advisory`), the house-standard mechanism.
+
+No first-run template file is written; the ledger directory is created
+on demand as runtime data.
 
 ## Validation plan
 
