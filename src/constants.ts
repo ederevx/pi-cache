@@ -37,6 +37,10 @@ export interface PiCacheOptions {
   cooldownSeconds: number;
   cooldownTurns: number;
   minGapSeconds: number;
+  /** Soft per-turn compaction cadence (off | cold | always). */
+  softCompactMode: "off" | "cold" | "always";
+  /** Minimum uncached turns before the soft cadence acts (default: every turn). */
+  softCompactMinDeltaTurns: number;
 }
 
 const envBool = (name: string, fallback: boolean): boolean => {
@@ -63,5 +67,7 @@ export function loadOptions(): PiCacheOptions {
     cooldownSeconds: parseFloat(process.env["PI_CACHE_COOLDOWN_SECONDS"] ?? "600"),
     cooldownTurns: 5,
     minGapSeconds: parseFloat(process.env["PI_CACHE_MIN_GAP_SECONDS"] ?? "240"),
+    softCompactMode: (process.env["PI_CACHE_SOFT_COMPACT"] || "off") as "off" | "cold" | "always",
+    softCompactMinDeltaTurns: parseInt(process.env["PI_CACHE_SOFT_MIN_DELTA_TURNS"] ?? "1", 10),
   };
 }

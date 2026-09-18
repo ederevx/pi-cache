@@ -160,21 +160,35 @@ Consequences of the invariant:
    summary entry (recorded at `session_compact`).
 2. On cadence (`agent_settled`, every turn or when the delta exceeds a
    token budget), call `ctx.compact()`.
-3. Our `session_before_compact` handler returns a custom proposal:
+3. Our `session_before_compact` handler returns a custom proposal ONLY
+   when WE triggered it (reason "manual" + our pending flag — built-in
+   threshold/overflow compactions pass through untouched):
    `{ summary: incrementalSummary, firstKeptEntryId: <boundary>,
-   tokensBefore, usage }` — the summarized span is ONLY the delta after
-   the boundary, so cached segments are never in the span (they are
-   either before it or untouched). The summary text is an append to the
-   previous summary (`previousSummary + new-delta condensation`), so it
-   composes without rewriting history.
-4. The summarizer call itself follows the example pattern (fresh
-   sessionId, `cacheRetention:"none"`) with input = the small delta only
-   — full-price writes stay proportional to the delta, not the history.
+   tokensBefore, usage }` where boundary = the later of pi's own cut and
+   the tracked last-soft-compaction entry — the summarized span never
+   extends before what is already cached. Summary text appends to
+   `previousSummary`, composing without rewriting history.
+4. **Summarizer economics (audit-corrected):** the built-in summarizer is
+   hardcoded `cacheRetention:"none"` + fresh routing id and a different
+   system prompt, so IT inherits no warm-cache benefit — and
+   `before_provider_request` does not fire for it; `ctx.compact()` cannot
+   change it. The custom proposal is therefore the ONLY place to do
+   cache-aware summarization: WE call `ctx.modelRegistry.complete`
+   ourselves with the session's system prompt + a copied cached prefix
+   (byte-identical for automatic OpenAI/DeepSeek caching; explicit
+   cache_control markers for Anthropic) so the summarizer reads the warm
+   prefix at read price and only the small delta + instruction are fresh.
 
 **Economics.** Without it, every long-context turn re-sends (and re-reads)
-all history at read price; with it, history is compressed once into a
-small delta write and then read cheaply. Each turn saves
-`(summarizedTokens - summaryTokens) x readRate − summarizeCallCost`.
+all history at read price (or full price where reads are unbilled, e.g.
+DeepSeek-at-1.0x per OpenRouter's table); with it, history is compressed
+once into a small delta write and then re-cheap. Each turn saves roughly
+`(summarizedTokens - summaryTokens) x readRate x turnsUntilNextCut`
+minus the (cache-aware) summarize call. Web evidence: literal per-turn
+compaction loses to append-and-cache in small-context/warm-cache regimes
+and wins for very long histories, latency/context-rot budgets, and
+no-read-discount providers — which is exactly why this is opt-in with
+cadence modes.
 
 **Guardrails.** Same as auto-compact: fire at `agent_settled`, never
 during streaming/overflow, cooldowns, opt-in env
