@@ -98,9 +98,15 @@ idle-with-growth. Risk: an extra summarizer call per event (~few k tokens)
 and task-coherence churn if triggered mid-task — mitigated by threshold +
 cooldown + opt-in, validated by comparing `cacheWrite` before/after.
 
-Feasibility depends on the capability audit
-(`docs/implementation-reference.md`): `ctx.compact()` signature,
-in-progress guards, and `turn_end` idleness.
+Feasibility confirmed by the capability audit (`the pi 0.86 extension API`):
+`ctx.compact({customInstructions, onComplete, onError})` is fire-and-forget
+(`void`); compaction summaries are cache-transparent (`cacheRetention:"none"`,
+fresh routing session), so the trigger only times the *next* turn's re-write.
+The safe point is `agent_settled` (guaranteed idle — no pending retry,
+overflow recovery, or continuation), not `turn_end` (compact() aborts live
+work). Guards in code: `agent_settled` + `ctx.isIdle()` + cooldown
+(turns/seconds) + last-entry-compaction check via pi's own stale guards;
+opt-in `PI_CACHE_AUTO_COMPACT`.
 
 ### 6. Affinity guardrails (always on, observational)
 

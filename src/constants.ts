@@ -30,6 +30,13 @@ export interface PiCacheOptions {
   warmRatioThreshold: number;
   /** Context size (tokens) above which a warm-cache advisory is useful. */
   advisoryMinTokens: number;
+  /** Cache-aware automatic compaction (opt-in, off). */
+  autoCompact: boolean;
+  coldRatio: number;
+  minContextPercent: number;
+  cooldownSeconds: number;
+  cooldownTurns: number;
+  minGapSeconds: number;
 }
 
 const envBool = (name: string, fallback: boolean): boolean => {
@@ -50,5 +57,11 @@ export function loadOptions(): PiCacheOptions {
     ledgerPath: process.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT,
     warmRatioThreshold: 0.6,
     advisoryMinTokens: 50_000,
+    autoCompact: envBool("PI_CACHE_AUTO_COMPACT", false),
+    coldRatio: 0.05,
+    minContextPercent: 60,
+    cooldownSeconds: parseFloat(process.env["PI_CACHE_COOLDOWN_SECONDS"] ?? "600"),
+    cooldownTurns: 5,
+    minGapSeconds: parseFloat(process.env["PI_CACHE_MIN_GAP_SECONDS"] ?? "240"),
   };
 }
