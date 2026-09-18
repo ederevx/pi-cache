@@ -14,7 +14,7 @@
  *   agent_settled          — cadence point, two listeners: cache-aware
  *                            auto-compact (cold window; soft-off fallback)
  *                            and soft per-turn compaction (fast stub;
- *                            auto-resumes the agent once after)
+ *                            hidden-continues the turn once after)
  *   session_before_compact — two listeners: warm-cache advisory, then the
  *                            soft-compaction proposal (last-truthy wins)
  *   session_compact        — boundary tracking + compaction telemetry
@@ -147,17 +147,29 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         softcompact.markTriggered();
         ctx.compact?.({
           onComplete: () => {
-            pi.appendEntry("pi-cache-compaction", { ok: true });
-            if (opts.softAutoResume) {
-              softcompact.markResumed();
-              try {
-                // Always triggers a turn; expandPromptTemplates stays
-                // false so the literal continuation text reaches the model.
-                pi.sendUserMessage(SOFT_RESUME_PROMPT, {});
-              } catch {
-                // Never strand the next user message without compaction.
-                softcompact.clearResumed();
-              }
+            if (!opts.softAutoResume) return;
+            softcompact.markResumed();
+            try {
+              // Hidden continuation: a custom message with display:false
+              // is TUI-invisible (interactive-mode renders custom rows
+              // only when display is truthy) while the model still reads
+              // its content as a user-role message (convertToLlm maps
+              // role "custom" -> "user" regardless of display). So the
+              // post-compaction request re-sends the compacted payload
+              // plus this fixed content, with no visible "Continue."
+              // row. triggerTurn without deliverAs is the idle branch:
+              // it re-runs the agent immediately.
+              pi.sendMessage(
+                {
+                  customType: "pi-cache-soft-continue",
+                  content: SOFT_RESUME_PROMPT,
+                  display: false,
+                },
+                { triggerTurn: true },
+              );
+            } catch {
+              // Never strand the next user message without compaction.
+              softcompact.clearResumed();
             }
           },
           onError: () => {

@@ -22,9 +22,10 @@ auto-compaction, soft per-turn compaction in `always` mode, telemetry);
 disable any with its `PI_CACHE_*` env var, e.g. `PI_CACHE_SOFT_COMPACT=off`
 (see `src/constants.ts` and `/cache-settings`). Soft compaction is FAST by
 default: the uncached delta is replaced by a fixed byte-stable stub (no
-summarizer LLM call — see design), and the agent is auto-resumed once after
-each soft compaction (`PI_CACHE_SOFT_FAST=0` / `PI_CACHE_SOFT_AUTORESUME=0`
-to disable either).
+summarizer LLM call — see design), and the turn is continued once after
+each soft compaction via a hidden custom message (no visible "Continue."
+row; `PI_CACHE_SOFT_FAST=0` / `PI_CACHE_SOFT_AUTORESUME=0` to disable
+either).
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
 
