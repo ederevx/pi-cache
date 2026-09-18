@@ -159,10 +159,13 @@ Consequences of the invariant:
 1. Track the cache boundary = the entry id of the last soft-compaction
    entry (recorded at `session_compact`).
 2. On cadence (`agent_settled`, every turn or cold windows), call
-   `ctx.compact()`; on success the agent is **auto-resumed once** with a
-   fixed `Continue.` prompt (one user turn -> one compaction -> one
-   continuation run; the continuation's settle consumes a skip guard, so
-   the cadence cannot loop).
+   `ctx.compact()`; on success the turn is **continued once** via a hidden
+   custom message (`display: false`, content = the fixed `Continue.`
+   text): TUI-invisible, but the model still reads it as a user-role
+   message, so pi re-issues the compacted payload with no visible prompt
+   row (one user turn -> one compaction -> one continuation run; the
+   continuation's settle consumes a skip guard, so the cadence cannot
+   loop).
 3. Our `session_before_compact` handler returns a custom proposal ONLY
    when WE triggered it (built-in threshold/overflow compactions pass
    through untouched). **FAST path (default):** the proposal is
@@ -196,13 +199,20 @@ modes.
 during streaming/overflow, cooldowns, opt-in env `PI_CACHE_SOFT_COMPACT`
 (`off` | `cold` = only on cold windows | `always`), min uncached turns
 `PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1), keep-recent floor, the
-already-compacted-span invariant enforced via pi's cut, and the autoresume
-skip guard.
+already-compacted-span invariant enforced via pi's cut, and the continuation
+skip guard. One platform constraint: pi's TUI renders its own compaction
+indicator and summary row unconditionally (pi 0.85.1: `interactive-mode.js`
+`compaction_start`/`compaction_end` handlers, no silent option in
+`CompactionPreparation`/`SessionBeforeCompactResult`/`CompactionSettings`);
+only the cost line is gated, by the `showCacheMissNotices` user setting
+(default off). The extension therefore cannot hide those core rows; it only
+controls the continuation message (hidden via `display: false`).
 
-**Telemetry visibility.** `session_compact` -> appendEntry("pi-cache-compaction",
-{ok}); ledger rows already capture every request incl. the summarizer;
-`/cache-stats` gains a `compactions: N` counter. Context-window telemetry
-stays honest: `getContextUsage()` reflects the compacted context per pi's
+**Telemetry visibility.** `session_compact` records entry id, tokens and
+`fromExtension`; ledger rows already capture every request incl. the
+summarizer; `/cache-stats` gains a `compactions: N` counter. Context-window
+telemetry stays honest: `getContextUsage()` reflects the compacted context
+per pi's
 own gates.
 
 ## Non-goals
