@@ -17,7 +17,7 @@
  *                            by default, hidden-continues the turn after)
  *   session_before_compact — two listeners: warm-cache advisory, then the
  *                            soft-compaction proposal (last-truthy wins)
- *   session_compact        — boundary tracking + compaction telemetry
+ *   session_compact        — compaction telemetry
  *
  * Command:
  *   /cache-stats           — session cache-ratio, churn, affinity, compactions
@@ -48,26 +48,17 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     sortTools: opts.sortTools,
     dedupTools: opts.dedupTools,
   });
-  const advisor = new CompactionAdvisor({
-    enabled: opts.advisory,
-    warmRatioThreshold: opts.warmRatioThreshold,
-    advisoryMinTokens: opts.advisoryMinTokens,
-  });
+  const advisor = new CompactionAdvisor({ enabled: opts.advisory });
   const affinity = new AffinityObserver();
   const autocompact = new AutocompactController({
     enabled: opts.autoCompact,
-    coldRatio: opts.coldRatio,
-    minContextPercent: opts.minContextPercent,
     cooldownSeconds: opts.cooldownSeconds,
-    cooldownTurns: opts.cooldownTurns,
     minGapSeconds: opts.minGapSeconds,
   });
   const softcompact = new SoftCompactionController({
     mode: opts.softCompactMode,
-    fast: opts.softFast,
     minDeltaTurns: opts.softCompactMinDeltaTurns,
     onceMinTokens: opts.softOnceMinTokens,
-    keepRecentFloor: 2,
   });
   const settingsPresenter = new SettingsPresenter();
 
@@ -137,24 +128,17 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     // would first be swept into summarized history (right before they
     // become "history"); thereafter the hard latch in the controller
     // stops any further trigger, so the compacted prefix stays
-    // byte-stable and warm forever. "always"/"cold" keep the deprecated
-    // per-turn cadences for A/B.
+    // byte-stable and warm forever.
     try {
       if (opts.softCompactMode === "off") return;
       // The auto-resumed continuation run settles right after the
       // compaction; let it pass without re-compacting (one user turn -> one
       // compaction -> one continuation). Consumed here before any trigger.
       if (softcompact.consumeSkipNextSettle()) return;
-      // Warmth signal from the ledger's last turn (soft cadence mode "cold"
-      // only acts when the cache is already cold).
-      const last = ledger.lastUsage();
-      const warm = last !== undefined && last.cacheRead + last.input > 0
-        ? last.cacheRead / (last.cacheRead + last.input) > 0.05
-        : false;
       // Context size signal: the once-trigger fires right when older turns
       // are about to become summarized history.
       const contextTokens = ctx.getContextUsage?.()?.tokens;
-      if (softcompact.shouldTrigger(opts.softCompactMode, warm, contextTokens)) {
+      if (softcompact.shouldTrigger(opts.softCompactMode, contextTokens)) {
         softcompact.markTriggered();
         ctx.compact?.({
           onComplete: () => {
@@ -211,22 +195,16 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_before_compact", async (event, ctx) => {
+  pi.on("session_before_compact", async (event) => {
     // Listener 2 of 2: soft-compaction proposal. Override ONLY compactions
     // we triggered; the built-in threshold/overflow compactions pass through
     // untouched. Peek here; propose() is the single consumer of the flag.
     try {
       if (!softcompact.isTriggered()) return;
-      const proposal = await softcompact.propose(
-        {
-          firstKeptEntryId: event.preparation.firstKeptEntryId,
-          tokensBefore: event.preparation.tokensBefore,
-          messagesToSummarize: event.preparation.messagesToSummarize,
-          previousSummary: event.preparation.previousSummary,
-        },
-        typeof ctx.getSystemPrompt === "function" ? ctx.getSystemPrompt() : "",
-        undefined, // v1: no model-backed summarizer yet (docs/design.md)
-      );
+      const proposal = await softcompact.propose({
+        firstKeptEntryId: event.preparation.firstKeptEntryId,
+        tokensBefore: event.preparation.tokensBefore,
+      });
       if (!proposal) return; // fail-open: pi's default summarization runs
       return { compaction: proposal };
     } catch {
@@ -236,7 +214,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.on("session_compact", async (event) => {
     try {
-      softcompact.recordCompaction(event.compactionEntry ?? undefined);
+      softcompact.recordCompaction();
       if (event.compactionEntry) {
         pi.appendEntry("pi-cache-compaction", {
           keptEntryId: event.compactionEntry.firstKeptEntryId,

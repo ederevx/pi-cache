@@ -170,20 +170,15 @@ first moment older turns would be swept into summarized history, so the
 sweep lands *right before becoming history*. After the one compaction a
 hard latch (`onceCompacted`) disables pi-cache's trigger forever; any
 compaction recorded meanwhile (including pi's own manual/threshold
-compaction) latches too. The compacted span is never re-summarized and the
-boundary never moves, so the prefix `[stable head][stub][recent window]`
-stays byte-identical for the rest of the session and every later request
+compaction) latches too. The compacted span is never re-summarized, so the
+prefix `[stable head][stub][recent window]` stays byte-identical for the rest of the session and every later request
 hits the cache below its fresh tail. The only later writer is pi's built-in
 threshold/overflow compaction at ~window-reserve tokens — rare, and
-pi-cache does not interfere with it. `PI_CACHE_SOFT_COMPACT=always|cold`
-opt back into the deprecated per-turn cadences (moving cut) for A/B;
-`off` disables this feature.
+pi-cache does not interfere with it. `PI_CACHE_SOFT_COMPACT=off` disables
+this feature.
 
 **Mechanism (uses pi's extension-visible compaction machinery):**
-1. Track the cache boundary = the entry id of the last soft-compaction
-   entry (recorded at `session_compact`).
-2. On cadence (`agent_settled` — once per session in mode `once`; every
-   turn or cold windows in the deprecated modes), call
+1. On cadence (`agent_settled`, once per session in mode `once`), call
    `ctx.compact()`; on success the turn is **continued once** via a hidden
    custom message (`display: false`, content = the fixed `Continue.`
    text): TUI-invisible, but the model still reads it as a user-role
@@ -191,22 +186,17 @@ opt back into the deprecated per-turn cadences (moving cut) for A/B;
    row (one user turn -> one compaction -> one continuation run; the
    continuation's settle consumes a skip guard, so the cadence cannot
    loop).
-3. Our `session_before_compact` handler returns a custom proposal ONLY
+2. Our `session_before_compact` handler returns a custom proposal ONLY
    when WE triggered it (built-in threshold/overflow compactions pass
-   through untouched). **FAST path (default):** the proposal is
+   through untouched). The proposal is
    `{ summary: FAST_COMPACTION_STUB, firstKeptEntryId: <pi's own cut>,
    tokensBefore }` — a fixed, byte-stable stub in place of the uncached
    delta, with pi's recent window kept verbatim. No model call, no
    `messagesToSummarize` read-back; O(1). The stub is a byte constant
    (`FAST_COMPACTION_STUB`): changing it would shift every following byte
    and invalidate the cached prefix, so it is part of the cache contract.
-4. **Smart path (`PI_CACHE_SOFT_FAST=0`):** cache-aware LLM proposal — WE
-   call the summarizer with the session's system prompt; proposal uses
-   `firstKeptEntryId = later-of(boundary, pi cut)`, summary appends to
-   `previousSummary`, composing without rewriting history. The built-in
-   summarizer is hardcoded `cacheRetention:"none"` + fresh routing id and
-   a different system prompt, so it inherits no warm-cache benefit; the
-   custom proposal is the only cache-aware summarize point.
+   (The model-backed smart path behind `PI_CACHE_SOFT_FAST=0` was
+   removed — it was never wired and had no surviving configuration.)
 
 **Economics.** Without it, every long-context turn re-sends (and re-reads)
 all history at read price (or full price where reads are unbilled); with it,
@@ -217,16 +207,15 @@ with a summary" via a warm-prefix read; `/rewind` truncates back to a cached
 prefix; breakpoints themselves cost nothing — replace in place, never above
 a breakpoint, and keep dynamic content out of the cached block. Per-turn
 appending loses to this in warm-cache/read-discount regimes and wins for
-very long histories and no-read-discount providers — hence opt-in cadence
-modes.
+very long histories and no-read-discount providers — hence the single
+opt-in once-cadence.
 
 **Guardrails.** Same as auto-compact: fire at `agent_settled`, never
 during streaming/overflow, opt-in env `PI_CACHE_SOFT_COMPACT` (`off` |
-`cold` = cold-window only | `always` = per-turn | `once` = one-shot,
-default), min uncached turns `PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1),
-one-shot token gate `PI_CACHE_ONCE_MIN_TOKENS` (default 20000), keep-recent
-floor, the already-compacted-span invariant enforced via pi's cut, and the
-continuation skip guard. One platform constraint: pi's TUI renders its own compaction
+`once` = one-shot, default), min uncached turns
+`PI_CACHE_SOFT_MIN_DELTA_TURNS` (default 1), one-shot token gate
+`PI_CACHE_ONCE_MIN_TOKENS` (default 20000), the already-compacted-span
+invariant enforced via pi's cut, and the continuation skip guard. One platform constraint: pi's TUI renders its own compaction
 indicator and summary row unconditionally (pi 0.85.1: `interactive-mode.js`
 `compaction_start`/`compaction_end` handlers, no silent option in
 `CompactionPreparation`/`SessionBeforeCompactResult`/`CompactionSettings`);
