@@ -32,6 +32,7 @@ import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
 import { AutocompactController } from "./autocompact.ts";
 import { SoftCompactionController } from "./softcompact.ts";
+import { SettingsPresenter } from "./settings.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Normalize unknown handler payload shapes with a safe local view. */
@@ -63,6 +64,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     minDeltaTurns: opts.softCompactMinDeltaTurns,
     keepRecentFloor: 2,
   });
+  const settingsPresenter = new SettingsPresenter();
 
   pi.on("message_end", async (event, ctx) => {
     try {
@@ -105,7 +107,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     try {
       // agent_settled is the guaranteed-idle point (no retry/compaction/
       // continuation will run), so compact() cannot abort live work here.
-      if (opts.autoCompact) {
+      // When soft cadence is on it is the every-turn path; auto-compaction
+      // (cold-window) only runs as its fallback when soft is disabled.
+      if (opts.autoCompact && opts.softCompactMode === "off") {
         const usage = ctx.getContextUsage?.();
         const verdict = autocompact.decide(usage?.percent, ledger);
         if (verdict.shouldCompact) {
@@ -180,6 +184,17 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     } catch {
       /* telemetry only */
     }
+  });
+
+  pi.registerCommand("cache-settings", {
+    description: "List pi-cache options in the settings-UI layout",
+    handler: async (_args, ctx) => {
+      try {
+        settingsPresenter.present(opts, ctx.ui, ctx.mode);
+      } catch {
+        console.error("pi-cache: could not render settings");
+      }
+    },
   });
 
   pi.registerCommand("cache-stats", {

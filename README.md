@@ -16,11 +16,15 @@ Copy the `src/` files into the auto-discovered extensions directory:
     mkdir -p ~/.pi/agent/extensions/pi-cache
     cp src/*.ts ~/.pi/agent/extensions/pi-cache/
 
-Then run `/reload` in pi (or restart). No config file needed; tunables
-are `PI_CACHE_*` env vars (see `src/constants.ts`) — e.g.
-`PI_CACHE_SORT_TOOLS=1 PI_CACHE_DEDUP_TOOLS=1` enable the opt-in
-normalization. Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir
-and survives reloads. Check the ledger live with `/cache-stats`.
+Then run `/reload` in pi (or restart). No config file needed. All
+cache-favoring features are ON by default (tools sort/dedup,
+auto-compaction, soft per-turn compaction in `always` mode, telemetry);
+disable any with its `PI_CACHE_*` env var, e.g. `PI_CACHE_SOFT_COMPACT=off`
+(see `src/constants.ts` and `/cache-settings`). Compatibility note: with
+soft compaction in `always` mode, pi runs its default summarizer each
+turn in v1 — set `PI_CACHE_SOFT_COMPACT=cold` to restrict to cold windows.
+Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
+reloads. Live views: `/cache-stats` and `/cache-settings`.
 
 ## Design pillars
 
