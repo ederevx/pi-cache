@@ -5,10 +5,9 @@ token cost. Public research + implementation repo.
 
 ## Status
 
-Design and research phase; implementation reference and extension skeleton land
-next. Everything here is evidence-based: provider mechanics were verified
-against official docs (Sep 2026), and the agent-framework findings come from
-codebases, issues, and PRs (Claude Code, aider, opencode).
+Design, research, and first implementation complete (house-structured,   
+OOP, smoke-tested via jiti). Next: adoption into a pi runtime on a      
+non-runtime branch, then the paired A/B validation.
 
 ## Design pillars
 
@@ -30,11 +29,13 @@ codebases, issues, and PRs (Claude Code, aider, opencode).
 
 ## Repo layout
 
-- `src/` — extension source (landing next)
+- `src/` — extension source (house layout: `index.ts` wiring + per-
+  responsibility modules: `ledger.ts`, `normalizer.ts`, `compaction.ts`,
+  `sink.ts`, `constants.ts`)
 - `docs/research/` — evidence: distilled reports + raw worker/evidence dumps
-- `docs/design.md` — full design (in progress)
-- `docs/implementation-reference.md` — pi extension API reference (in progress)
-- `docs/web-solutions.md` — surveyed third-party solutions (in progress)
+- `docs/design.md` — full design
+- `docs/implementation-reference.md` — pi extension API reference
+- `docs/web-solutions.md` — surveyed third-party solutions
 
 ## Key verified facts (details in docs/research/)
 

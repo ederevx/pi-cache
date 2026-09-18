@@ -14,6 +14,9 @@ re-verify before relying on them economically.
 | `provider documentation` | Gateways / OpenRouter corrections | "middle-out transformers"/"byte-level caching" blog posts do not exist (verified against 124-post RSS feed); real post = "Prompt Caching + Sticky Routing"; sticky-routing identity hash; DeepSeek 1.0x read on OR table; LiteLLM/Portkey/Helicone/Cloudflare/one-api posture |
 | `provider documentation` | Agent frameworks | Claude Code binary-mined (skipCacheWrite, forkPointPinned, cacheScope, cacheBreakerPhrase, /costs metering bug #94224, #94197 compaction cost); aider (#5556 cache-key pollution, keepalive pings); opencode #14743 (0% -> 97.6% via S1/S2 split); Anthropic context editing (clear_at_least, server-side clearing) |
 | `provider documentation` | Direct providers (fetched docs) | Anthropic 4 breakpoints + top-level auto, min 512-4,096 by model, org/workspace cache keys, TPM exemption; OpenAI unified guide (explicit breakpoints, 4 writes, 50 lookups, 128-rounding, 15 rpm machine locality, TPM counting); Bedrock cachePoint 5m/1h, 4 checkpoints, usage fields |
+| `public web sources` | Web sweep | GitHub cache-injection proxies; pi-better-messages-cache deprecation precedent; aider rolling breakpoint + keepalive source-confirmed; corrected citation URLs |
+| `raw/provider documentation.md` | pi implementation reference | ExtensionAPI shapes, Usage, pi-ai cache internals (file:line), compaction contract, gaps/workarounds |
+| `provider documentation` | Extension structure audit | House layout/style/OOP spec for pi-cache (index.ts wire-only, no module globals, env-var config idiom, appendEntry, dot-dirs) |
 
 ## Condensed key facts
 
