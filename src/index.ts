@@ -10,6 +10,8 @@
  *   message_end            — record assistant usage in the ledger
  *   before_provider_headers— observe session-affinity header stability
  *   before_provider_request— opt-in tools sort/dedup + head-churn watch
+ *   turn_end               — turn bookkeeping for auto-compaction
+ *   agent_settled          — opt-in cache-aware auto-compaction trigger
  *   session_before_compact — observational warm-cache advisory
  *
  * Command:
@@ -26,6 +28,7 @@ import { FileRecordSink } from "./sink.ts";
 import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
+import { AutocompactController } from "./autocompact.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Normalize unknown handler payload shapes with a safe local view. */
@@ -44,6 +47,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     advisoryMinTokens: opts.advisoryMinTokens,
   });
   const affinity = new AffinityObserver();
+  const autocompact = new AutocompactController({
+    enabled: opts.autoCompact,
+    coldRatio: opts.coldRatio,
+    minContextPercent: opts.minContextPercent,
+    cooldownSeconds: opts.cooldownSeconds,
+    cooldownTurns: opts.cooldownTurns,
+    minGapSeconds: opts.minGapSeconds,
+  });
 
   pi.on("message_end", async (event, ctx) => {
     try {
@@ -70,6 +81,32 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       affinity.note(event.headers ?? {});
     } catch {
       /* observational only */
+    }
+  });
+
+  pi.on("turn_end", async (event) => {
+    try {
+      autocompact.noteTurn(event.turnIndex);
+    } catch {
+      /* bookkeeping only */
+    }
+  });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    try {
+      if (!opts.autoCompact) return;
+      // agent_settled is the guaranteed-idle point (no retry/compaction/
+      // continuation will run), so compact() cannot abort live work here.
+      const usage = ctx.getContextUsage?.();
+      const verdict = autocompact.decide(usage?.percent, ledger);
+      if (!verdict.shouldCompact) return;
+      ctx.compact?.({
+        onComplete: () => autocompact.markCompacted(),
+        onError: () =>
+          pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" }),
+      });
+    } catch {
+      /* automatic control must never break a turn */
     }
   });
 

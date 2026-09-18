@@ -9,6 +9,7 @@
  */
 
 import type { Usage } from "@earendil-works/pi-ai";
+import type { AutocompactSignal } from "./autocompact.ts";
 
 /** A single recorded request row in the ledger. */
 export interface UsageRow {
@@ -27,7 +28,7 @@ export interface RecordSink {
   append(row: UsageRow): void;
 }
 
-export class CacheLedger {
+export class CacheLedger implements AutocompactSignal {
   private rows: UsageRow[] = [];
   private seq = 0;
 
@@ -71,6 +72,18 @@ export class CacheLedger {
     const t = this.totals();
     const denom = t.input + t.cacheRead;
     return denom > 0 ? t.cacheRead / denom : 0;
+  }
+
+  /** Last completed turn's usage, for the auto-compaction trigger. */
+  lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined {
+    const last = this.rows[this.rows.length - 1];
+    return last ? { input: last.input, cacheRead: last.cacheRead, cacheWrite: last.cacheWrite } : undefined;
+  }
+
+  /** Milliseconds since the last recorded turn ended. */
+  msSinceLastTurn(): number {
+    const last = this.rows[this.rows.length - 1];
+    return last ? Date.now() - last.ts : Number.POSITIVE_INFINITY;
   }
 
   /** One-line summary for the /cache-stats command and status widget. */
