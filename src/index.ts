@@ -187,7 +187,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
             // If compact() failed before the hook ran, release the armed
             // trigger so no later (user) compaction gets a stale override.
             softcompact.clearTrigger();
-            pi.appendEntry("pi-cache-advisory", { message: "soft-compact failed" });
+            try { pi.appendEntry("pi-cache-advisory", { message: "soft-compact failed" }); } catch { /* never break a turn */ }
           },
         });
       }
