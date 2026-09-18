@@ -27,9 +27,7 @@ swept into summarized history). Each pass replaces the newest uncached
 delta with the SAME fixed byte-stable stub (no summarizer LLM call), so
 the `[stable head][stub]` prefix stays byte-identical across all
 compactions and cache-warm, while input stays bounded near 2x
-keepRecentTokens instead of growing into pi's cold threshold compaction;
-the turn is continued once after each pass via a hidden custom message
-(no visible "Continue." row; `PI_CACHE_SOFT_AUTORESUME=0` to disable).
+keepRecentTokens instead of growing into pi's cold threshold compaction.
 `PI_CACHE_SOFT_COMPACT=off` disables this feature.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.

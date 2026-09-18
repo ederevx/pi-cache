@@ -62,24 +62,10 @@ export const FAST_COMPACTION_STUB =
   "Earlier conversation turns were fast-compacted by pi-cache (cache-first " +
   "soft compaction). The working context is in the turns below.";
 
-/**
- * Auto-resume prompt for the hidden continuation after a soft compaction.
- * Informs the agent that the fast compaction fired and instructs it to
- * keep any pending work going; when nothing is pending it repeats its
- * last message so the continuation turn still emits an output. Kept
- * short and stable: this text reappears in the transcript every turn
- * and is itself swept into the stub on later compactions.
- */
-export const SOFT_RESUME_PROMPT =
-  "pi-cache: fast compaction triggered, earlier turns are now a stub. " +
-  "Continue any pending work; if none, just repeat your last message.";
-
 export class SoftCompactionController {
   private pendingTrigger = false;
   private lastTurnsCompact = 0;
   private compactions = 0;
-  /** Auto-resume guard: skip the next settle (the continuation run). */
-  private skipNextSettle = false;
 
   constructor(private readonly opts: SoftCompactOptions) {}
 
@@ -114,30 +100,6 @@ export class SoftCompactionController {
     this.pendingTrigger = false;
   }
 
-  /**
-   * Auto-resume bookkeeping. Called right before the continuation prompt is
-   * injected; the continuation run's own settle must not re-compact, which
-   * keeps the cadence at exactly one compaction per real user message.
-   */
-  markResumed(): void {
-    this.skipNextSettle = true;
-  }
-
-  /** Consume the auto-resume skip (called at the next agent_settled). */
-  consumeSkipNextSettle(): boolean {
-    const was = this.skipNextSettle;
-    this.skipNextSettle = false;
-    return was;
-  }
-
-  /**
-   * Auto-resume injection failed: release the skip guard so the next real
-   * user message still compacts normally.
-   */
-  clearResumed(): void {
-    this.skipNextSettle = false;
-  }
-
   /** After a successful compaction, record telemetry. */
   recordCompaction(): void {
     this.compactions++;
@@ -147,10 +109,10 @@ export class SoftCompactionController {
    * Cadence gate for the agent_settled trigger. Also feed bumpTurn() per
    * turn. Mode "auto": re-arm every time the live context has grown back
    * to the threshold since the last compaction (natural hysteresis: the
-   * compaction just dropped context below it, and the continuation run's
-   * settle is consumed by the skip guard, so the gate cannot loop within
-   * a turn). Each pass only replaces the newest uncached delta with the
-   * same byte-stable stub, so the cached head never moves.
+   * compaction just dropped context below it, and the min-delta-turns gate
+   * must elapse, so the gate cannot re-fire within a turn). Each pass only
+   * replaces the newest uncached delta with the same byte-stable stub, so
+   * the cached head never moves.
    */
   shouldTrigger(mode: SoftCompactMode, contextTokens: number | undefined): boolean {
     if (mode === "off") return false;
