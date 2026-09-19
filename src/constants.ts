@@ -4,8 +4,8 @@
  * House style: tunables are centralized here (constants.ts), overridable
  * through PI_CACHE_* environment variables, mirroring the env-var settings
  * idiom used by pi extensions. No config JSON is written; durable
- * telemetry lives in a hidden dot-directory under the agent dir, matching
- * the `a local hook directory/` precedent.
+ * telemetry lives in a hidden dot-directory under the agent dir,
+ * house-consistent hidden-dot-dir convention.
  */
 
 import { join } from "node:path";
