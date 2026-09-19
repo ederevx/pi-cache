@@ -10,4 +10,7 @@ node_modules/
 
 # Local runtime state
 *.log
-corenode_modules
+core
+
+# Unmanaged tests node_modules resolution symlink
+node_modules
