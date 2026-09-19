@@ -143,6 +143,12 @@ provider (simulated cache) gives offline harness tests.
 
 ## Soft compaction (cache-first, repeated FAST by default) — SPEC
 
+> **Removed 2026-09-18.** Soft fast compaction and its compact store were
+> dropped from the implementation and are no longer wired; the cold-window
+> auto-compaction path (`src/autocompact.ts`, on by default) is the single
+> compaction mode and pi's own summarizer compaction runs unchanged. This
+> section is retained as the historical design record only.
+
 **Definition.** Fast "soft" compaction whose ONLY purposes are better cache
 hits and fewer input tokens, re-armed whenever the live context grows back
 to the threshold. Invariant, by the user's requirement: **soft compaction

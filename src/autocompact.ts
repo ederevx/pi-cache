@@ -8,8 +8,11 @@
  * plus the next full prefix re-write) should land in a window that is
  * already cold, never mid-warm-cache.
  *
- * Trigger rule (opt-in): after a turn that came back with ~0 cacheRead
- * while context usage is above the configured percent threshold, call
+ * Trigger rule (default on; disable with PI_CACHE_AUTO_COMPACT=0): after
+ * a turn that came back with ~0 cacheRead while context usage is above
+ * the configured percent threshold — or when the prefix head is churning
+ * (tools/system not byte-stable) or the provider session-affinity header
+ * is rotating, both of which already invalidate the provider cache — call
  * ctx.compact(). A ~0 cacheRead turn means the provider prefix was lost
  * anyway (TTL expiry after a gap, provider move, churn), so compaction
  * piles no extra write cost on a warm window.
@@ -25,6 +28,10 @@ export interface AutocompactSignal {
   lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined;
   /** Milliseconds since the last completed turn (for TTL-gap detection). */
   msSinceLastTurn(): number;
+  /** Number of times the prefix head changed this session (normalizer.churn). */
+  headChurn(): number;
+  /** Whether the provider session-affinity header has rotated (affinity.rotated). */
+  affinityRotated(): boolean;
 }
 
 export interface AutocompactOptions {
@@ -70,7 +77,13 @@ export class AutocompactController {
     const cold = usage.cacheRead + usage.input > 0
       ? usage.cacheRead / (usage.cacheRead + usage.input) <= AutocompactController.COLD_RATIO
       : false;
-    if (!cold) return { shouldCompact: false, reason: "cache warm" };
+    // A churning prefix head (tools/system not byte-stable) or a rotating
+    // provider session-affinity header invalidates the provider cache
+    // regardless of TTL — the window is already cold, so the cost of
+    // compaction is not additive here. This is the natural trigger for
+    // pi-cache's own tool-sort/dedup churn signal and the affinity observer.
+    const churned = signals.headChurn() > 0 || signals.affinityRotated();
+    if (!cold && !churned) return { shouldCompact: false, reason: "cache warm" };
     if (
       typeof contextPercent !== "number" ||
       contextPercent < AutocompactController.MIN_CONTEXT_PERCENT
@@ -85,10 +98,13 @@ export class AutocompactController {
       (neverCompacted ||
         this.lastTurnIndex - this.lastCompactedTurn >= AutocompactController.COOLDOWN_TURNS);
     if (!cooldownOk) return { shouldCompact: false, reason: "cooldown" };
-    if (gapMs < this.opts.minGapSeconds * 1000) {
+    // Only a TTL-style cold gap needs a minimum elapsed time to confirm the
+    // provider prefix was truly lost; churn/rotation is already visible, so
+    // the gap requirement is waived for that path.
+    if (!churned && gapMs < this.opts.minGapSeconds * 1000) {
       return { shouldCompact: false, reason: "cold without a gap" };
     }
-    return { shouldCompact: true, reason: "cold window + context threshold" };
+    return { shouldCompact: true, reason: churned ? "churned prefix + context threshold" : "cold window + context threshold" };
   }
 
   /** Record a successful compaction to reset the cooldowns. */

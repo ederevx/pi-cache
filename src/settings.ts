@@ -31,11 +31,9 @@ export class SettingsPresenter {
       { id: "telemetry", title: "Telemetry", description: "Record per-request cache usage to the ledger", value: on(opts.telemetry) },
       { id: "sortTools", title: "Sort tools", description: "Deterministic tool order for byte-stable prefixes", value: on(opts.sortTools) },
       { id: "dedupTools", title: "Dedup tools", description: "Drop exact-duplicate tool schemas from the payload", value: on(opts.dedupTools) },
+      { id: "pinSession", title: "Session pin", description: "Inject a stable provider session id for stateless requests so sibling processes share the provider cache bucket", value: on(opts.pinSession) },
       { id: "advisory", title: "Compaction advisory", description: "Note warm-cache compactions that re-write the prefix", value: on(opts.advisory) },
       { id: "autoCompact", title: "Auto-compaction", description: "Compact in cold-window turns (cache already lost) at idle", value: on(opts.autoCompact) },
-      { id: "softCompact", title: "Soft compaction", description: "Cadence: auto (default) = fast stub compaction whenever live context crosses the threshold again (repeated, input stays bounded); off = disable (arms the cold-window auto-compact fallback)", value: opts.softCompactMode },
-      { id: "softMinTokens", title: "Min context", description: "Re-compact when live context reaches this since the last soft compaction (approx. pi keepRecentTokens); 0 = every settle", value: String(opts.softMinTokens) },
-      { id: "compactCapture", title: "Compact capture", description: "Persist fast-compacted entries to ~/tmp/pi-cache/compacts (LATEST) for the agent to inspect", value: on(opts.compactCapture) },
     ];
   }
 
