@@ -29,6 +29,11 @@ export class AffinityObserver {
     }
   }
 
+  /** Whether the session-affinity header rotated at least once. */
+  rotated(): boolean {
+    return this.changes > 0;
+  }
+
   /** One-line status for /cache-stats. */
   status(): string {
     if (this.seenRequests === 0) return "affinity n/a";

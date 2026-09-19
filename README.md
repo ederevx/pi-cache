@@ -5,9 +5,13 @@ token cost. Public research + implementation repo.
 
 ## Status
 
-Design, research, and first implementation complete (house-structured,   
-OOP, smoke-tested via jiti). Next: adoption into a pi runtime on a      
-non-runtime branch, then the paired A/B validation.
+Design, research, and implementation complete (house-structured, OOP,
+validated by the zero-dependency suite under `tests/`; see
+`tests/run.ts`). Soft fast compaction and its compact store were
+removed: cache-aware cold-window auto-compaction is now the single
+compaction path, on by default, with pi's own normal summarizer
+compaction left untouched. Installed in the pi runtime; paired A/B
+validation is the remaining step.
 
 ## Installation
 
@@ -17,24 +21,13 @@ Copy the `src/` files into the auto-discovered extensions directory:
     cp src/*.ts ~/.pi/agent/extensions/pi-cache/
 
 Then run `/reload` in pi (or restart). No config file needed. All
-cache-favoring features are ON by default (tools sort/dedup,
-auto-compaction, repeated fast compaction, telemetry); disable any with
-its `PI_CACHE_*` env var, e.g. `PI_CACHE_SOFT_COMPACT=off` (see
-`src/constants.ts` and `/cache-settings`). Compaction is FAST and
-re-arms whenever the live context grows back to `PI_CACHE_SOFT_MIN_TOKENS`
-(default ≈ pi's keepRecentTokens; right as older turns would first be
-swept into summarized history). Each pass replaces the newest uncached
-delta with the SAME fixed byte-stable stub (no summarizer LLM call), so
-the `[stable head][stub]` prefix stays byte-identical across all
-compactions and cache-warm, while input stays bounded near 2x
-keepRecentTokens instead of growing into pi's cold threshold compaction.
-`PI_CACHE_SOFT_COMPACT=off` disables this feature.
-Each soft fast compaction now also persists the compacted-out entries
-(including subagent and tool output) to a temporary store at the
-well-known path `~/tmp/pi-cache/compacts/LATEST`: a per-session ring of
-up to 3 JSONL artifacts, a global cap of 200, and a 7-day TTL, GC'd at
-compaction, session start, extension load, and shutdown. The agent or
-user can read LATEST to recover exactly what a compaction dropped.
+cache-favoring features are ON by default (tools sort/dedup, session
+pin, cold-window auto-compaction, advisories, telemetry); disable any
+with its `PI_CACHE_*` env var (see `src/constants.ts` and
+`/cache-settings`). Auto-compaction fires only in cold windows (the
+provider cache is already lost) or when the prefix head churns / the
+provider session affinity rotates — never mid-warm-cache — and pi's
+own normal summarizer compaction runs unchanged.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
 
@@ -50,29 +43,30 @@ reloads. Live views: `/cache-stats` and `/cache-settings`.
    0% -> 97.6% cross-repo hit fix.
 3. **Tool-schema hygiene** — deterministic tool ordering, dedup, and removal
    of volatile fields (cwd, absolute paths) from tool definitions.
-4. **Cache-aware compaction** — keep the cached head intact when trimming;
-   adjust effective `keepRecentTokens` and cut alignment via
-   `session_before_compact`.
+4. **Cache-aware compaction** — compact only when the provider cache is
+   already lost: a cold last turn (TTL expiry after a gap) or a
+   churning/rotating prefix head, at idle (`agent_settled`). Pi's own
+   normal summarizer compaction then runs unchanged; the advisory
+   observes warm-cache re-writes without altering them.
 5. **Affinity guardrails** — keep OpenRouter sticky routing warm: one
    `session_id` per thread, never per turn; detect prefix-identity churn.
-6. **Repeated fast compaction** — re-arms whenever live context grows
-   back to `PI_CACHE_SOFT_MIN_TOKENS` (default ≈ pi's keepRecentTokens,
-   the moment older turns would become summarized "history"). Each pass
-   replaces only the newest uncached delta with the same fixed byte-stable
-   stub, so the `[stable head][stub]` prefix stays byte-identical and
-   cache-warm forever while input stays bounded near 2x keepRecentTokens.
-   Providers cache on the serialized prefix (Anthropic cumulative
-   breakpoint hashes; DeepSeek exact prefix-units + common-prefix
-   persistence), so rewriting a compacted span would reset the cache —
-   the repeated cadence never does: it only ever drops spans that were
-   uncached anyway, and never runs the LLM summarizer that pi's own cold
-   threshold compaction would.
+6. **Cold-window auto-compaction** — the single compaction path, on by
+   default (`PI_CACHE_AUTO_COMPACT`). After a turn with ~0 cacheRead at
+   context above the threshold — or when the tool/system prefix head is
+   churning or the provider session-affinity header is rotating, both of
+   which already invalidate the provider cache — `ctx.compact()` fires
+   at idle ahead of pi's own cold threshold compaction. Cooldowns
+   (seconds + turns) gate repetition; `PI_CACHE_AUTO_COMPACT=off`
+   disables it entirely.
 
 ## Repo layout
 
 - `src/` — extension source (house layout: `index.ts` wiring + per-
   responsibility modules: `ledger.ts`, `normalizer.ts`, `compaction.ts`,
-  `sink.ts`, `constants.ts`)
+  `affinity.ts`, `session-pin.ts`, `autocompact.ts`, `sink.ts`,
+  `settings.ts`, `constants.ts`)
+- `tests/` — zero-dependency validation suite (`run.ts` + per-module
+  tests, including an end-to-end mock-pi wiring test)
 - `docs/research/` — evidence: distilled reports + raw worker/evidence dumps
 - `docs/design.md` — full design
 - `docs/implementation-reference.md` — pi extension API reference

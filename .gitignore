@@ -10,4 +10,4 @@ node_modules/
 
 # Local runtime state
 *.log
-core
+corenode_modules
