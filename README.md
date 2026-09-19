@@ -15,21 +15,27 @@ validation is the remaining step.
 
 ## Installation
 
-Copy the `src/` files into the auto-discovered extensions directory:
+    bash scripts/install.sh
 
-    mkdir -p ~/.pi/agent/extensions/pi-cache
-    cp src/*.ts ~/.pi/agent/extensions/pi-cache/
-
+Re-run to refresh owned copies in place (idempotent; the manifest at
+`~/.pi/agent/.pi-cache/manifest.json` records exactly what it owns).
 Then run `/reload` in pi (or restart). No config file needed. All
 cache-favoring features are ON by default (tools sort/dedup, session
 pin, cold-window auto-compaction, advisories, telemetry); disable any
 with its `PI_CACHE_*` env var (see `src/constants.ts` and
 `/cache-settings`). Auto-compaction fires only in cold windows (the
 provider cache is already lost) or when the prefix head churns / the
-provider session affinity rotates — never mid-warm-cache — and pi's
+provider session affinity rotates - never mid-warm-cache - and pi's
 own normal summarizer compaction runs unchanged.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
+
+## Uninstall
+
+    bash scripts/uninstall.sh
+
+Removes exactly the manifest-owned files; the telemetry ledger is
+left in place.
 
 ## Design pillars
 

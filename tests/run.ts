@@ -15,6 +15,9 @@
  */
 
 import { registry, cleanupScratch } from "./harness.ts";
+import { execFileSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Test modules self-register on import.
 import "./constants.test.ts";
@@ -29,3 +32,18 @@ import "./extension.test.ts";
 await registry.runAll();
 cleanupScratch();
 if (registry.failed > 0) process.exit(1);
+
+// Installer round-trip (install into a throwaway agent home, uninstall,
+// assert nothing is left behind). Runs last so a failure still surfaces
+// the full unit/e2e report above.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+try {
+  execFileSync("bash", ["tests/scripts_test.sh"], {
+    cwd: repoRoot,
+    stdio: "inherit",
+  });
+  console.log("scripts test: passed");
+} catch {
+  console.error("scripts test: FAILED");
+  process.exit(1);
+}
