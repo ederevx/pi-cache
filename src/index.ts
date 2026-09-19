@@ -1,7 +1,7 @@
 /**
  * pi-cache — pi extension entry point.
  *
- * Wire-only module, matching the house pattern (a local extension/index.ts):
+ * Wire-only module, matching the house-pattern entry-point shape:
  * construct collaborators, register hooks and the command, and nothing
  * else. All logic lives in single-responsibility classes owned here; no
  * module-global mutable state.

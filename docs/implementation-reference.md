@@ -246,16 +246,15 @@ and for compaction/branch-summary usage; pi-cache can complement or replace this
   - `~/.pi/agent/settings.json` (global) / `.pi/settings.json` (project): a key for your extension
     (`"piCache": {...}`) or reuse of `extensions: [paths]` for loading (settings.md:279-312);
   - state file under `CONFIG_DIR_NAME` (imported from pi-coding-agent; `ctx.cwd` + `join` for project scope,
-    `getAgentDir()` for the global `~/.pi/agent` dir — both exported, used by `~/.pi/agent/extensions/a local extension`),
+    `getAgentDir()` for the global `~/.pi/agent` dir — both exported),
     e.g. `settings.json` next to extension or `~/.pi/agent/pi-cache.json`;
   - `pi.appendEntry(customType, data)` for per-session persisted state (survives restart, not sent to LLM);
   - `pi.registerFlag("pi-cache-...", {type:"boolean"|"string"})` for CLI override;
   - env: `PI_CACHE_RETENTION` (checked by pi-ai itself; docs/extensions.md + settings.md). Check
     `ctx.isProjectTrusted()` before honoring project-local config.
-- Local style precedents: `~/.pi/agent/extensions/history.ts` (module doc comment header + pure logic),
-  `a local extension.ts` (mapped `before_agent_start`/`tool_call`/`session_before_compact`), and
-  `a local extension/enforcer.ts:403-415` (`pi.on("before_agent_start"…)`, `pi.on("tool_call"…)`, `pi.on("tool_result"…)`,
-  `pi.on("turn_end"…)`; commands via `pi.registerCommand("subagents",…)` at index.ts:319).
+- Local style precedent: `a local extension.ts` (mapped
+  `before_agent_start`/`tool_call`/`session_before_compact`), plus the pi
+  extension examples shipped in the pi package (`examples/extensions/`).
 
 ## 5. Compaction: session_before_compact
 

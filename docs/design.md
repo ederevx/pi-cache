@@ -125,7 +125,7 @@ variables (mirroring the env-var idiom of pi extensions):
 - `PI_CACHE_TELEMETRY` (default true), `PI_CACHE_SORT_TOOLS`,
   `PI_CACHE_DEDUP_TOOLS`, `PI_CACHE_ADVISORY` (default true)
 - `PI_CACHE_LEDGER` (default `~/.pi/agent/.pi-cache/ledger.jsonl` —
-  hidden dot-dir, matching the `a local hook directory/` precedent)
+  hidden dot-dir, house-consistent convention)
 
 Durable per-session state also goes through `pi.appendEntry`
 (`pi-cache-advisory`), the house-standard mechanism.
