@@ -25,7 +25,7 @@ pin, cold-window auto-compaction, advisories, telemetry); disable any
 with its `PI_CACHE_*` env var (see `src/constants.ts` and
 `/cache-settings`). Auto-compaction fires only in cold windows (the
 provider cache is already lost) or when the prefix head churns / the
-provider session affinity rotates - never mid-warm-cache - and pi's
+provider session affinity rotates — never mid-warm-cache — and pi's
 own normal summarizer compaction runs unchanged.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
@@ -71,8 +71,9 @@ left in place.
   responsibility modules: `ledger.ts`, `normalizer.ts`, `compaction.ts`,
   `affinity.ts`, `session-pin.ts`, `autocompact.ts`, `sink.ts`,
   `settings.ts`, `constants.ts`)
-- `tests/` — zero-dependency validation suite (`run.ts` + per-module
-  tests, including an end-to-end mock-pi wiring test)
+- `tests/` — zero-dependency validation + OOP/format lint suite
+  (`tests/run.ts`, `tests/oop_lint.py`, per-module tests, the
+  installer round-trip, and the mock-pi wiring test)
 - `docs/research/` — evidence: distilled reports + raw worker/evidence dumps
 - `docs/design.md` — full design
 - `docs/implementation-reference.md` — pi extension API reference
