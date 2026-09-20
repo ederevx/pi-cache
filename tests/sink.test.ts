@@ -6,7 +6,7 @@
 
 import { test, assertEq, scratchDir } from "./harness.ts";
 import { FileRecordSink } from "../src/sink.ts";
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { UsageRow } from "../src/ledger.ts";
 
@@ -52,4 +52,14 @@ test("sink: rewrite preserves the ledger mode", () => {
   const first = statSync(file).mode & 0o777;
   sink.rewrite([row(1), row(2)]);
   assertEq(statSync(file).mode & 0o777, first, "mode preserved");
+});
+
+test("sink: append never drops a row under lock contention", () => {
+  const dir = join(scratchDir(), "sink-lock");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, "ledger.jsonl");
+  writeFileSync(`${file}.lock`, "held", { mode: 0o600 });
+  const sink = new FileRecordSink(file);
+  sink.append(row(1));
+  assertEq(sink.load().length, 1, "row persisted despite lock contention");
 });
