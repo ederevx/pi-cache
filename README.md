@@ -24,6 +24,18 @@ remaining step.
 
 ## Installation
 
+As a pi package (see `docs/packages.md`):
+
+    pi install /absolute/path/to/pi-cache
+    pi -e /absolute/path/to/pi-cache      # try it for one run
+
+The repo declares its extension in `package.json` under the `pi` key
+(`pi.extensions` -> `./src/index.ts`) and lists the bundled pi core
+packages as `peerDependencies`. There is no build step and no third-party
+runtime dependency; pi loads `src/*.ts` in place.
+
+As a flat extension copy:
+
     bash scripts/install.sh
 
 Re-run to refresh owned copies in place (idempotent; the manifest at
