@@ -35,13 +35,51 @@ def fail(path: str, message: str) -> None:
 
 
 TS_TOP_LEVEL_BAD = [
-    (r"^\s*let\s+", "top-level let binding"),
-    (r"^\s*var\s+", "top-level var binding"),
+    (r"^\s*(export\s+)?let\s+", "top-level let binding"),
+    (r"^\s*(export\s+)?var\s+", "top-level var binding"),
 ]
 
 TS_CONST_CONTAINER = re.compile(
-    r"^\s*const\s+\w+\s*=\s*(new\s+(Map|Set)\b|\{|\[)"
+    r"^\s*(export\s+)?const\s+\w+(\s*:[^=]+)?\s*=\s*(new\s+(Map|Set)\b|\{|\[)"
 )
+
+
+def strip_line_noise(line: str, in_block: bool) -> tuple[str, bool]:
+    """Remove comments and string/template literals so brace counting and
+    declaration matching only see real code. Returns (cleaned, in_block)."""
+    out: list[str] = []
+    i = 0
+    n = len(line)
+    while i < n:
+        if in_block:
+            end = line.find("*/", i)
+            if end == -1:
+                return "".join(out), True
+            i = end + 2
+            in_block = False
+            continue
+        two = line[i:i + 2]
+        if two == "//":
+            break
+        if two == "/*":
+            in_block = True
+            i += 2
+            continue
+        ch = line[i]
+        if ch in ('"', "'", "`"):
+            i += 1
+            while i < n:
+                if line[i] == "\\":
+                    i += 2
+                    continue
+                if line[i] == ch:
+                    i += 1
+                    break
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out), in_block
 
 
 def check_typescript(path: str) -> None:
@@ -51,20 +89,21 @@ def check_typescript(path: str) -> None:
     with open(path, "r", encoding="utf-8") as f:
         lines = f.readlines()
     depth = 0
+    in_block = False
     for lineno, raw in enumerate(lines, 1):
-        line = raw.rstrip("\n")
-        stripped = line.strip()
-        if stripped.startswith("//") or stripped.startswith("/*") \
-                or stripped.startswith("*"):
-            continue
-        depth += line.count("{") - line.count("}")
-        if depth != 0 or not stripped:
-            continue
-        for pattern, label in TS_TOP_LEVEL_BAD:
-            if re.match(pattern, stripped):
-                fail(path, f"line {lineno}: {label}: {stripped[:60]}")
-        if TS_CONST_CONTAINER.match(stripped):
-            fail(path, f"line {lineno}: top-level mutable const container: {stripped[:60]}")
+        cleaned, in_block = strip_line_noise(raw.rstrip("\n"), in_block)
+        stripped = cleaned.strip()
+        # Check at the line's starting scope, before its own braces change
+        # the depth, so multi-line module-scope `const X = {` is caught.
+        if depth == 0 and stripped:
+            for pattern, label in TS_TOP_LEVEL_BAD:
+                if re.match(pattern, stripped):
+                    fail(path, f"line {lineno}: {label}: {stripped[:60]}")
+            if TS_CONST_CONTAINER.match(stripped):
+                fail(path, f"line {lineno}: top-level mutable const container: {stripped[:60]}")
+        depth += cleaned.count("{") - cleaned.count("}")
+        if depth < 0:
+            depth = 0
 
 
 REMOVED_SOFT_IDENTS = [
