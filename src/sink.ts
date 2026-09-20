@@ -29,9 +29,10 @@ export class FileRecordSink implements RecordSink {
   constructor(private readonly path: string) {}
 
   append(row: UsageRow): void {
-    this.withLock(() => {
-      appendFileSync(this.path, JSON.stringify(row) + "\n", "utf8");
-    });
+    // Prefer the lock so a concurrent rewrite cannot clobber the row; retry
+    // briefly under contention, then append unlocked rather than drop it.
+    if (this.appendLocked(row)) return;
+    this.appendUnlocked(row);
   }
 
   load(): UsageRow[] {
@@ -95,7 +96,7 @@ export class FileRecordSink implements RecordSink {
       /* an unwritable ledger dir disables persistence, never the session */
       return;
     }
-    const lock = this.acquireLock();
+    const lock = this.acquireLockWithRetry();
     if (lock === undefined) return;
     try {
       fn();
@@ -108,6 +109,54 @@ export class FileRecordSink implements RecordSink {
         /* a later sweep clears a leaked lock */
       }
     }
+  }
+
+  /** Append one row while holding the lock; false means contention. */
+  private appendLocked(row: UsageRow): boolean {
+    try {
+      this.ensureDir();
+    } catch {
+      return false;
+    }
+    const lock = this.acquireLockWithRetry();
+    if (lock === undefined) return false;
+    try {
+      appendFileSync(this.path, JSON.stringify(row) + "\n", "utf8");
+      return true;
+    } catch {
+      return false;
+    } finally {
+      try {
+        rmSync(lock, { force: true });
+      } catch {
+        /* a later sweep clears a leaked lock */
+      }
+    }
+  }
+
+  /** Last-resort append that never drops a row when the lock is unavailable. */
+  private appendUnlocked(row: UsageRow): void {
+    try {
+      this.ensureDir();
+      appendFileSync(this.path, JSON.stringify(row) + "\n", "utf8");
+    } catch {
+      /* telemetry must never break the session */
+    }
+  }
+
+  /** Retry the lock briefly so a short rewrite does not drop an append. */
+  private acquireLockWithRetry(): string | undefined {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const lock = this.acquireLock();
+      if (lock !== undefined) return lock;
+      FileRecordSink.sleep(1);
+    }
+    return undefined;
+  }
+
+  /** Synchronous short sleep; never used on the hot path. */
+  private static sleep(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   }
 
   /** Acquire the rewrite lock, clearing a stale one; undefined on contention. */
