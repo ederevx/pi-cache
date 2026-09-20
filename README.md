@@ -79,7 +79,8 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
    `session_id` per thread, never per turn; detect prefix-identity churn.
 6. **Compaction pressure + fast override** — the auto-compaction trigger
    is `CompactionPressure` (probability ramps from 50% to 85% usable
-   context, scaled by a graded cache coldness) and **fast compaction**
+   context, scaled by a graded cache coldness, which fast compaction
+   neutralizes) and **fast compaction**
    overrides pi's summarizer via `session_before_compact` for every reason
    and `session_before_tree` for a wanted branch summary (each with its own
    switch: `PI_CACHE_FAST_COMPACT` / `PI_CACHE_FAST_BRANCH_SUMMARY`).

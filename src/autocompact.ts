@@ -275,6 +275,10 @@ export class AutocompactController {
       contextWindow: view.contextWindow,
       reserveTokens: 0,
       coldness,
+      // Fast compaction is prefix-stable, so a warm cache must not deflate
+      // the pressure below the token ramp (which otherwise never fires for
+      // a fully cached context).
+      neutral: this.cacheNeutral,
       cacheRead: usage.cacheRead,
       input: usage.input,
     });

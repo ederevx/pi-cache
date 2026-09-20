@@ -36,6 +36,12 @@ export interface PressureSample {
   reserveTokens: number;
   /** Coldness in `[0,1]`: 0 = fully warm, 1 = fully cold (preferred). */
   coldness?: number;
+  /**
+   * Fast compaction is active: the override is prefix-stable, so the warm
+   * discount must not suppress the token ramp. `true` uses a neutral
+   * factor of 1 (no discount, no premium).
+   */
+  neutral?: boolean;
   /** Fallback warmth inputs when `coldness` is absent. */
   cacheRead?: number;
   input?: number;
@@ -78,7 +84,10 @@ export class CompactionPressure {
 
   /** Utilization and coldness factor -> raw pressure. */
   private pressureFor(input: PressureSample): number {
-    return this.utilization(input) * this.coldnessFactor(this.coldness(input));
+    const factor = input.neutral
+      ? 1
+      : this.coldnessFactor(this.coldness(input));
+    return this.utilization(input) * factor;
   }
 
   /** Context tokens as a fraction of the usable window. */
