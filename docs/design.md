@@ -31,6 +31,10 @@ opt-in and A/B-validated.
 - Settles open questions with data: DeepSeek read pricing on this machine
   (native 0.1x vs OpenRouter table 1.0x vs catalog 0.2x), real hit-rate on
   the default model, compaction write spikes, TTL expiry patterns.
+- The append-only ledger is bounded to `PI_CACHE_LEDGER_MAX_ROWS`
+  (default 20000) retained rows: it is trimmed and rewritten on load and
+  at `session_shutdown`, pending appends are flushed first, and stale
+  atomic-write temp files are swept at load.
 
 ### 2. Stable-prefix normalization (opt-in, highest ceiling)
 
@@ -167,7 +171,8 @@ variables (the env-var idiom common to pi extensions):
 - `PI_CACHE_TELEMETRY` (default true), `PI_CACHE_SORT_TOOLS`,
   `PI_CACHE_DEDUP_TOOLS`, `PI_CACHE_ADVISORY` (default true)
 - `PI_CACHE_LEDGER` (default `~/.pi/agent/.pi-cache/ledger.jsonl` —
-  hidden dot-dir, house-consistent convention)
+  hidden dot-dir, house-consistent convention), `PI_CACHE_LEDGER_MAX_ROWS`
+  (default 20000; <= 0 keeps every row)
 
 Durable per-session state also goes through `pi.appendEntry`
 (`pi-cache-advisory`), the house-standard mechanism.

@@ -29,6 +29,8 @@ export interface PiCacheOptions {
   advisory: boolean;
   /** Absolute path of the append-only usage ledger. */
   ledgerPath: string;
+  /** Retained ledger rows before the oldest are dropped (<= 0 = unbounded). */
+  ledgerMaxRows: number;
   /** Cache-aware automatic compaction (default on). */
   autoCompact: boolean;
   /** Minimum seconds between automatic compactions. */
@@ -65,6 +67,14 @@ const envFloat = (name: string, fallback: number): number => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+/** parseInt with a guarded default: unset/unparsable values fall back. */
+const envInt = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : fallback;
+};
+
 const LEDGER_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "ledger.jsonl");
 const SETTINGS_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "settings.json");
 
@@ -83,6 +93,7 @@ export function loadOptions(): PiCacheOptions {
     pinSession: envBool("PI_CACHE_PIN_SESSION", true),
     advisory: envBool("PI_CACHE_ADVISORY", true),
     ledgerPath: process.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT,
+    ledgerMaxRows: envInt("PI_CACHE_LEDGER_MAX_ROWS", 20000),
     // Cache-favoring features are ON by default; set the env var to
     // 0/off/false to disable.
     autoCompact: envBool("PI_CACHE_AUTO_COMPACT", true),

@@ -44,6 +44,7 @@ const CLEAN = {
   PI_CACHE_PIN_SESSION: undefined,
   PI_CACHE_ADVISORY: undefined,
   PI_CACHE_AUTO_COMPACT: undefined,
+  PI_CACHE_LEDGER_MAX_ROWS: undefined,
   PI_CACHE_FAST_COMPACT: undefined,
   PI_CACHE_FAST_BRANCH_SUMMARY: undefined,
   PI_CACHE_PRESSURE_START: undefined,
@@ -74,6 +75,7 @@ test("constants: default options", () => {
     assert(opts.cacheTtlSeconds > 0, "cache TTL fallback default");
     // Default ledger lives under the agent dir dot-dir.
     assert(opts.ledgerPath.endsWith(".pi-cache/ledger.jsonl"), "default ledger path");
+    assertEq(opts.ledgerMaxRows, 20000, "default retained ledger window");
     // Pressure defaults form an ordered ramp.
     assert(opts.pressureStart > 0 && opts.pressureStart < opts.pressureFull, "pressure ramp order");
     assertEq(opts.pressureFull, 0.85);

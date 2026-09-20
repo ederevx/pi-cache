@@ -31,6 +31,9 @@ sources=("$repo_root"/src/*.ts)
 
 mkdir -p "$dest_dir" "$state_dir"
 
+# Drop stale atomic-write temp files from an interrupted prior install.
+find "$dest_dir" "$state_dir" -maxdepth 1 -name '*.tmp*' -type f -exec rm -f {} + 2>/dev/null || true
+
 install_to() {
   # Atomic replacement, per shared convention: never truncate a file
   # that running software may read or execute — land the complete new
