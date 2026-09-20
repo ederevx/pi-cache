@@ -80,13 +80,15 @@ test("constants: default options", () => {
     assert(opts.cooldownSeconds > 0, "cooldownSeconds default");
     assert(opts.pressureColdFloor > 0 && opts.pressureColdFloor < 1, "coldness floor default");
     assert(opts.cacheTtlSeconds > 0, "cache TTL fallback default");
-    // Default ledger lives under the agent dir dot-dir.
-    assert(opts.ledgerPath.endsWith(".pi-cache/ledger.jsonl"), "default ledger path");
+    // Default ledger lives under the agent dir dot-dir. The suffix is
+    // compared against a platform-joined path so the assertion holds on
+    // Windows (backslash separators) and POSIX alike.
+    assert(opts.ledgerPath.endsWith(join(".pi-cache", "ledger.jsonl")), "default ledger path");
     assertEq(opts.ledgerMaxRows, 20000, "default retained ledger window");
     assertEq(opts.backupKeep, 3, "default backup ring");
     assertEq(opts.backupTtlDays, 7, "default backup TTL");
     assertEq(opts.backupMaxMb, 32, "default backup size cap");
-    assert(opts.backupDir.endsWith(".pi-cache/backups"), "default backup dir");
+    assert(opts.backupDir.endsWith(join(".pi-cache", "backups")), "default backup dir");
     // Pressure defaults form an ordered ramp.
     assert(opts.pressureStart > 0 && opts.pressureStart < opts.pressureFull, "pressure ramp order");
     assertEq(opts.pressureFull, 0.85);
