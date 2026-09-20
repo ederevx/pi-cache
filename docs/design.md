@@ -121,6 +121,30 @@ work). Guards in code: `agent_settled` + `ctx.isIdle()` + cooldown
 (turns/seconds) + last-entry-compaction check via pi's own stale guards;
 opt-in `PI_CACHE_AUTO_COMPACT`.
 
+**Coldness as a graded pressure input (evaluated 2026-09-20).** Feasible
+but not a drop-in replacement for the safety gate. The observed cache
+share already enters `CompactionPressure` as `cacheFactor`, while
+`decide()` still applies a binary cold gate and a min-gap check whose
+`msSinceLastTurn` is ~0 at `agent_settled` (so it is effectively bypassed
+when fast compaction is on). A graded model would:
+
+1. Collapse churn/rotation to coldness 1; derive observed coldness from
+   the last request's cache share (guarding write-only and below-minimum
+   all-zero responses); and blend a time/TTL prior from
+   `ctx.model.promptCache` or pi's `cache_warming_decision`
+   (`continuationProbability`, `warmCost`, `missCost`).
+2. Feed `coldness` into the pressure cache factor instead of a boolean, and
+   delete the min-gap gate.
+3. Keep a hard zero floor while the last request was a strong hit and no
+   churn/TTL pressure exists: folding a safety invariant into a probability
+   would occasionally invalidate a hot, actively-warmed cache.
+
+Caveats: usage alone cannot separate TTL expiry from prefix churn; TTL is
+sliding and published as a range (DeepSeek has none); pi-cache compaction
+cancels pi's warming, so when pi decides "warm" (`expectedSavings` >=
+$0.05) the cache is valuable and compaction pressure should be suppressed.
+See `docs/research/internet-prompt-caching-2026-09-18.md#cache-coldness-2026-09-20`.
+
 ### 6. Affinity guardrails (always on, observational)
 
 - Detect per-turn `session_id` / prefix-identity churn and report it

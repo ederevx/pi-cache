@@ -88,3 +88,59 @@ Sources consulted:
    repeated-stub head; Anthropic's 20-block walk-back finds prior writes
    up to the stub; OpenAI requires full prefix match (one re-write of the
    kept window after each compaction, then warm again).
+
+## Cache coldness (2026-09-20)
+
+Fresh sweep by three research workers; each claim carries its fetched URL.
+
+### Provider lifetimes (all refresh-on-reuse unless noted)
+
+- Anthropic: 5 min default, 1 h optional; lifetime starts at request start
+  and "is refreshed each time the cached content is used". Reads 0.1x,
+  writes 1.25x/2x; no manual clear; a 20-block look-back means a changed
+  breakpoint block finds nothing behind it.
+  https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+- OpenAI: implicit by default; GPT-5.6+ "remains eligible for reuse for 30
+  minutes after its most recent write or reuse"; older `in_memory` ~5-10
+  min of inactivity (up to 1 h). Per-machine caches plus "overflow routing"
+  above ~15 rpm can cold a prefix early.
+  https://platform.openai.com/docs/guides/prompt-caching
+- Gemini: implicit on by default (min 2,048-4,096); explicit TTL defaults
+  to 1 h and is settable, with storage billed. OpenRouter documents its own
+  Gemini layer as a fixed 5 min (conflict).
+  https://ai.google.dev/gemini-api/docs/generate-content/caching
+- DeepSeek: exact prefix units, no TTL - "automatically cleared, usually
+  within a few hours to a few days", best-effort.
+  https://api-docs.deepseek.com/guides/kv_cache
+- OpenRouter: sticky routing keyed on the first system + first non-system
+  message (or `session_id`); "Sticky sessions expire after 10 minutes of
+  inactivity. Each successful request resets the timer."
+  https://openrouter.ai/docs/features/prompt-caching
+
+### Client observability
+
+- Hits/writes: OpenAI `prompt_tokens_details.cached_tokens` /
+  `cache_write_tokens`; Anthropic `cache_read_input_tokens` /
+  `cache_creation_input_tokens`; DeepSeek `prompt_cache_hit_tokens`;
+  OpenRouter normalizes these and adds `cache_discount`.
+- A write is not proof of cold (writes happen at breakpoints; partial hits
+  write a new extension); below-minimum prompts return all-zero cache
+  fields with no error. Anthropic cache diagnostics (beta) is the only
+  documented TTL-expiry vs prefix-change discriminator.
+  https://docs.anthropic.com/en/docs/build-with-claude/cache-diagnostics
+- Because TTL is sliding, `now - last_request` only lower-bounds expiry;
+  track the last write/reuse. No provider or tool publishes a graded
+  coldness score; per-request signals are effectively binary.
+
+### pi 0.86 model (reusable)
+
+- `model.promptCache` declares per-tier lifetimes in seconds; the catalog
+  fills Anthropic 300/3600 and leaves other providers unset.
+  docs/models.md#prompt-cache-lifetimes
+- Warming refreshes at 90% of TTL minus 10 s; `continuationProbability` is
+  0.15 idle / 1.0 while active; `expectedSavings = p*missCost - warmCost`;
+  pi warms at >= $0.05 (cache-warmer.js:4-19,267-286).
+- The `cache_warming_decision` event exposes `warmCost`/`missCost`/
+  `continuationProbability`/`action` and is extension-overridable; the
+  extension ctx exposes `model`/`isIdle()`/`getContextUsage()` but not the
+  TTL or `nextWarmAt`.
