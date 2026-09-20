@@ -35,7 +35,8 @@ with the `/cache-settings` switch (which persists to pi-cache's owned
 the cache-window gate is relaxed because the override is prefix-stable,
 and with it off compaction stays inside cold/churned windows.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
-reloads. Live views: `/cache-stats` and `/cache-settings`.
+reloads. Live views: `/cache-stats` (global and session scopes, with live
+compaction pressure) and `/cache-settings`.
 
 ## Uninstall
 

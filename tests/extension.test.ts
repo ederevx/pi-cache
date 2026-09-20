@@ -184,11 +184,17 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     assertEq(fast!.compaction!.summary, FAST_SUMMARY_STUB);
     assertEq(fast!.compaction!.firstKeptEntryId, "E9");
 
-    // 5. /cache-stats reflects ledger + churn + affinity + compactions.
+    // 5. /cache-stats reflects global + session ledger, live pressure,
+    // churn, affinity, and compaction counts.
     let notified = "";
-    const statsCtx = { ui: { notify: (text: string) => { notified = text; } } };
+    const statsCtx = {
+      getContextUsage: () => ({ tokens: 60_000, contextWindow: 100_000, percent: 60 }),
+      ui: { notify: (text: string) => { notified = text; } },
+    };
     await pi.commands.get("cache-stats")!.handler([], statsCtx as never);
-    assert(notified.includes("pi-cache: 1 req"), "stats counts requests: " + notified);
+    assert(notified.includes("pi-cache global: 1 req"), "global stats: " + notified);
+    assert(notified.includes("pi-cache session: 1 req"), "session stats: " + notified);
+    assert(notified.includes("pressure "), "session pressure: " + notified);
     assert(notified.includes("head churn 1"), "stats reports churn: " + notified);
     assert(notified.includes("compactions 1"), "stats reports compact count: " + notified);
 
