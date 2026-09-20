@@ -154,9 +154,7 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     await pi.emit("agent_settled", {}, ctx);
     assertEq(compactCalls.length, 1, "cold+churned window compacts");
     const call = compactCalls[0];
-    assert(typeof call.onComplete === "function", "onComplete callback bound");
     assert(typeof call.onError === "function", "onError callback bound");
-    (call.onComplete as () => void)();
 
     // 4. Compaction telemetry: pi's normal compaction completes.
     await pi.emit(

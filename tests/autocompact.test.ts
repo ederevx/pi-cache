@@ -1,15 +1,15 @@
 /**
  * pi-cache — auto-compaction controller tests.
- * decide() must compact only in a cold window (or churned/rotated
- * prefix) with context above the threshold and cooldowns elapsed; the
- * TTL-gap requirement must be waived for the churn path.
+ * decide() must compact only when cache coldness clears the floor (or the
+ * prefix churned/rotated) and cooldowns elapsed; the TTL idle ramp raises
+ * coldness, and the pressure model owns the probabilistic context gate.
  */
 
 import { test, assert, assertEq } from "./harness.ts";
 import { AutocompactController } from "../src/autocompact.ts";
 import { CompactionPressure } from "../src/pressure.ts";
 
-const opts = { enabled: true, cooldownSeconds: 0, minGapSeconds: 240 };
+const opts = { enabled: true, cooldownSeconds: 0 };
 
 function signals(overrides: Partial<ReturnType<typeof baseSignals>> = {}) {
   return { ...baseSignals(), ...overrides };
@@ -42,6 +42,7 @@ test("autocompact: warm cache blocks", () => {
   const verdict = c.decide(90, signals({ lastUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }) }));
   assertEq(verdict.shouldCompact, false);
   assertEq(verdict.reason, "cache warm");
+  assertEq(verdict.coldness, 0, "a majority-hit request is coldness 0");
 });
 
 test("autocompact: cold but context below threshold blocks", () => {
@@ -50,33 +51,44 @@ test("autocompact: cold but context below threshold blocks", () => {
   const verdict = c.decide(50, signals());
   assertEq(verdict.shouldCompact, false);
   assertEq(verdict.reason, "context below threshold");
+  assertEq(verdict.coldness, 1, "a ~0% hit request is coldness 1");
 });
 
-test("autocompact: cold + high context + elapsed gap compacts", () => {
+test("autocompact: cold + high context compacts", () => {
   const c = new AutocompactController(opts);
   c.noteTurn(0);
-  const verdict = c.decide(85, signals({ msSinceLastTurn: () => 600_000 }));
+  const verdict = c.decide(85, signals());
   assertEq(verdict.shouldCompact, true);
   assertEq(verdict.reason, "cold window + context threshold");
 });
 
-test("autocompact: cold without an elapsed gap blocks", () => {
+test("autocompact: the TTL idle ramp raises coldness", () => {
+  const warm = () => ({ input: 100, cacheRead: 900, cacheWrite: 0 });
   const c = new AutocompactController(opts);
   c.noteTurn(0);
-  const verdict = c.decide(85, signals({ msSinceLastTurn: () => 30_000 }));
-  assertEq(verdict.shouldCompact, false);
-  assertEq(verdict.reason, "cold without a gap");
+  // 10% of a 300 s TTL is below the 0.2 floor: still warm.
+  const early = c.decide(
+    85,
+    signals({ lastUsage: warm, msSinceLastTurn: () => 30_000, cacheTtlMs: () => 300_000 }),
+  );
+  assertEq(early.shouldCompact, false, "warm before the ramp clears the floor");
+  assert(early.coldness !== undefined && early.coldness < 0.2, "coldness below floor");
+  // 40% of the TTL clears the floor and the fixed percent threshold.
+  const later = c.decide(
+    85,
+    signals({ lastUsage: warm, msSinceLastTurn: () => 120_000, cacheTtlMs: () => 300_000 }),
+  );
+  assertEq(later.shouldCompact, true, "time makes a warm cache compactable");
+  assert(later.coldness !== undefined && later.coldness >= 0.2, "coldness cleared the floor");
 });
 
-test("autocompact: churned prefix waives the gap requirement", () => {
+test("autocompact: churned prefix is cold", () => {
   const c = new AutocompactController(opts);
   c.noteTurn(0);
-  const verdict = c.decide(
-    85,
-    signals({ msSinceLastTurn: () => 30_000, headChurn: () => 2 }),
-  );
+  const verdict = c.decide(85, signals({ headChurn: () => 2 }));
   assertEq(verdict.shouldCompact, true);
   assertEq(verdict.reason, "churned prefix + context threshold");
+  assertEq(verdict.coldness, 1);
 });
 
 test("autocompact: rotation also triggers the churn path", () => {

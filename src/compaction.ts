@@ -3,8 +3,8 @@
  *
  * One responsibility: decide whether a pending compaction is worth a
  * cache-related advisory. Purely observational — it never cancels or
- * alters compaction (an overflow recovery must never be wedged; house
- * rule from manual-only cancel is the established pattern). Decisions
+ * alters compaction (an overflow recovery must never be wedged; manual-only
+ * cancel is the established pattern). Decisions
  * are computed from the ledger's session totals plus the preparation
  * sizes passed in by the hook.
  */

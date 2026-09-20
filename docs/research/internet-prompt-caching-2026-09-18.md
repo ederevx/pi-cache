@@ -1,9 +1,8 @@
 # Internet research: provider prefix-cache semantics (2026-09-18)
 
-Fetched with curl by the researcher and extracted to
-plain text. Quotes are verbatim from the fetched pages; the raw fetches were
-scratch under `~/tmp/pi-cache-research/` (garbage-collected; the quotes
-below are the durable record).
+Fetched with curl and extracted to plain text. Quotes are verbatim from the
+fetched pages; the fetches were scratch under `~/tmp/` (garbage-collected;
+the quotes below are the durable record).
 
 Sources consulted:
 - https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching

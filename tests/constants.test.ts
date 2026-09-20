@@ -50,6 +50,8 @@ const CLEAN = {
   PI_CACHE_PRESSURE_GAMMA: undefined,
   PI_CACHE_PRESSURE_CACHE_DISCOUNT: undefined,
   PI_CACHE_PRESSURE_COLD_PREMIUM: undefined,
+  PI_CACHE_PRESSURE_COLD_FLOOR: undefined,
+  PI_CACHE_TTL_SECONDS: undefined,
 };
 
 test("constants: default options", () => {
@@ -65,7 +67,8 @@ test("constants: default options", () => {
     // Fast cache-aware compaction is on by default.
     assertEq(opts.fastCompact, true);
     assert(opts.cooldownSeconds > 0, "cooldownSeconds default");
-    assert(opts.minGapSeconds > 0, "minGapSeconds default");
+    assert(opts.pressureColdFloor > 0 && opts.pressureColdFloor < 1, "coldness floor default");
+    assert(opts.cacheTtlSeconds > 0, "cache TTL fallback default");
     // Default ledger lives under the agent dir dot-dir.
     assert(opts.ledgerPath.endsWith(".pi-cache/ledger.jsonl"), "default ledger path");
     // Pressure defaults form an ordered ramp.
@@ -132,14 +135,14 @@ test("constants: numeric parsing falls back on garbage", () => {
   withEnv(
     {
       PI_CACHE_COOLDOWN_SECONDS: "12.5",
-      PI_CACHE_MIN_GAP_SECONDS: "abc",
+      PI_CACHE_TTL_SECONDS: "abc",
       PI_CACHE_PRESSURE_FULL: "nope",
       PI_CACHE_SETTINGS: settingsPath("numeric"),
     },
     () => {
       const opts = loadOptions();
       assertEq(opts.cooldownSeconds, 12.5);
-      assert(opts.minGapSeconds === 240, "minGap fallback");
+      assertEq(opts.cacheTtlSeconds, 300, "TTL fallback");
       assertEq(opts.pressureFull, 0.85, "pressure fallback");
     },
   );

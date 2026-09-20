@@ -9,8 +9,9 @@ Design, research, and implementation complete (house-structured, OOP,
 validated by the zero-dependency suite under `tests/`; see
 `tests/run.ts`). Cache-aware compaction has two layers, both on by
 default. (1) The auto-compaction trigger is a probabilistic *compaction
-pressure* whose probability rises with context tokens, discounted for a
-warm cache and premium-loaded when cold. (2) When **fast compaction** is
+pressure* whose probability rises with context tokens and with a graded
+cache *coldness* (observed hit share + TTL idle ramp), with a warm-cache
+floor and fast compaction relaxing it. (2) When **fast compaction** is
 on, pi-cache answers `session_before_compact` for *every* compaction
 reason (`manual`/`threshold`/`overflow`) with a byte-stable cache-aware
 override that replaces pi's LLM summarizer entirely. Turn fast
@@ -68,9 +69,11 @@ left in place.
    `session_id` per thread, never per turn; detect prefix-identity churn.
 6. **Compaction pressure + fast override** — the auto-compaction trigger
    is `CompactionPressure` (probability ramps from 50% to 85% usable
-   context, cache-discounted and cold-premium-loaded), and **fast
-   compaction** overrides pi's summarizer via `session_before_compact`
-   for every reason. Cooldowns (seconds + turns) gate repetition;
+   context, scaled by a graded cache coldness) and **fast compaction**
+   overrides pi's summarizer via `session_before_compact` for every
+   reason. `AutocompactController` also accounts for every completed
+   compaction (its own trigger, pi's threshold/overflow, the override),
+   and cooldowns (seconds + turns) gate repetition;
    `PI_CACHE_FAST_COMPACT=off` (or the `/cache-settings` switch) returns
    to pi's normal summarizer, and `PI_CACHE_AUTO_COMPACT=off` disables
    the trigger entirely.
@@ -85,12 +88,12 @@ left in place.
 - `tests/` — zero-dependency validation + OOP/format lint suite
   (`tests/run.ts`, `tests/oop_lint.py`, per-module tests, the
   installer round-trip, and the mock-pi wiring test)
-- `docs/research/` — evidence: distilled reports + raw worker/evidence dumps
+- `docs/research/` — distilled provider/extension evidence and citations
 - `docs/design.md` — full design
 - `docs/implementation-reference.md` — pi extension API reference
 - `docs/web-solutions.md` — surveyed third-party solutions
 
-## Key verified facts (details in docs/research/)
+## Key verified facts (details and citations in docs/research/)
 
 - Anthropic: explicit `cache_control`, 4 breakpoints, 5m/1h TTL,
   writes 1.25x/2x, **reads 0.1x**, hits exempt from rate limits.

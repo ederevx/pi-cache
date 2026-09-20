@@ -3,7 +3,7 @@
  *
  * House style: tunables are centralized here (constants.ts), overridable
  * through PI_CACHE_* environment variables, mirroring the env-var settings
- * idiom used by pi extensions. Durable telemetry and pi-cache's
+ * idiom common to pi extensions. Durable telemetry and pi-cache's
  * own user settings live in a hidden dot-directory under the agent dir
  * (see user-settings.ts), house-consistent hidden-dot-dir convention.
  */
@@ -29,12 +29,14 @@ export interface PiCacheOptions {
   advisory: boolean;
   /** Absolute path of the append-only usage ledger. */
   ledgerPath: string;
-  /** Cache-aware automatic compaction in cold windows (default on). */
+  /** Cache-aware automatic compaction (default on). */
   autoCompact: boolean;
   /** Minimum seconds between automatic compactions. */
   cooldownSeconds: number;
-  /** Minimum idle gap (s) that indicates a provider TTL expired. */
-  minGapSeconds: number;
+  /** Coldness at/below which a non-churned cache is warm (0..1). */
+  pressureColdFloor: number;
+  /** Fallback provider cache lifetime (s) when the model declares none. */
+  cacheTtlSeconds: number;
   /** Fast cache-aware compaction override (default on; /cache-settings switch). */
   fastCompact: boolean;
   /** Absolute path of pi-cache's owned user-settings JSON. */
@@ -83,7 +85,8 @@ export function loadOptions(): PiCacheOptions {
     // 0/off/false to disable.
     autoCompact: envBool("PI_CACHE_AUTO_COMPACT", true),
     cooldownSeconds: envFloat("PI_CACHE_COOLDOWN_SECONDS", 600),
-    minGapSeconds: envFloat("PI_CACHE_MIN_GAP_SECONDS", 240),
+    pressureColdFloor: envFloat("PI_CACHE_PRESSURE_COLD_FLOOR", 0.2),
+    cacheTtlSeconds: envFloat("PI_CACHE_TTL_SECONDS", 300),
     // Fast compaction: env beats the owned settings switch beats default on.
     fastCompact: envBool(
       "PI_CACHE_FAST_COMPACT",

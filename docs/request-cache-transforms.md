@@ -1,7 +1,7 @@
 # Semantic-preserving request transforms for cache hits
 
-Evidence: `provider prompt-caching documentation` (web/provider research) and
-`the pi request serialization audit` (pi 0.85.1 serialization audit).
+Evidence: provider prompt-caching documentation and the pi request
+serialization audit (see `docs/research/`).
 
 ## The lever, precisely
 
