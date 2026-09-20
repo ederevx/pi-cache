@@ -39,8 +39,10 @@ the cache-window gate is relaxed because the override is prefix-stable,
 and with it off compaction stays inside cold/churned windows.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. The ledger keeps the most recent `PI_CACHE_LEDGER_MAX_ROWS` rows
-(default 20000, trimmed on load and at session shutdown), session stats
-are rebuilt from it on session start so they survive reloads, and stale
+(default 20000, trimmed on load and at session shutdown), a bounded
+pre-trim backup is captured before any shrinking rewrite
+(`PI_CACHE_LEDGER_BACKUPS`/`_TTL_DAYS`/`_MAX_MB`), session stats are
+rebuilt from it on session start so they survive reloads, and stale
 atomic-write temp files are swept at load. Live views: `/cache-stats`
 (global and session scopes, with live compaction pressure) and
 `/cache-settings`.
@@ -50,9 +52,9 @@ atomic-write temp files are swept at load. Live views: `/cache-stats`
     bash scripts/uninstall.sh
 
 Removes exactly the manifest-owned files, hash-verified against the
-manifest so a repurposed path is never deleted. The telemetry ledger and
-settings are left in place; `bash scripts/uninstall.sh --purge` also
-removes them plus any stale temp files.
+manifest so a repurposed path is never deleted. The telemetry ledger,
+settings, and bounded backups are left in place; `bash
+scripts/uninstall.sh --purge` also removes them plus any stale temp files.
 
 ## Design pillars
 

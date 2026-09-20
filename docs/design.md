@@ -37,6 +37,11 @@ opt-in and A/B-validated.
   temp files are swept at load, and the current session's rows are rebuilt
   from the retained window on `session_start` so session stats survive
   reloads.
+- Before any shrinking rewrite, a backup of the ledger is copied into
+  `PI_CACHE_BACKUP_DIR` (default `.pi-cache/backups`); the store is bounded
+  by its own GC: newest `PI_CACHE_LEDGER_BACKUPS` (default 3), a
+  `PI_CACHE_LEDGER_BACKUP_TTL_DAYS` TTL (default 7), and a
+  `PI_CACHE_LEDGER_BACKUP_MAX_MB` total-size cap (default 32).
 
 ### 2. Stable-prefix normalization (opt-in, highest ceiling)
 

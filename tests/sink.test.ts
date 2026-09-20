@@ -6,6 +6,7 @@
 
 import { test, assertEq, scratchDir } from "./harness.ts";
 import { FileRecordSink } from "../src/sink.ts";
+import { BackupStore } from "../src/backup-store.ts";
 import { readdirSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { UsageRow } from "../src/ledger.ts";
@@ -62,4 +63,16 @@ test("sink: append never drops a row under lock contention", () => {
   const sink = new FileRecordSink(file);
   sink.append(row(1));
   assertEq(sink.load().length, 1, "row persisted despite lock contention");
+});
+
+test("sink: a shrinking rewrite captures a bounded backup", () => {
+  const dir = join(scratchDir(), "sink-backup");
+  const file = join(dir, "ledger.jsonl");
+  const backups = new BackupStore(join(dir, "backups"), { keep: 3, ttlMs: 0, maxBytes: 0 });
+  const sink = new FileRecordSink(file, backups);
+  sink.rewrite([row(1), row(2), row(3)]);
+  assertEq(backups.count(), 0, "growth writes do not back up");
+  sink.rewrite([row(1)]);
+  assertEq(backups.count(), 1, "shrinking rewrite captures the pre-image");
+  assertEq(sink.load().length, 1);
 });

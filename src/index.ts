@@ -40,6 +40,7 @@
 import { loadOptions } from "./constants.ts";
 import { CacheLedger } from "./ledger.ts";
 import { FileRecordSink } from "./sink.ts";
+import { BackupStore } from "./backup-store.ts";
 import { TempSweeper } from "./temp-sweep.ts";
 import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
@@ -62,8 +63,19 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const opts = loadOptions();
   // Sweep stale atomic-write temp files before the ledger/settings are read.
   new TempSweeper().sweep(dirname(opts.ledgerPath));
+  // Pre-retention backups, bounded by their own ring/TTL/size GC.
+  const backups = new BackupStore(opts.backupDir, {
+    keep: opts.backupKeep,
+    ttlMs: opts.backupTtlDays * 24 * 60 * 60 * 1000,
+    maxBytes: opts.backupMaxMb * 1024 * 1024,
+  });
+  try {
+    backups.prune();
+  } catch {
+    /* backup GC must never block extension load */
+  }
   const ledger = new CacheLedger(
-    new FileRecordSink(opts.ledgerPath),
+    new FileRecordSink(opts.ledgerPath, backups),
     opts.telemetry,
     opts.ledgerMaxRows,
   );
