@@ -38,10 +38,15 @@ export class UserSettingsStore {
   /** Merge `patch` into the stored document and persist atomically. */
   save(patch: UserSettings): UserSettings {
     const next: UserSettings = { ...this.load(), ...patch };
+    this.writeAtomic(next);
+    return next;
+  }
+
+  /** Write the complete document to a sibling temp file, then rename it. */
+  private writeAtomic(settings: UserSettings): void {
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
+    writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n", { mode: 0o600 });
     renameSync(tmp, this.file);
-    return next;
   }
 }

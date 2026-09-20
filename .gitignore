@@ -14,3 +14,7 @@ core
 
 # Unmanaged tests node_modules resolution symlink
 node_modules
+
+# Python bytecode cache (lint self-test imports)
+__pycache__/
+*.pyc

@@ -179,7 +179,7 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
       },
       ctx,
     );
-    const fast = compactResults[1] as { compaction?: { summary: string; firstKeptEntryId: string } } | undefined;
+    const fast = compactResults[0] as { compaction?: { summary: string; firstKeptEntryId: string } } | undefined;
     assert(fast?.compaction !== undefined, "fast override returned a compaction");
     assertEq(fast!.compaction!.summary, FAST_SUMMARY_STUB);
     assertEq(fast!.compaction!.firstKeptEntryId, "E9");
@@ -321,7 +321,7 @@ test("extension: fast-compaction switch toggles and persists", async () => {
       { preparation: { firstKeptEntryId: "E1", tokensBefore: 10, messagesToSummarize: [] }, reason: "manual" },
       ctx,
     );
-    assert(before[1] !== undefined, "fast compaction on by default");
+    assert(before[0] !== undefined, "fast compaction on by default");
 
     // Select the Fast compaction row: it must flip off and persist.
     let options: string[] = [];
@@ -345,7 +345,7 @@ test("extension: fast-compaction switch toggles and persists", async () => {
       { preparation: { firstKeptEntryId: "E2", tokensBefore: 10, messagesToSummarize: [] }, reason: "threshold" },
       ctx,
     );
-    assertEq(after[1], undefined, "fast compaction off after toggle");
+    assertEq(after[0], undefined, "fast compaction off after toggle");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }

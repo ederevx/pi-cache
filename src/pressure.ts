@@ -46,37 +46,61 @@ export interface PressureVerdict {
   fire: boolean;
 }
 
-const DEFAULT_OPTIONS: Omit<PressureOptions, "random"> = {
-  start: 0.5,
-  full: 0.85,
-  gamma: 2,
-  cacheDiscount: 0.5,
-  coldPremium: 0.25,
-};
-
 export class CompactionPressure {
+  private static readonly DEFAULTS: Omit<PressureOptions, "random"> = {
+    start: 0.5,
+    full: 0.85,
+    gamma: 2,
+    cacheDiscount: 0.5,
+    coldPremium: 0.25,
+  };
+
   private readonly opts: PressureOptions;
 
   constructor(opts: Partial<PressureOptions> = {}) {
-    this.opts = { ...DEFAULT_OPTIONS, ...opts, random: opts.random ?? Math.random };
+    this.opts = {
+      ...CompactionPressure.DEFAULTS,
+      ...opts,
+      random: opts.random ?? Math.random,
+    };
   }
 
-  /** Utilization and cache/cold factor -> pressure, probability, draw. */
+  /** Compose the pressure and probability into the drawn verdict. */
   sample(input: PressureSample): PressureVerdict {
+    const pressure = this.pressureFor(input);
+    const probability = this.probabilityFor(pressure);
+    return { pressure, probability, fire: this.opts.random() < probability };
+  }
+
+  /** Utilization and cache/cold factor -> raw pressure. */
+  private pressureFor(input: PressureSample): number {
+    return this.utilization(input) * this.cacheFactor(this.cacheShare(input));
+  }
+
+  /** Context tokens as a fraction of the usable window. */
+  private utilization(input: PressureSample): number {
     const usable = Math.max(1, input.contextWindow - input.reserveTokens);
-    const utilization = Math.max(0, input.tokens / usable);
+    return Math.max(0, input.tokens / usable);
+  }
+
+  /** Cached share of the last request's input tokens. */
+  private cacheShare(input: PressureSample): number {
     const requestTokens = Math.max(0, input.input) + Math.max(0, input.cacheRead);
-    const cacheShare = requestTokens > 0 ? Math.max(0, input.cacheRead) / requestTokens : 0;
+    return requestTokens > 0 ? Math.max(0, input.cacheRead) / requestTokens : 0;
+  }
 
-    // Warm cache (large cacheShare) lowers urgency; cold cache raises it.
-    const factor =
+  /** Warm cache lowers urgency; cold cache raises it above raw utilization. */
+  private cacheFactor(cacheShare: number): number {
+    return (
       (1 - this.opts.cacheDiscount * cacheShare) *
-      (1 + this.opts.coldPremium * (1 - cacheShare));
-    const pressure = utilization * factor;
+      (1 + this.opts.coldPremium * (1 - cacheShare))
+    );
+  }
 
+  /** Ramp pressure into a clamped `[0,1]` Bernoulli probability. */
+  private probabilityFor(pressure: number): number {
     const span = Math.max(1e-9, this.opts.full - this.opts.start);
     const ramp = (pressure - this.opts.start) / span;
-    const probability = Math.pow(Math.max(0, Math.min(1, ramp)), this.opts.gamma);
-    return { pressure, probability, fire: this.opts.random() < probability };
+    return Math.pow(Math.max(0, Math.min(1, ramp)), this.opts.gamma);
   }
 }

@@ -75,8 +75,6 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
   const settingsStore = new UserSettingsStore(opts.settingsPath);
   const settingsPresenter = new SettingsPresenter();
-  /** Compactions our controller completed (telemetry for /cache-stats). */
-  let compactions = 0;
 
   pi.on("message_end", async (event, ctx) => {
     try {
@@ -133,10 +131,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       });
       if (verdict.shouldCompact) {
         ctx.compact?.({
-          onComplete: () => {
-            autocompact.markCompacted();
-            compactions++;
-          },
+          onComplete: () => autocompact.markCompacted(),
           onError: () =>
             pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" }),
         });
@@ -147,29 +142,23 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", async (event) => {
-    // Warm-cache advisory (observational only). Returns nothing, so the
-    // fast-compaction listener's result below is preserved.
+    // One handler, explicit order: the observational warm-cache advisory runs
+    // first and never returns, then the fast cache-aware override ("overall")
+    // may replace pi's default LLM summarizer for EVERY reason
+    // (manual/threshold/overflow) with the byte-stable stub at pi's own cut
+    // point. Returning no compaction (disabled, malformed, or any error)
+    // leaves pi's summarizer intact.
     try {
       const preparation = event?.preparation;
-      if (!preparation) return;
-      const tip = advisor.suggest(
-        ledger.totals(),
-        preparation.messagesToSummarize.length,
-        preparation.tokensBefore,
-      );
-      if (tip) pi.appendEntry("pi-cache-advisory", { message: tip });
-    } catch {
-      /* never break compaction */
-    }
-  });
-
-  pi.on("session_before_compact", async (event) => {
-    // Fast cache-aware override ("overall"): when enabled, replace pi's
-    // default LLM summarizer for EVERY reason (manual/threshold/overflow)
-    // with the byte-stable stub at pi's own cut point. Returning no result
-    // (disabled, malformed, or any error) leaves pi's summarizer intact.
-    try {
-      const proposal = fastcompact.propose(event?.preparation);
+      if (preparation) {
+        const tip = advisor.suggest(
+          ledger.totals(),
+          preparation.messagesToSummarize.length,
+          preparation.tokensBefore,
+        );
+        if (tip) pi.appendEntry("pi-cache-advisory", { message: tip });
+      }
+      const proposal = fastcompact.propose(preparation);
       if (!proposal) return;
       return { compaction: proposal };
     } catch {
@@ -196,14 +185,19 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     description: "Toggle fast compaction and list pi-cache options",
     handler: async (_args, ctx) => {
       try {
-        const selected = await settingsPresenter.choose(opts, ctx.ui, ctx.mode);
+        const selected = await settingsPresenter.choose(
+          opts,
+          fastcompact.enabled,
+          ctx.ui,
+          ctx.mode,
+        );
         if (selected !== "fastCompact") return;
         // The switch: flip, apply live, and persist to the owned settings
-        // file so the choice survives reloads and restarts.
+        // file so the choice survives reloads and restarts. The live value
+        // is owned by the controller, never written back onto `opts`.
         const enabled = !fastcompact.enabled;
         fastcompact.setEnabled(enabled);
         autocompact.setCacheNeutral(enabled);
-        opts.fastCompact = enabled;
         settingsStore.save({ fastCompaction: enabled });
         ctx.ui?.notify?.(`pi-cache: fast compaction ${enabled ? "on" : "off"} (saved)`, "info");
       } catch {
@@ -219,7 +213,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const churn = normalizer.churn();
       const line = churn > 0 ? `${base}, head churn ${churn}` : base;
       const text =
-        `${line}, ${affinity.status()}, compactions ${compactions} ` +
+        `${line}, ${affinity.status()}, compactions ${autocompact.stats().compactions} ` +
         `(fast ${fastcompact.stats().compactions}, fast ${fastcompact.enabled ? "on" : "off"})`;
       // Command output is emitted through ctx (handler return values are
       // discarded by pi); toast in UI mode, fall back to stderr otherwise.

@@ -38,17 +38,20 @@ export const FAST_SUMMARY_STUB =
   "fast compaction). The working context is in the turns below.";
 
 export class FastCompactionController {
+  private enabledFlag: boolean;
   private compactions = 0;
 
-  constructor(private readonly opts: FastCompactOptions) {}
+  constructor(opts: FastCompactOptions) {
+    this.enabledFlag = opts.enabled;
+  }
 
   /** The live switch (toggled from /cache-settings). */
   get enabled(): boolean {
-    return this.opts.enabled;
+    return this.enabledFlag;
   }
 
   setEnabled(enabled: boolean): void {
-    this.opts.enabled = enabled;
+    this.enabledFlag = enabled;
   }
 
   /**
@@ -61,7 +64,7 @@ export class FastCompactionController {
     firstKeptEntryId: string;
     tokensBefore: number;
   } | undefined {
-    if (!this.opts.enabled) return undefined;
+    if (!this.enabledFlag) return undefined;
     if (!preparation) return undefined;
     if (typeof preparation.firstKeptEntryId !== "string") return undefined;
     if (typeof preparation.tokensBefore !== "number") return undefined;
