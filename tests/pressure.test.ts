@@ -85,3 +85,22 @@ test("pressure: the injected RNG drives the draw", () => {
   assertEq(always.sample(sample).fire, true);
   assertEq(never.sample(sample).fire, false);
 });
+
+test("pressure: explicit coldness scales pressure", () => {
+  const p = pressure();
+  const at = (coldness: number) =>
+    p.sample({ tokens: 120_000, contextWindow: 200_000, reserveTokens: 0, coldness });
+  assert(at(1).pressure > at(0).pressure, "cold pressure above warm");
+  assert(
+    at(0.5).pressure > at(0).pressure && at(0.5).pressure < at(1).pressure,
+    "pressure is monotone in coldness",
+  );
+});
+
+test("pressure: coldness is clamped to [0,1]", () => {
+  const p = pressure();
+  const at = (coldness: number) =>
+    p.sample({ tokens: 120_000, contextWindow: 200_000, reserveTokens: 0, coldness }).pressure;
+  assertEq(at(-5), at(0));
+  assertEq(at(5), at(1));
+});

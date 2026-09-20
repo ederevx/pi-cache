@@ -1,17 +1,18 @@
 /**
  * pi-cache — probabilistic compaction pressure.
  *
- * One responsibility: turn live context size and cache economics into a
- * compaction probability that rises smoothly as the context grows, and
- * draw the Bernoulli decision. Raw token utilization is the base; the
- * cached share of the last request discounts it (cached reads are cheap,
- * so a warm context is less urgent) while a cold request raises it above
- * the raw utilization ("beyond the actual token cost"). The draw uses an
- * injected RNG so callers stay deterministic in tests.
+ * One responsibility: turn live context size and cache coldness into a
+ * compaction probability that rises smoothly as the context grows and the
+ * cache cools, and draw the Bernoulli decision.
  *
- * The sample is clamped into `[0, 1]` for the probability but the raw
- * pressure is reported unbounded, so a very cold, very large context can
- * exceed the nominal token threshold.
+ * - `utilization` (tokens / usable window) is the base ramp.
+ * - `coldness` in [0,1] (0 warm, 1 cold) scales it: a warm cache is
+ *   discounted (cached reads are cheap, so keeping it is fine) and a cold
+ *   cache is premium-loaded ("beyond the actual token cost").
+ * - When `coldness` is absent the sample falls back to the last request's
+ *   cached share (`1 - cacheRead / (cacheRead + input)`).
+ *
+ * The draw uses an injected RNG so callers stay deterministic in tests.
  */
 
 export interface PressureOptions {
@@ -23,7 +24,7 @@ export interface PressureOptions {
   gamma: number;
   /** Warm-cache pressure discount in `[0,1]` (1 = ignore cached tokens). */
   cacheDiscount: number;
-  /** Cold-context pressure premium (0 = no bonus); can push pressure > 1. */
+  /** Cold-cache pressure premium (0 = no bonus); can push pressure > 1. */
   coldPremium: number;
   /** Uniform draw in `[0,1)`; injectable for tests. */
   random: () => number;
@@ -33,12 +34,15 @@ export interface PressureSample {
   tokens: number;
   contextWindow: number;
   reserveTokens: number;
-  cacheRead: number;
-  input: number;
+  /** Coldness in `[0,1]`: 0 = fully warm, 1 = fully cold (preferred). */
+  coldness?: number;
+  /** Fallback warmth inputs when `coldness` is absent. */
+  cacheRead?: number;
+  input?: number;
 }
 
 export interface PressureVerdict {
-  /** Unbounded pressure (`utilization * cache/cold factor`). */
+  /** Unbounded pressure (`utilization * coldness factor`). */
   pressure: number;
   /** Clamped Bernoulli probability for this sample. */
   probability: number;
@@ -72,9 +76,9 @@ export class CompactionPressure {
     return { pressure, probability, fire: this.opts.random() < probability };
   }
 
-  /** Utilization and cache/cold factor -> raw pressure. */
+  /** Utilization and coldness factor -> raw pressure. */
   private pressureFor(input: PressureSample): number {
-    return this.utilization(input) * this.cacheFactor(this.cacheShare(input));
+    return this.utilization(input) * this.coldnessFactor(this.coldness(input));
   }
 
   /** Context tokens as a fraction of the usable window. */
@@ -83,17 +87,22 @@ export class CompactionPressure {
     return Math.max(0, input.tokens / usable);
   }
 
-  /** Cached share of the last request's input tokens. */
-  private cacheShare(input: PressureSample): number {
-    const requestTokens = Math.max(0, input.input) + Math.max(0, input.cacheRead);
-    return requestTokens > 0 ? Math.max(0, input.cacheRead) / requestTokens : 0;
+  /** Explicit coldness when given, else derived from the cached share. */
+  private coldness(input: PressureSample): number {
+    if (typeof input.coldness === "number" && Number.isFinite(input.coldness)) {
+      return CompactionPressure.clamp(input.coldness);
+    }
+    const cacheRead = Math.max(0, input.cacheRead ?? 0);
+    const fresh = Math.max(0, input.input ?? 0);
+    const requestTokens = cacheRead + fresh;
+    return requestTokens > 0 ? 1 - cacheRead / requestTokens : 1;
   }
 
   /** Warm cache lowers urgency; cold cache raises it above raw utilization. */
-  private cacheFactor(cacheShare: number): number {
+  private coldnessFactor(coldness: number): number {
     return (
-      (1 - this.opts.cacheDiscount * cacheShare) *
-      (1 + this.opts.coldPremium * (1 - cacheShare))
+      (1 - this.opts.cacheDiscount * (1 - coldness)) *
+      (1 + this.opts.coldPremium * coldness)
     );
   }
 
@@ -102,5 +111,9 @@ export class CompactionPressure {
     const span = Math.max(1e-9, this.opts.full - this.opts.start);
     const ramp = (pressure - this.opts.start) / span;
     return Math.pow(Math.max(0, Math.min(1, ramp)), this.opts.gamma);
+  }
+
+  private static clamp(value: number): number {
+    return Math.max(0, Math.min(1, value));
   }
 }

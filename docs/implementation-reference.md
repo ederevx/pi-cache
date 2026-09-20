@@ -252,9 +252,8 @@ and for compaction/branch-summary usage; pi-cache can complement or replace this
   - `pi.registerFlag("pi-cache-...", {type:"boolean"|"string"})` for CLI override;
   - env: `PI_CACHE_RETENTION` (checked by pi-ai itself; docs/extensions.md + settings.md). Check
     `ctx.isProjectTrusted()` before honoring project-local config.
-- Local style precedent: `a local extension.ts` (mapped
-  `before_agent_start`/`tool_call`/`session_before_compact`), plus the pi
-  extension examples shipped in the pi package (`examples/extensions/`).
+- Local style precedent: the pi extension examples shipped in the package
+  (`examples/extensions/`, e.g. `custom-compaction.ts`).
 
 ## 5. Compaction: session_before_compact
 

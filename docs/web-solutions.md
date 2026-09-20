@@ -1,6 +1,6 @@
 # Surveyed third-party solutions (web sweep, 2026-09-18)
 
-Provenance: `public web sources`. Tags: [V] verified from
+Provenance: public web sweep (2026-09-18). Tags: [V] verified from
 fetched bytes, [K] knowledge/unverified. Repo stars and URLs current at
 sweep time.
 

@@ -12,15 +12,16 @@
  *   before_provider_request — tools sort/dedup + head-churn watch (+
  *                             provider session-id pin for stateless runs)
  *   turn_end                 — turn bookkeeping for auto-compaction
- *   agent_settled            — cache-aware auto-compaction: a probabilistic
- *                              compaction-pressure draw whose probability
- *                              rises with context tokens; cold/churn gating
- *                              is relaxed while fast compaction is on
+ *   agent_settled            — cache-aware auto-compaction: a compaction
+ *                              pressure draw whose probability rises with
+ *                              context tokens and cache coldness
  *   session_before_compact   — warm-cache advisory (observational) then,
  *                              when fast compaction is on, the cache-aware
  *                              override that replaces pi's summarizer for
  *                              EVERY compaction reason ("overall")
- *   session_compact          — compaction telemetry
+ *   session_compact          — autocompaction accounting (all sources) +
+ *                              telemetry
+ *   session_compact_failed   — failure advisory
  *
  * Commands:
  *   /cache-stats             — global + session cache stats, live pressure,
@@ -71,13 +72,34 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const autocompact = new AutocompactController({
     enabled: opts.autoCompact,
     cooldownSeconds: opts.cooldownSeconds,
-    minGapSeconds: opts.minGapSeconds,
+    coldFloor: opts.pressureColdFloor,
     cacheNeutral: opts.fastCompact,
     pressure,
   });
   const settingsStore = new UserSettingsStore(opts.settingsPath);
   const settingsPresenter = new SettingsPresenter();
   const statsPresenter = new CacheStatsPresenter();
+
+  /** Provider cache lifetime (ms) from the model's promptCache tier. */
+  const cacheTtlMs = (ctx: { model?: unknown } | undefined): number => {
+    const model = ctx?.model as
+      | { promptCache?: { short?: number; long?: number } }
+      | undefined;
+    const retention = process.env["PI_CACHE_RETENTION"] === "long" ? "long" : "short";
+    const seconds = model?.promptCache?.[retention];
+    return typeof seconds === "number" && seconds > 0
+      ? seconds * 1000
+      : opts.cacheTtlSeconds * 1000;
+  };
+
+  /** The live session signals the autocompaction decision reads. */
+  const autocompactSignals = (ctx: { model?: unknown } | undefined) => ({
+    lastUsage: () => ledger.lastUsage(),
+    msSinceLastTurn: () => ledger.msSinceLastTurn(),
+    headChurn: () => normalizer.churn(),
+    affinityRotated: () => affinity.rotated(),
+    cacheTtlMs: () => cacheTtlMs(ctx),
+  });
 
   pi.on("message_end", async (event, ctx) => {
     try {
@@ -126,15 +148,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     try {
       if (!opts.autoCompact) return;
       const usage = ctx.getContextUsage?.();
-      const verdict = autocompact.decide(usage, {
-        lastUsage: () => ledger.lastUsage(),
-        msSinceLastTurn: () => ledger.msSinceLastTurn(),
-        headChurn: () => normalizer.churn(),
-        affinityRotated: () => affinity.rotated(),
-      });
+      const verdict = autocompact.decide(usage, autocompactSignals(ctx));
       if (verdict.shouldCompact) {
         ctx.compact?.({
-          onComplete: () => autocompact.markCompacted(),
           onError: () =>
             pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" }),
         });
@@ -171,12 +187,30 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.on("session_compact", async (event) => {
     try {
-      fastcompact.recordCompaction();
+      // Autocompaction owns the completed-compaction accounting for EVERY
+      // source (our ctx.compact, pi's threshold/overflow, the fast override),
+      // so its cooldown and counter track reality.
+      autocompact.markCompacted();
+      const fromExtension =
+        event?.fromExtension === true || event?.compactionEntry?.fromHook === true;
+      if (fromExtension) fastcompact.recordCompaction();
       if (event?.compactionEntry) {
         pi.appendEntry("pi-cache-compaction", {
           keptEntryId: event.compactionEntry.firstKeptEntryId,
           tokensBefore: event.compactionEntry.tokensBefore,
-          fromExtension: event.compactionEntry.fromHook,
+          fromExtension,
+        });
+      }
+    } catch {
+      /* telemetry only */
+    }
+  });
+
+  pi.on("session_compact_failed", async (event) => {
+    try {
+      if (!event?.aborted && event?.errorMessage) {
+        pi.appendEntry("pi-cache-advisory", {
+          message: `compaction failed: ${event.errorMessage}`,
         });
       }
     } catch {
@@ -213,7 +247,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     description: "Show global and session cache stats with live pressure",
     handler: async (_args, ctx) => {
       const usage = ctx.getContextUsage?.();
-      const pressure = autocompact.currentPressure(usage, ledger.lastUsage());
+      const signals = autocompactSignals(ctx);
+      const pressure = autocompact.currentPressure(usage, ledger.lastUsage(), signals);
       const text = statsPresenter.render({
         global: ledger.totals(),
         session: ledger.sessionTotals(),

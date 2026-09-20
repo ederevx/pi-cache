@@ -86,15 +86,15 @@ compaction is on, makes the compaction itself prefix-stable:
 
 1. `CompactionPressure` (`src/pressure.ts`) samples the live context:
    `utilization = tokens / (contextWindow - reserveTokens)` mapped through
-   a `start=0.5`/`full=0.85`/`gamma=2` ramp to a probability, discounted by
-   the cached share of the last request and premium-loaded when it is cold.
-   Probability is monotonically nondecreasing in token count, and the raw
-   pressure can exceed utilization for a cold context ("beyond the actual
-   token cost"). The draw uses an injected RNG so tests stay deterministic.
+   a `start=0.5`/`full=0.85`/`gamma=2` ramp to a probability, scaled by a
+   cache `coldness` in [0,1] (0 warm, 1 cold): warm is discounted, cold
+   premium-loaded. Probability is monotonically nondecreasing in token
+   count, and the raw pressure can exceed utilization for a cold context
+   ("beyond the actual token cost"). The draw uses an injected RNG.
 2. At `agent_settled` (guaranteed idle) the draw decides whether to
-   `ctx.compact()`. With fast compaction off, the cold/churn window gate
-   still applies first (a model summarizer must not run mid-warm-cache);
-   with it on the gate is relaxed because the override is prefix-stable.
+   `ctx.compact()`. A warm-cache coldness floor applies first (a model
+   summarizer must not run mid-warm-cache); fast compaction relaxes that
+   floor because the override is prefix-stable.
 3. Strict guardrails: cooldown (min turns + min seconds after any
    compaction); never fire while streaming or when core reports overflow
    recovery (`willRetry`); never fire when a compaction is already in
@@ -111,7 +111,7 @@ text, so the switch exists to return to pi's normal summarizer. Feasibility
 confirmed by the 0.86.0 audit: `session_before_compact` returning
 `{compaction}` skips `_runDefaultCompaction` for all reasons.
 
-Feasibility confirmed by the capability audit (`the pi 0.86 extension API`):
+Feasibility confirmed against the pi 0.86 extension API:
 `ctx.compact({customInstructions, onComplete, onError})` is fire-and-forget
 (`void`); compaction summaries are cache-transparent (`cacheRetention:"none"`,
 fresh routing session), so the trigger only times the *next* turn's re-write.
@@ -121,29 +121,25 @@ work). Guards in code: `agent_settled` + `ctx.isIdle()` + cooldown
 (turns/seconds) + last-entry-compaction check via pi's own stale guards;
 opt-in `PI_CACHE_AUTO_COMPACT`.
 
-**Coldness as a graded pressure input (evaluated 2026-09-20).** Feasible
-but not a drop-in replacement for the safety gate. The observed cache
-share already enters `CompactionPressure` as `cacheFactor`, while
-`decide()` still applies a binary cold gate and a min-gap check whose
-`msSinceLastTurn` is ~0 at `agent_settled` (so it is effectively bypassed
-when fast compaction is on). A graded model would:
+**Coldness model (implemented 2026-09-20).** `AutocompactController`
+computes `coldness` and feeds it to `CompactionPressure`:
 
-1. Collapse churn/rotation to coldness 1; derive observed coldness from
-   the last request's cache share (guarding write-only and below-minimum
-   all-zero responses); and blend a time/TTL prior from
-   `ctx.model.promptCache` or pi's `cache_warming_decision`
-   (`continuationProbability`, `warmCost`, `missCost`).
-2. Feed `coldness` into the pressure cache factor instead of a boolean, and
-   delete the min-gap gate.
-3. Keep a hard zero floor while the last request was a strong hit and no
-   churn/TTL pressure exists: folding a safety invariant into a probability
-   would occasionally invalidate a hot, actively-warmed cache.
+1. Churn/rotation sets coldness 1 (the prefix is definitively invalid).
+2. Otherwise the last request's cached share maps linearly from <=5%
+   (`COLD_RATIO`) = 1 to >=50% = 0.
+3. A time ramp raises it toward 1 as `msSinceLastTurn` approaches the
+   provider cache lifetime from `ctx.model.promptCache` (fallback
+   `PI_CACHE_TTL_SECONDS`), combined by their maximum.
+4. A warm-cache floor (`PI_CACHE_PRESSURE_COLD_FLOOR`, default 0.2) still
+   blocks a non-churned, non-cache-neutral warm cache; the old min-gap
+   gate is gone because it measured about zero at `agent_settled`.
 
 Caveats: usage alone cannot separate TTL expiry from prefix churn; TTL is
-sliding and published as a range (DeepSeek has none); pi-cache compaction
-cancels pi's warming, so when pi decides "warm" (`expectedSavings` >=
-$0.05) the cache is valuable and compaction pressure should be suppressed.
-See `docs/research/internet-prompt-caching-2026-09-18.md#cache-coldness-2026-09-20`.
+sliding and published as a range (DeepSeek has none), so the idle ramp is
+a lower bound; pi-cache compaction cancels pi's warming, so when pi would
+decide "warm" the cache is valuable and compaction pressure should be
+suppressed. Evidence:
+`docs/research/internet-prompt-caching-2026-09-18.md#cache-coldness-2026-09-20`.
 
 ### 6. Affinity guardrails (always on, observational)
 
@@ -157,7 +153,7 @@ See `docs/research/internet-prompt-caching-2026-09-18.md#cache-coldness-2026-09-
 
 House-consistent, not a config JSON: tunables live in
 `src/constants.ts` and are overridable with `PI_CACHE_*` environment
-variables (mirroring the env-var idiom of pi extensions):
+variables (the env-var idiom common to pi extensions):
 
 - `PI_CACHE_TELEMETRY` (default true), `PI_CACHE_SORT_TOOLS`,
   `PI_CACHE_DEDUP_TOOLS`, `PI_CACHE_ADVISORY` (default true)
