@@ -21,8 +21,10 @@ class MemorySink implements RecordSink {
   load(): UsageRow[] {
     return [...this.rows];
   }
-  rewrite(rows: UsageRow[]): void {
-    this.rows = rows.map((row) => ({ ...row }));
+  transform(keep: (rows: UsageRow[]) => UsageRow[]): void {
+    const raw = [...this.rows];
+    const next = keep(raw);
+    if (next !== raw) this.rows = next.map((row) => ({ ...row }));
   }
   flush(): Promise<void> {
     return Promise.resolve();

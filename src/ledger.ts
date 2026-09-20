@@ -4,7 +4,7 @@
  * One responsibility: record per-request cache usage, keep global and
  * current-session totals, persist rows through an injected sink, and bound
  * the retained window so the ledger cannot grow without limit. Writing and
- * rewriting go through the sink so the file side stays a single owner.
+ * retention go through the sink so the file side stays a single owner.
  * Telemetry must never break the session, so failures are swallowed.
  */
 
@@ -36,8 +36,11 @@ export interface RecordSink {
   append(row: UsageRow): void;
   /** All rows currently persisted on disk (for rehydration on load). */
   load(): UsageRow[];
-  /** Replace the persisted rows atomically; snapshot `rows` at call time. */
-  rewrite(rows: UsageRow[]): void;
+  /**
+   * Locked read-modify-write: load the rows, call `keep`, and persist the
+   * returned array atomically. Returning the same array means "unchanged".
+   */
+  transform(keep: (rows: UsageRow[]) => UsageRow[]): void;
   /** Resolve once every queued append has landed. */
   flush(): Promise<void>;
 }
@@ -55,8 +58,6 @@ export class CacheLedger {
   private readonly enabled: boolean;
   /** Retained row window; `<= 0` means unbounded. */
   private readonly maxRows: number;
-  /** True when the last merge dropped duplicate lines from disk. */
-  private duplicateLines = false;
   /** The active session identity, once known. */
   private sessionId: string | undefined;
 
@@ -64,16 +65,14 @@ export class CacheLedger {
     this.sink = sink;
     this.enabled = enabled;
     this.maxRows = maxRows > 0 ? maxRows : Number.POSITIVE_INFINITY;
-    this.mergeLatest();
+    this.enforceRetention();
     this.noteSeq();
-    this.retain();
   }
 
   /** Adopt the active session id and rebuild its persisted row window. */
   useSession(sessionId: string): void {
     this.sessionId = sessionId;
     this.sessionRows = this.rows.filter((row) => row.session === sessionId);
-    this.trim();
   }
 
   /** Record one assistant message's usage, if present. */
@@ -81,9 +80,7 @@ export class CacheLedger {
     if (!usage || !this.enabled) return;
     const row = this.buildRow(usage, model, session);
     this.rows.push(row);
-    if (this.sessionId === undefined || row.session === this.sessionId) {
-      this.sessionRows.push(row);
-    }
+    this.noteSessionRow(row);
     this.sink.append(row);
     this.trim();
   }
@@ -118,13 +115,12 @@ export class CacheLedger {
   }
 
   /**
-   * Merge the freshest on-disk rows and rewrite the file when the retained
-   * window dropped anything. Callers that may have pending appends should
-   * `flush()` first so the rewrite is the last write.
+   * Locked read-modify-write retention: merge the freshest disk rows,
+   * reclaim duplicates, trim to the window, and persist only when
+   * something changed. Returns whether the file was rewritten.
    */
   compact(): boolean {
-    this.mergeLatest();
-    return this.retain();
+    return this.enforceRetention();
   }
 
   /** Resolve once every queued append has landed. */
@@ -132,21 +128,17 @@ export class CacheLedger {
     return this.sink.flush();
   }
 
-  /** Merge fresh disk rows into memory so a rewrite cannot drop sibling appends. */
-  private mergeLatest(): void {
-    const raw = this.sink.load();
-    const normalizedRaw = this.normalize(raw);
-    this.duplicateLines = normalizedRaw.length < raw.length;
-    this.rows = this.normalize([...this.rows, ...raw]);
-  }
-
-  /** Trim to the retained window; rewrite the file if anything was dropped. */
-  private retain(): boolean {
-    const dropped = this.trim();
-    if (!dropped && !this.duplicateLines) return false;
-    this.sink.rewrite(this.rows.slice());
-    this.duplicateLines = false;
-    return true;
+  /** Bound the file inside the sink's lock; true when it was rewritten. */
+  private enforceRetention(): boolean {
+    let changed = false;
+    this.sink.transform((raw) => {
+      const duplicates = this.normalize(raw).length < raw.length;
+      this.rows = this.normalize([...this.rows, ...raw]);
+      const dropped = this.trim();
+      changed = duplicates || dropped;
+      return changed ? this.rows.slice() : raw;
+    });
+    return changed;
   }
 
   /** Keep `seq` ahead of every rehydrated row so new ids stay unique. */
@@ -169,6 +161,13 @@ export class CacheLedger {
       cacheWrite: usage.cacheWrite ?? 0,
       totalTokens: usage.totalTokens ?? 0,
     };
+  }
+
+  /** Route a row to the session window only when it belongs to this session. */
+  private noteSessionRow(row: UsageRow): void {
+    if (this.sessionId === undefined || row.session === this.sessionId) {
+      this.sessionRows.push(row);
+    }
   }
 
   /** Dedupe valid rows by id and order by (ts, seq); newest last. */

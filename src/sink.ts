@@ -2,12 +2,14 @@
  * pi-cache — file ledger sink.
  *
  * One responsibility: own the ledger bytes — append rows, rehydrate them,
- * atomically rewrite the retained window, and flush queued appends. Errors
- * are swallowed (fail-open): telemetry must never break the session.
+ * and run locked read-modify-write retention — with every operation
+ * serialized by a same-dir lock so sibling processes cannot clobber each
+ * other. Errors are swallowed (fail-open): telemetry must never break the
+ * session.
  */
 
-import { appendFile } from "node:fs/promises";
 import {
+  appendFileSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -23,13 +25,13 @@ const LOCK_STALE_MS = 30_000;
 
 export class FileRecordSink implements RecordSink {
   private prepared = false;
-  /** Serializes appends; `flush` awaits the chain. */
-  private pending: Promise<void> = Promise.resolve();
 
   constructor(private readonly path: string) {}
 
   append(row: UsageRow): void {
-    this.pending = this.pending.then(() => this.appendRow(row));
+    this.withLock(() => {
+      appendFileSync(this.path, JSON.stringify(row) + "\n", "utf8");
+    });
   }
 
   load(): UsageRow[] {
@@ -41,27 +43,25 @@ export class FileRecordSink implements RecordSink {
   }
 
   /**
-   * Replace the file with a snapshot of `rows` atomically. Callers that may
-   * have pending appends should `flush()` first so the rewrite is the last
-   * write. A best-effort lock keeps concurrent rewrites from clobbering
-   * each other; on lock contention this pass is skipped.
+   * Locked read-modify-write: load the file, hand `keep` the rows, and
+   * atomically persist only when `keep` returns a different array. The lock
+   * is held across load and write, so a concurrent append cannot be lost.
    */
+  transform(keep: (rows: UsageRow[]) => UsageRow[]): void {
+    this.withLock(() => {
+      const raw = this.load();
+      const next = keep(raw);
+      if (next !== raw) this.writeAtomic(next.slice());
+    });
+  }
+
+  /** Replace the file with exactly `rows` (convenience over `transform`). */
   rewrite(rows: UsageRow[]): void {
-    const snapshot = rows.slice();
-    this.ensureDir();
-    const lock = this.acquireLock();
-    if (lock === undefined) return;
-    try {
-      this.writeAtomic(snapshot);
-    } catch {
-      /* telemetry must never break the session */
-    } finally {
-      rmSync(lock, { force: true });
-    }
+    this.transform(() => rows);
   }
 
   async flush(): Promise<void> {
-    await this.pending;
+    /* appends are synchronous under the lock; nothing is queued */
   }
 
   /** Parse JSONL, skipping torn or foreign lines. */
@@ -87,6 +87,29 @@ export class FileRecordSink implements RecordSink {
     this.prepared = true;
   }
 
+  /** Ensure the directory, then run `fn` holding the rewrite lock. */
+  private withLock(fn: () => void): void {
+    try {
+      this.ensureDir();
+    } catch {
+      /* an unwritable ledger dir disables persistence, never the session */
+      return;
+    }
+    const lock = this.acquireLock();
+    if (lock === undefined) return;
+    try {
+      fn();
+    } catch {
+      /* telemetry must never break the session */
+    } finally {
+      try {
+        rmSync(lock, { force: true });
+      } catch {
+        /* a later sweep clears a leaked lock */
+      }
+    }
+  }
+
   /** Acquire the rewrite lock, clearing a stale one; undefined on contention. */
   private acquireLock(): string | undefined {
     const lock = `${this.path}.lock`;
@@ -94,16 +117,24 @@ export class FileRecordSink implements RecordSink {
       writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
       return lock;
     } catch {
+      if (!this.clearStaleLock(lock)) return undefined;
       try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
-          rmSync(lock, { force: true });
-          writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
-          return lock;
-        }
+        writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
+        return lock;
       } catch {
-        /* lock vanished or is unreadable; treat as contention */
+        return undefined;
       }
-      return undefined;
+    }
+  }
+
+  /** Remove a lock older than the grace period; true when it was stale. */
+  private clearStaleLock(lock: string): boolean {
+    try {
+      if (Date.now() - statSync(lock).mtimeMs <= LOCK_STALE_MS) return false;
+      rmSync(lock, { force: true });
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -124,15 +155,6 @@ export class FileRecordSink implements RecordSink {
       return statSync(this.path).mode & 0o777;
     } catch {
       return 0o600;
-    }
-  }
-
-  private async appendRow(row: UsageRow): Promise<void> {
-    try {
-      this.ensureDir();
-      await appendFile(this.path, JSON.stringify(row) + "\n", "utf8");
-    } catch {
-      /* telemetry must never break the session */
     }
   }
 }
