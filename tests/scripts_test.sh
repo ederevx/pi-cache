@@ -36,12 +36,31 @@ echo "  ok: $dest_count files, sha parity, manifest present"
 
 # the manifest is readable JSON and lists the same set
 python3 - "$manifest" "$dest" <<'EOF' || fail "manifest validation"
-import json, os, sys
+import json, os, re, sys
 m = json.load(open(sys.argv[1]))
+
+
+def norm(path):
+    # The installer records Git-Bash/MSYS-style paths (/c/Users/...) and
+    # os.path may render its own Windows form (C:/Users/... with mixed
+    # separators); fold both into one canonical shape on every platform:
+    # forward slashes and a leading-slash drive aliased to <drive>:.
+    p = path.replace("\\", "/")
+    p = re.sub(r"^/([A-Za-z])/", lambda mm: mm.group(1).upper() + ":/", p)
+    p = re.sub(r"^([A-Za-z]):/", lambda mm: mm.group(1).upper() + ":/", p)
+    return p
+
+
+base = norm(sys.argv[2])
+owned = sorted(norm(p) for p in m["owned"])
 expected = sorted(
-    os.path.join(sys.argv[2], n) for n in os.listdir(sys.argv[2])
-    if n.endswith(".ts"))
-assert sorted(m["owned"]) == expected, (sorted(m["owned"]), expected)
+    os.path.join(base, n).replace("\\", "/")
+    for n in os.listdir(sys.argv[2]) if n.endswith(".ts"))
+assert owned == expected, (
+    sorted(m["owned"]),
+    [os.path.join(sys.argv[2], n)
+     for n in sorted(os.listdir(sys.argv[2])) if n.endswith(".ts")],
+)
 assert set(m["hashes"]) == set(m["owned"])
 EOF
 echo "  ok: manifest owns exactly the installed files"
