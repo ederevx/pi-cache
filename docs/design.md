@@ -66,6 +66,13 @@ system/developer + first non-system message):
   proposal at pi's own `firstKeptEntryId` (`src/fastcompact.ts`), so no
   summarizer model call runs and the `[stable head][constant]` prefix
   never moves between compactions.
+- `session_before_tree` similarly accepts a `summary`; pi-cache answers a
+  wanted `/tree` branch summary with the byte-stable `FAST_BRANCH_STUB`, so
+  that summarizer call is skipped too. This is the more lossy path: a
+  branch summary is persisted and prefix-relevant, and pi does not
+  accumulate file tracking from extension-provided summaries
+  (`prepareBranchEntries` skips `fromHook`), so turn fast compaction off
+  when branch preservation matters.
 - Physics note: trimming the head still invalidates the prefix at the cut
   point; the win is the constant, cached stub plus the untouched kept
   window, not surgical preservation of the dropped span.
@@ -101,8 +108,10 @@ compaction is on, makes the compaction itself prefix-stable:
    progress; all decisions in one `AutocompactController` class.
 4. When fast compaction is on, the `session_before_compact` proposal
    replaces pi's summarizer for *every* reason with the byte-stable
-   `FAST_SUMMARY_STUB` at pi's own cut point (no model call). Any error
-   returns nothing, leaving pi's summarizer as the fail-open fallback.
+   `FAST_SUMMARY_STUB` at pi's own cut point (no model call), and
+   `session_before_tree` answers a wanted branch summary with
+   `FAST_BRANCH_STUB`. Any error returns nothing, leaving pi's summarizer
+   as the fail-open fallback.
 
 **Expected effect.** Compaction probability tracks context growth while
 compaction cost stays near zero and the cached prefix head stops moving;

@@ -22,6 +22,8 @@
  *   session_compact          — autocompaction accounting (all sources) +
  *                              telemetry
  *   session_compact_failed   — failure advisory
+ *   session_before_tree      — fast cache-aware branch-summary override
+ *   session_tree             — branch-summary telemetry
  *
  * Commands:
  *   /cache-stats             — global + session cache stats, live pressure,
@@ -212,6 +214,34 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         pi.appendEntry("pi-cache-advisory", {
           message: `compaction failed: ${event.errorMessage}`,
         });
+      }
+    } catch {
+      /* telemetry only */
+    }
+  });
+
+  pi.on("session_before_tree", async (event) => {
+    // Fast branch-summary override: pi only uses an extension summary when
+    // the user asked for one and there are entries to summarize, so the
+    // controller mirrors those guards. Returning nothing leaves pi's
+    // default branch summarizer intact (fail-open).
+    try {
+      const preparation = event?.preparation;
+      const proposal = fastcompact.proposeBranch(
+        preparation?.entriesToSummarize?.length ?? 0,
+        preparation?.userWantsSummary === true,
+      );
+      if (!proposal) return;
+      return { summary: { summary: proposal.summary } };
+    } catch {
+      /* never wedge a navigation */
+    }
+  });
+
+  pi.on("session_tree", async (event) => {
+    try {
+      if (event?.summaryEntry) {
+        pi.appendEntry("pi-cache-tree", { fromExtension: event.fromExtension === true });
       }
     } catch {
       /* telemetry only */

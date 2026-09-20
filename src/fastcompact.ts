@@ -3,7 +3,8 @@
  *
  * One responsibility: when fast compaction is enabled, replace pi's
  * default LLM summarizer for ANY compaction (`manual`, `threshold`,
- * `overflow`) with an O(1), byte-stable proposal at pi's own cut point.
+ * `overflow`) and for a `/tree` branch summary (`session_before_tree`)
+ * with an O(1), byte-stable proposal at pi's own cut point.
  * The proposal keeps pi's recent window verbatim and substitutes the
  * summarized span with a fixed constant, so:
  *   - no summarizer model call is made (faster);
@@ -36,6 +37,15 @@ export interface FastCompactPreparation {
 export const FAST_SUMMARY_STUB =
   "Earlier conversation turns were fast-compacted by pi-cache (cache-first " +
   "fast compaction). The working context is in the turns below.";
+
+/**
+ * Fixed, byte-stable stand-in for an abandoned `/tree` branch. Kept
+ * separate from the compaction stub so the two context shapes stay
+ * distinguishable while each remains deterministic.
+ */
+export const FAST_BRANCH_STUB =
+  "The abandoned branch was fast-summarized by pi-cache (cache-first fast " +
+  "compaction). Continue from the selected point below.";
 
 export class FastCompactionController {
   private enabledFlag: boolean;
@@ -78,6 +88,22 @@ export class FastCompactionController {
   /** Count a completed fast compaction for /cache-stats. */
   recordCompaction(): void {
     this.compactions++;
+  }
+
+  /**
+   * The fast branch-summary proposal for `session_before_tree`, or
+   * `undefined` to let pi's default summarizer run. pi only uses an
+   * extension summary when the user asked for one and there are entries
+   * to summarize, so mirror those guards here.
+   */
+  proposeBranch(
+    entriesToSummarize: number,
+    userWantsSummary: boolean,
+  ): { summary: string } | undefined {
+    if (!this.enabledFlag) return undefined;
+    if (!userWantsSummary) return undefined;
+    if (!(entriesToSummarize > 0)) return undefined;
+    return { summary: FAST_BRANCH_STUB };
   }
 
   stats(): { compactions: number } {

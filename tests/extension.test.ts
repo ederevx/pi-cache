@@ -18,7 +18,7 @@ import {
 } from "./harness.ts";
 import { join } from "node:path";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
-import { FAST_SUMMARY_STUB } from "../src/fastcompact.ts";
+import { FAST_BRANCH_STUB, FAST_SUMMARY_STUB } from "../src/fastcompact.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
 
@@ -181,6 +181,24 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     assert(fast?.compaction !== undefined, "fast override returned a compaction");
     assertEq(fast!.compaction!.summary, FAST_SUMMARY_STUB);
     assertEq(fast!.compaction!.firstKeptEntryId, "E9");
+
+    // 4c. Fast branch-summary override: a /tree navigation that wants a
+    // summary is replaced by the byte-stable branch stub, and none is
+    // offered when the user did not ask for one.
+    const treeResults = await pi.emit(
+      "session_before_tree",
+      { preparation: { userWantsSummary: true, entriesToSummarize: [{}, {}] } },
+      ctx,
+    );
+    const tree = treeResults[0] as { summary?: { summary: string } } | undefined;
+    assert(tree?.summary !== undefined, "fast branch summary returned");
+    assertEq(tree!.summary!.summary, FAST_BRANCH_STUB);
+    const noSummary = await pi.emit(
+      "session_before_tree",
+      { preparation: { userWantsSummary: false, entriesToSummarize: [{}, {}] } },
+      ctx,
+    );
+    assertEq(noSummary[0], undefined, "no branch summary when not requested");
 
     // 5. /cache-stats reflects global + session ledger, live pressure,
     // churn, affinity, and compaction counts.
