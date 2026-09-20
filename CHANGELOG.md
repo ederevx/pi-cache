@@ -3,6 +3,16 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.1.2] - 2026-09-20
+
+### Changed
+
+- Add `.npmrc` with `package-lock=false`. pi runs `npm install` in a git
+  clone, which otherwise writes an untracked `package-lock.json`; the
+  package has no runtime dependencies to lock.
+
+[0.1.2]: https://github.com/ederevx/pi-cache/releases/tag/v0.1.2
+
 ## [0.1.1] - 2026-09-20
 
 ### Fixed
