@@ -61,6 +61,10 @@ if $purge; then
     fi
   done
   find "$state_dir" -maxdepth 1 -name '*.tmp*' -type f -exec rm -f {} + 2>/dev/null || true
+  if [[ -d "$state_dir/backups" ]]; then
+    rm -rf "$state_dir/backups"
+    echo "uninstall: purged $state_dir/backups"
+  fi
 fi
 
 rmdir "$state_dir" 2>/dev/null || true

@@ -18,6 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import type { BackupStore } from "./backup-store.ts";
 import type { RecordSink, UsageRow } from "./ledger.ts";
 
 /** Grace before a same-named lock left by a crash is considered stale. */
@@ -26,7 +27,10 @@ const LOCK_STALE_MS = 30_000;
 export class FileRecordSink implements RecordSink {
   private prepared = false;
 
-  constructor(private readonly path: string) {}
+  constructor(
+    private readonly path: string,
+    private readonly backups?: BackupStore,
+  ) {}
 
   append(row: UsageRow): void {
     // Prefer the lock so a concurrent rewrite cannot clobber the row; retry
@@ -52,7 +56,10 @@ export class FileRecordSink implements RecordSink {
     this.withLock(() => {
       const raw = this.load();
       const next = keep(raw);
-      if (next !== raw) this.writeAtomic(next.slice());
+      if (next === raw) return;
+      // A shrinking rewrite would drop rows: keep a bounded recovery copy.
+      if (this.backups && next.length < raw.length) this.backups.capture(this.path);
+      this.writeAtomic(next.slice());
     });
   }
 

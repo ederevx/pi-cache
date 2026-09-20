@@ -31,6 +31,14 @@ export interface PiCacheOptions {
   ledgerPath: string;
   /** Retained ledger rows before the oldest are dropped (<= 0 = unbounded). */
   ledgerMaxRows: number;
+  /** Directory for pre-retention ledger backups. */
+  backupDir: string;
+  /** Newest ledger backups retained (ring). */
+  backupKeep: number;
+  /** Ledger backup TTL in days (0 = no TTL). */
+  backupTtlDays: number;
+  /** Total ledger backup size cap in MiB (0 = no cap). */
+  backupMaxMb: number;
   /** Cache-aware automatic compaction (default on). */
   autoCompact: boolean;
   /** Minimum seconds between automatic compactions. */
@@ -94,6 +102,12 @@ export function loadOptions(): PiCacheOptions {
     advisory: envBool("PI_CACHE_ADVISORY", true),
     ledgerPath: process.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT,
     ledgerMaxRows: envInt("PI_CACHE_LEDGER_MAX_ROWS", 20000),
+    backupDir:
+      process.env["PI_CACHE_BACKUP_DIR"] ||
+      join(getAgentDir(), LEDGER_DIR_NAME, "backups"),
+    backupKeep: envInt("PI_CACHE_LEDGER_BACKUPS", 3),
+    backupTtlDays: envInt("PI_CACHE_LEDGER_BACKUP_TTL_DAYS", 7),
+    backupMaxMb: envInt("PI_CACHE_LEDGER_BACKUP_MAX_MB", 32),
     // Cache-favoring features are ON by default; set the env var to
     // 0/off/false to disable.
     autoCompact: envBool("PI_CACHE_AUTO_COMPACT", true),
