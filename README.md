@@ -7,11 +7,17 @@ token cost. Public research + implementation repo.
 
 Design, research, and implementation complete (house-structured, OOP,
 validated by the zero-dependency suite under `tests/`; see
-`tests/run.ts`). Soft fast compaction and its compact store were
-removed: cache-aware cold-window auto-compaction is now the single
-compaction path, on by default, with pi's own normal summarizer
-compaction left untouched. Installed in the pi runtime; paired A/B
-validation is the remaining step.
+`tests/run.ts`). Cache-aware compaction has two layers, both on by
+default. (1) The auto-compaction trigger is a probabilistic *compaction
+pressure* whose probability rises with context tokens, discounted for a
+warm cache and premium-loaded when cold. (2) When **fast compaction** is
+on, pi-cache answers `session_before_compact` for *every* compaction
+reason (`manual`/`threshold`/`overflow`) with a byte-stable cache-aware
+override that replaces pi's LLM summarizer entirely. Turn fast
+compaction off with the `/cache-settings` switch or
+`PI_CACHE_FAST_COMPACT=off`, and pi's own normal summarizer runs
+unchanged. Installed in the pi runtime; paired A/B validation is the
+remaining step.
 
 ## Installation
 
@@ -21,12 +27,13 @@ Re-run to refresh owned copies in place (idempotent; the manifest at
 `~/.pi/agent/.pi-cache/manifest.json` records exactly what it owns).
 Then run `/reload` in pi (or restart). No config file needed. All
 cache-favoring features are ON by default (tools sort/dedup, session
-pin, cold-window auto-compaction, advisories, telemetry); disable any
-with its `PI_CACHE_*` env var (see `src/constants.ts` and
-`/cache-settings`). Auto-compaction fires only in cold windows (the
-provider cache is already lost) or when the prefix head churns / the
-provider session affinity rotates — never mid-warm-cache — and pi's
-own normal summarizer compaction runs unchanged.
+pin, compaction pressure, fast compaction, advisories, telemetry);
+disable any with its `PI_CACHE_*` env var (see `src/constants.ts`) or
+with the `/cache-settings` switch (which persists to pi-cache's owned
+`~/.pi/agent/.pi-cache/settings.json`). Auto-compaction fires on an idle
+`agent_settled` when the pressure draw passes; with fast compaction on
+the cache-window gate is relaxed because the override is prefix-stable,
+and with it off compaction stays inside cold/churned windows.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Live views: `/cache-stats` and `/cache-settings`.
 
@@ -49,28 +56,31 @@ left in place.
    0% -> 97.6% cross-repo hit fix.
 3. **Tool-schema hygiene** — deterministic tool ordering, dedup, and removal
    of volatile fields (cwd, absolute paths) from tool definitions.
-4. **Cache-aware compaction** — compact only when the provider cache is
-   already lost: a cold last turn (TTL expiry after a gap) or a
-   churning/rotating prefix head, at idle (`agent_settled`). Pi's own
-   normal summarizer compaction then runs unchanged; the advisory
-   observes warm-cache re-writes without altering them.
+4. **Cache-aware compaction** — the trigger is a token-driven
+   probabilistic pressure (warm cache discounted, cold cache
+   premium-loaded), and when fast compaction is on the compaction itself
+   is a byte-stable O(1) override at pi's own cut point, so the cached
+   prefix head never moves. Fast compaction replaces pi's summarizer for
+   all reasons; with it off, pi's own normal summarizer runs unchanged in
+   cold/churned windows.
 5. **Affinity guardrails** — keep OpenRouter sticky routing warm: one
    `session_id` per thread, never per turn; detect prefix-identity churn.
-6. **Cold-window auto-compaction** — the single compaction path, on by
-   default (`PI_CACHE_AUTO_COMPACT`). After a turn with ~0 cacheRead at
-   context above the threshold — or when the tool/system prefix head is
-   churning or the provider session-affinity header is rotating, both of
-   which already invalidate the provider cache — `ctx.compact()` fires
-   at idle ahead of pi's own cold threshold compaction. Cooldowns
-   (seconds + turns) gate repetition; `PI_CACHE_AUTO_COMPACT=off`
-   disables it entirely.
+6. **Compaction pressure + fast override** — the auto-compaction trigger
+   is `CompactionPressure` (probability ramps from 50% to 85% usable
+   context, cache-discounted and cold-premium-loaded), and **fast
+   compaction** overrides pi's summarizer via `session_before_compact`
+   for every reason. Cooldowns (seconds + turns) gate repetition;
+   `PI_CACHE_FAST_COMPACT=off` (or the `/cache-settings` switch) returns
+   to pi's normal summarizer, and `PI_CACHE_AUTO_COMPACT=off` disables
+   the trigger entirely.
 
 ## Repo layout
 
 - `src/` — extension source (house layout: `index.ts` wiring + per-
   responsibility modules: `ledger.ts`, `normalizer.ts`, `compaction.ts`,
-  `affinity.ts`, `session-pin.ts`, `autocompact.ts`, `sink.ts`,
-  `settings.ts`, `constants.ts`)
+  `affinity.ts`, `session-pin.ts`, `autocompact.ts`, `pressure.ts`,
+  `fastcompact.ts`, `user-settings.ts`, `sink.ts`, `settings.ts`,
+  `constants.ts`)
 - `tests/` — zero-dependency validation + OOP/format lint suite
   (`tests/run.ts`, `tests/oop_lint.py`, per-module tests, the
   installer round-trip, and the mock-pi wiring test)
@@ -89,6 +99,10 @@ left in place.
 - OpenRouter: passthrough + sticky routing keyed on the first
   system/developer + first non-system message; `session_id` forces
   stickiness; `cache_discount` in every response.
+- pi 0.86.0: `session_before_compact` may return `{ compaction }` and
+  that fully replaces the default summarizer for all reasons
+  (`manual`/`threshold`/`overflow`); there is no extension-declared user
+  setting, so pi-cache owns `~/.pi/agent/.pi-cache/settings.json`.
 - Agent bugs to avoid: volatile tool schemas (opencode #14743), per-turn
   data in cache keys (aider #5556), naive compaction re-writing ~97k tokens
   (claude-code #94197), metering over-counts (#94224).

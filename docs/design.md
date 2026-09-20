@@ -57,46 +57,58 @@ system/developer + first non-system message):
   `Instance.directory` from the bash tool and moved cwd to the env block).
 - A/B only: tool order can change model behavior.
 
-### 4. Cache-aware compaction (advisory, opt-in)
+### 4. Cache-aware compaction (fast override, default on)
 
-- `session_before_compact`: when telemetry shows a warm cache, prefer
-  trimming at turn boundaries and raising effective
-  `keepRecentTokens` over a summary rebuild (naive compaction rewrote
-  ~97k unchanged tokens per event in claude-code #94197).
-- Physics note: trimming the head invalidates the prefix at the cut point;
-  the win is avoiding churn on the kept tail, not surgical preservation.
-- Respect pi's built-in behavior (compaction's own summary request already
-  disables cache writes).
+- `session_before_compact` may return `{ compaction }`; pi 0.86 then skips
+  `_runDefaultCompaction` for *every* reason (`manual`/`threshold`/
+  `overflow`). pi-cache uses this to answer with a byte-stable, O(1)
+  proposal at pi's own `firstKeptEntryId` (`src/fastcompact.ts`), so no
+  summarizer model call runs and the `[stable head][constant]` prefix
+  never moves between compactions.
+- Physics note: trimming the head still invalidates the prefix at the cut
+  point; the win is the constant, cached stub plus the untouched kept
+  window, not surgical preservation of the dropped span.
+- The switch is `/cache-settings` -> Fast compaction (persisted to
+  `~/.pi/agent/.pi-cache/settings.json`) or `PI_CACHE_FAST_COMPACT`. With
+  it off, the advisory stays observational and pi's summarizer runs
+  unchanged.
 
-### 5. Cache-aware auto-compaction (opt-in, off by default)
+### 5. Cache-aware auto-compaction + compaction pressure (default on)
 
 Question under evaluation/implementation: use the telemetry itself to drive
 compaction timing, and trigger it automatically.
 
-**Policy (cold-window clustering).** Compaction invalidates the prefix at
-its cut point, and the summarizer + next full re-write are the expensive
-part. Paying those costs inside a *warm* window wastes the hits; the
-optimal time to compact is when the cache is already cold:
+**Policy (pressure + fast override).** Compaction changes the prefix at
+its cut point, so the trigger and the summarizer both matter. pi-cache
+drives the timing from a *compaction pressure* probability and, when fast
+compaction is on, makes the compaction itself prefix-stable:
 
-1. At `turn_end`, if the just-completed turn showed ~0 `cacheRead` (the
-   provider prefix was lost anyway: TTL expiry after a gap, provider move,
-   head churn) AND `getContextUsage().percent` is at/above the threshold,
-   call `ctx.compact()` — the re-write lands in a window that would be
-   charged fresh regardless.
-2. While the cache is warm and context is below the threshold, do nothing
-   (keep harvesting hits; defer the inevitable compaction).
-3. Strict guardrails: opt-in via `PI_CACHE_AUTO_COMPACT=1`; cooldown
-   (min turns + min seconds after any compaction/summary); never fire
-   while streaming or when core reports overflow recovery (`willRetry`);
-   never fire when a compaction is already in progress; all decisions in
-   one `AutocompactController` class owned by the factory.
+1. `CompactionPressure` (`src/pressure.ts`) samples the live context:
+   `utilization = tokens / (contextWindow - reserveTokens)` mapped through
+   a `start=0.5`/`full=0.85`/`gamma=2` ramp to a probability, discounted by
+   the cached share of the last request and premium-loaded when it is cold.
+   Probability is monotonically nondecreasing in token count, and the raw
+   pressure can exceed utilization for a cold context ("beyond the actual
+   token cost"). The draw uses an injected RNG so tests stay deterministic.
+2. At `agent_settled` (guaranteed idle) the draw decides whether to
+   `ctx.compact()`. With fast compaction off, the cold/churn window gate
+   still applies first (a model summarizer must not run mid-warm-cache);
+   with it on the gate is relaxed because the override is prefix-stable.
+3. Strict guardrails: cooldown (min turns + min seconds after any
+   compaction); never fire while streaming or when core reports overflow
+   recovery (`willRetry`); never fire when a compaction is already in
+   progress; all decisions in one `AutocompactController` class.
+4. When fast compaction is on, the `session_before_compact` proposal
+   replaces pi's summarizer for *every* reason with the byte-stable
+   `FAST_SUMMARY_STUB` at pi's own cut point (no model call). Any error
+   returns nothing, leaving pi's summarizer as the fail-open fallback.
 
-**Expected effect.** Avoid the common pattern of a forced compaction
-mid-warm-cache plus full re-write shortly after; the write churn is moved
-into already-cold windows. Side benefit: fewer `1h`/`30m` TTL expiries on
-idle-with-growth. Risk: an extra summarizer call per event (~few k tokens)
-and task-coherence churn if triggered mid-task — mitigated by threshold +
-cooldown + opt-in, validated by comparing `cacheWrite` before/after.
+**Expected effect.** Compaction probability tracks context growth while
+compaction cost stays near zero and the cached prefix head stops moving;
+the risky overflow-recovery tradeoff is that the stub carries no summary
+text, so the switch exists to return to pi's normal summarizer. Feasibility
+confirmed by the 0.86.0 audit: `session_before_compact` returning
+`{compaction}` skips `_runDefaultCompaction` for all reasons.
 
 Feasibility confirmed by the capability audit (`the pi 0.86 extension API`):
 `ctx.compact({customInstructions, onComplete, onError})` is fire-and-forget
@@ -141,13 +153,13 @@ and models. Compare `cache_ratio`, `$` saved, `cacheWrite` churn, plus
 non-regression signals (tool-call success, answer diff). pi-ai's `faux`
 provider (simulated cache) gives offline harness tests.
 
-## Soft compaction (cache-first, repeated FAST by default) — SPEC
+## Fast compaction (cache-first) — SPEC
 
-> **Removed 2026-09-18.** Soft fast compaction and its compact store were
-> dropped from the implementation and are no longer wired; the cold-window
-> auto-compaction path (`src/autocompact.ts`, on by default) is the single
-> compaction mode and pi's own summarizer compaction runs unchanged. This
-> section is retained as the historical design record only.
+> **Reintroduced 2026-09-20** under new names after the 2026-09-18 removal,
+> now as an *overall* override: `src/fastcompact.ts`
+> (`FastCompactionController`, `FAST_SUMMARY_STUB`), plus the token-driven
+> probabilistic `src/pressure.ts`. The retired compact store/legacy option
+> names stay banned by `tests/oop_lint.py`.
 
 **Definition.** Fast "soft" compaction whose ONLY purposes are better cache
 hits and fewer input tokens, re-armed whenever the live context grows back

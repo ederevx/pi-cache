@@ -1,10 +1,13 @@
 /**
  * pi-cache — options/env resolution tests.
  * loadOptions() must resolve every PI_CACHE_* override from environment
- * variables and fall back to the documented defaults.
+ * variables, fall back to pi-cache's owned settings JSON for the fast
+ * compaction switch, and otherwise use the documented defaults.
  */
 
-import { test, assert, assertEq } from "./harness.ts";
+import { test, assert, assertEq, scratchDir } from "./harness.ts";
+import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { loadOptions } from "../src/constants.ts";
 
 /** Save the current env, apply overrides, run fn, restore. */
@@ -27,34 +30,51 @@ function withEnv(overrides: Record<string, string | undefined>, fn: () => void):
   }
 }
 
+/** A fresh, empty owned-settings path so tests never read the real one. */
+function settingsPath(name: string): string {
+  const root = join(scratchDir(), "constants");
+  mkdirSync(root, { recursive: true });
+  return join(root, `${name}-settings.json`);
+}
+
+const CLEAN = {
+  PI_CACHE_TELEMETRY: undefined,
+  PI_CACHE_SORT_TOOLS: undefined,
+  PI_CACHE_DEDUP_TOOLS: undefined,
+  PI_CACHE_PIN_SESSION: undefined,
+  PI_CACHE_ADVISORY: undefined,
+  PI_CACHE_AUTO_COMPACT: undefined,
+  PI_CACHE_FAST_COMPACT: undefined,
+  PI_CACHE_PRESSURE_START: undefined,
+  PI_CACHE_PRESSURE_FULL: undefined,
+  PI_CACHE_PRESSURE_GAMMA: undefined,
+  PI_CACHE_PRESSURE_CACHE_DISCOUNT: undefined,
+  PI_CACHE_PRESSURE_COLD_PREMIUM: undefined,
+};
+
 test("constants: default options", () => {
-  withEnv(
-    {
-      PI_CACHE_TELEMETRY: undefined,
-      PI_CACHE_SORT_TOOLS: undefined,
-      PI_CACHE_DEDUP_TOOLS: undefined,
-      PI_CACHE_PIN_SESSION: undefined,
-      PI_CACHE_ADVISORY: undefined,
-      PI_CACHE_AUTO_COMPACT: undefined,
-    },
-    () => {
-      const opts = loadOptions();
-      assertEq(opts.telemetry, true);
-      assertEq(opts.sortTools, true);
-      assertEq(opts.dedupTools, true);
-      assertEq(opts.pinSession, true);
-      assertEq(opts.advisory, true);
-      // Cold-window auto-compaction is the default path.
-      assertEq(opts.autoCompact, true);
-      assert(opts.cooldownSeconds > 0, "cooldownSeconds default");
-      assert(opts.minGapSeconds > 0, "minGapSeconds default");
-      // Default ledger lives under the agent dir dot-dir.
-      assert(opts.ledgerPath.endsWith(".pi-cache/ledger.jsonl"), "default ledger path");
-      // Removed soft-compaction surface is gone from the options.
-      assert(!("softCompactMode" in opts), "no soft-compact option");
-      assert(!("compactDir" in opts), "no compact-store option");
-    },
-  );
+  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: settingsPath("default") }, () => {
+    const opts = loadOptions();
+    assertEq(opts.telemetry, true);
+    assertEq(opts.sortTools, true);
+    assertEq(opts.dedupTools, true);
+    assertEq(opts.pinSession, true);
+    assertEq(opts.advisory, true);
+    // Cold-window auto-compaction is the default path.
+    assertEq(opts.autoCompact, true);
+    // Fast cache-aware compaction is on by default.
+    assertEq(opts.fastCompact, true);
+    assert(opts.cooldownSeconds > 0, "cooldownSeconds default");
+    assert(opts.minGapSeconds > 0, "minGapSeconds default");
+    // Default ledger lives under the agent dir dot-dir.
+    assert(opts.ledgerPath.endsWith(".pi-cache/ledger.jsonl"), "default ledger path");
+    // Pressure defaults form an ordered ramp.
+    assert(opts.pressureStart > 0 && opts.pressureStart < opts.pressureFull, "pressure ramp order");
+    assertEq(opts.pressureFull, 0.85);
+    assertEq(opts.pressureGamma, 2);
+    assert(opts.pressureCacheDiscount > 0, "cache discount default");
+    assert(opts.pressureColdPremium > 0, "cold premium default");
+  });
 });
 
 test("constants: boolean env parsing", () => {
@@ -66,6 +86,8 @@ test("constants: boolean env parsing", () => {
       PI_CACHE_PIN_SESSION: "0",
       PI_CACHE_ADVISORY: "false",
       PI_CACHE_AUTO_COMPACT: "no",
+      PI_CACHE_FAST_COMPACT: "off",
+      PI_CACHE_SETTINGS: settingsPath("bool"),
     },
     () => {
       const opts = loadOptions();
@@ -75,8 +97,29 @@ test("constants: boolean env parsing", () => {
       assertEq(opts.pinSession, false);
       assertEq(opts.advisory, false);
       assertEq(opts.autoCompact, false);
+      assertEq(opts.fastCompact, false);
     },
   );
+});
+
+test("constants: owned settings file drives the fast-compaction switch", () => {
+  const file = settingsPath("switch");
+  writeFileSync(file, JSON.stringify({ fastCompaction: false }));
+  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file }, () => {
+    assertEq(loadOptions().fastCompact, false);
+  });
+  writeFileSync(file, JSON.stringify({ fastCompaction: true }));
+  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file }, () => {
+    assertEq(loadOptions().fastCompact, true);
+  });
+});
+
+test("constants: env overrides the owned settings switch", () => {
+  const file = settingsPath("override");
+  writeFileSync(file, JSON.stringify({ fastCompaction: false }));
+  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file, PI_CACHE_FAST_COMPACT: "1" }, () => {
+    assertEq(loadOptions().fastCompact, true);
+  });
 });
 
 test("constants: ledger path override", () => {
@@ -90,11 +133,14 @@ test("constants: numeric parsing falls back on garbage", () => {
     {
       PI_CACHE_COOLDOWN_SECONDS: "12.5",
       PI_CACHE_MIN_GAP_SECONDS: "abc",
+      PI_CACHE_PRESSURE_FULL: "nope",
+      PI_CACHE_SETTINGS: settingsPath("numeric"),
     },
     () => {
       const opts = loadOptions();
       assertEq(opts.cooldownSeconds, 12.5);
       assert(opts.minGapSeconds === 240, "minGap fallback");
+      assertEq(opts.pressureFull, 0.85, "pressure fallback");
     },
   );
 });
@@ -107,6 +153,7 @@ test("constants: removed env vars are ignored harmlessly", () => {
       PI_CACHE_SOFT_MIN_TOKENS: "999",
       PI_CACHE_COMPACT_DIR: "~/x",
       PI_CACHE_ONCE_MIN_TOKENS: "4444",
+      PI_CACHE_SETTINGS: settingsPath("legacy"),
     },
     () => {
       const opts = loadOptions();
