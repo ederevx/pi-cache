@@ -20,6 +20,7 @@ test("stats: renders distinct global and session usage lines", () => {
     compactions: 1,
     fastCompactions: 1,
     fastEnabled: true,
+    branchEnabled: true,
   });
   const [globalLine, sessionLine] = text.split("\n");
   assert(globalLine.startsWith("pi-cache global: 12 req"), globalLine);
@@ -37,6 +38,7 @@ test("stats: empty scopes render the no-usage wording", () => {
     compactions: 0,
     fastCompactions: 0,
     fastEnabled: false,
+    branchEnabled: false,
   });
   assert(text.includes("pi-cache global: no usage recorded yet"));
   assert(text.includes("pi-cache session: no usage recorded yet"));
@@ -51,9 +53,10 @@ test("stats: session line carries pressure, churn and compaction counts", () => 
     compactions: 2,
     fastCompactions: 1,
     fastEnabled: true,
+    branchEnabled: true,
     pressure: { pressure: 0.85, probability: 0.4 },
   });
   assert(text.includes("pressure 0.85 (p 40%)"), text);
   assert(text.includes("head churn 3"), text);
-  assert(text.includes("compactions 2 (fast 1, fast on)"), text);
+  assert(text.includes("compactions 2 (fast 1, compaction on, branch on)"), text);
 });

@@ -29,6 +29,7 @@ export interface CacheStatsInput {
   compactions: number;
   fastCompactions: number;
   fastEnabled: boolean;
+  branchEnabled: boolean;
   /** Present only when the session had a usable context sample. */
   pressure?: CacheStatsPressure;
 }
@@ -66,7 +67,8 @@ export class CacheStatsPresenter {
     signals.push(input.affinity);
     signals.push(
       `compactions ${input.compactions} ` +
-        `(fast ${input.fastCompactions}, fast ${input.fastEnabled ? "on" : "off"})`,
+        `(fast ${input.fastCompactions}, compaction ${input.fastEnabled ? "on" : "off"}, ` +
+        `branch ${input.branchEnabled ? "on" : "off"})`,
     );
     return ", " + signals.join(", ");
   }

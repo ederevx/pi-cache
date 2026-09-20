@@ -39,6 +39,8 @@ export interface PiCacheOptions {
   cacheTtlSeconds: number;
   /** Fast cache-aware compaction override (default on; /cache-settings switch). */
   fastCompact: boolean;
+  /** Separate fast branch-summary override (default on; its own switch). */
+  fastBranchSummary: boolean;
   /** Absolute path of pi-cache's owned user-settings JSON. */
   settingsPath: string;
   /** Probabilistic compaction-pressure model tunables. */
@@ -91,6 +93,11 @@ export function loadOptions(): PiCacheOptions {
     fastCompact: envBool(
       "PI_CACHE_FAST_COMPACT",
       stored.fastCompaction ?? true,
+    ),
+    // Branch summaries have their own switch (lossier than compaction).
+    fastBranchSummary: envBool(
+      "PI_CACHE_FAST_BRANCH_SUMMARY",
+      stored.fastBranchSummary ?? true,
     ),
     settingsPath: userSettingsPath(),
     // Compaction-pressure ramp. Defaults: begin at 50% usable context,

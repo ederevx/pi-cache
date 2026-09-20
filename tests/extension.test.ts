@@ -86,6 +86,7 @@ const PI_CACHE_KEYS = [
   "PI_CACHE_ADVISORY",
   "PI_CACHE_AUTO_COMPACT",
   "PI_CACHE_FAST_COMPACT",
+  "PI_CACHE_FAST_BRANCH_SUMMARY",
   "PI_CACHE_LEDGER",
   "PI_CACHE_SETTINGS",
 ];
@@ -229,7 +230,7 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     };
     await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
     assertEq(selectTitle, "pi-cache settings");
-    assertEq(selectOptions.length, 7, "one settings row per option");
+    assertEq(selectOptions.length, 8, "one settings row per option");
 
     // 7. Fail-open: garbage events never throw.
     await pi.emit("message_end", null, null);
@@ -368,6 +369,52 @@ test("extension: fast-compaction switch toggles and persists", async () => {
       ctx,
     );
     assertEq(after[0], undefined, "fast compaction off after toggle");
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
+test("extension: fast branch-summary switch toggles independently", async () => {
+  const root = join(scratchDir(), "e2e-branch-switch");
+  mkdirSync(root, { recursive: true });
+  const settingsFile = join(root, "settings.json");
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: settingsFile,
+    PI_CACHE_AUTO_COMPACT: "0",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    const ctx = {};
+
+    const treePrep = { preparation: { userWantsSummary: true, entriesToSummarize: [{}, {}] } };
+    const before = await pi.emit("session_before_tree", treePrep, ctx);
+    assert(before[0] !== undefined, "fast branch summary on by default");
+
+    const settingsCtx = {
+      mode: "tui",
+      ui: {
+        select: (_t: string, o: string[]) =>
+          Promise.resolve(o.find((line) => line.startsWith("Fast branch summary:"))!),
+        notify: () => {},
+      },
+    };
+    await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
+    const saved = JSON.parse(readFileSync(settingsFile, "utf8")) as {
+      fastBranchSummary?: boolean;
+    };
+    assertEq(saved.fastBranchSummary, false, "branch switch persisted off");
+
+    const after = await pi.emit("session_before_tree", treePrep, ctx);
+    assertEq(after[0], undefined, "branch summary off after toggle");
+    const comp = await pi.emit(
+      "session_before_compact",
+      { preparation: { firstKeptEntryId: "E1", tokensBefore: 10, messagesToSummarize: [] }, reason: "manual" },
+      ctx,
+    );
+    assert(comp[0] !== undefined, "compaction switch unaffected");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
