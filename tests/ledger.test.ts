@@ -166,3 +166,28 @@ test("ledger: flush resolves through the sink", async () => {
   await ledger.flush();
   assert(true, "flush resolved");
 });
+
+test("ledger: useSession rebuilds the session window from persisted rows", () => {
+  const sink = new MemorySink();
+  const now = Date.now();
+  sink.rows = [
+    { id: "a", seq: 0, ts: now, pid: 1, session: "s1", model: "m", input: 1, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 1 },
+    { id: "b", seq: 1, ts: now + 1, pid: 1, session: "s2", model: "m", input: 2, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+    { id: "c", seq: 2, ts: now + 2, pid: 1, session: "s1", model: "m", input: 3, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 3 },
+  ];
+  const ledger = new CacheLedger(sink, true);
+  assertEq(ledger.sessionTotals().n, 0, "no session adopted yet");
+  ledger.useSession("s1");
+  assertEq(ledger.sessionTotals().n, 2, "session rows rebuilt");
+  assertEq(ledger.lastUsage()?.input, 3, "newest session row");
+});
+
+test("ledger: close flushes and bounds the file", async () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true, 2);
+  ledger.record(usage, "m", "s");
+  ledger.record(usage, "m", "s");
+  ledger.record(usage, "m", "s");
+  await ledger.close();
+  assertEq(sink.rows.length, 2, "file bounded after close");
+});

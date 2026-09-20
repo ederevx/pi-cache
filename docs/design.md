@@ -33,8 +33,10 @@ opt-in and A/B-validated.
   the default model, compaction write spikes, TTL expiry patterns.
 - The append-only ledger is bounded to `PI_CACHE_LEDGER_MAX_ROWS`
   (default 20000) retained rows: it is trimmed and rewritten on load and
-  at `session_shutdown`, pending appends are flushed first, and stale
-  atomic-write temp files are swept at load.
+  at `session_shutdown` after flushing pending appends, stale atomic-write
+  temp files are swept at load, and the current session's rows are rebuilt
+  from the retained window on `session_start` so session stats survive
+  reloads.
 
 ### 2. Stable-prefix normalization (opt-in, highest ceiling)
 

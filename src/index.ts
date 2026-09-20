@@ -7,6 +7,7 @@
  * module-global mutable state.
  *
  * Hooks:
+ *   session_start            — adopt the session id for session stats
  *   message_end              — record assistant usage in the ledger
  *   before_provider_headers  — observe session-affinity header stability
  *   before_provider_request — tools sort/dedup + head-churn watch (+
@@ -117,12 +118,31 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     cacheTtlMs: () => cacheTtlMs(ctx),
   });
 
+  /** The live session id the core exposes, or a stable fallback. */
+  const sessionIdOf = (ctx: unknown): string => {
+    const manager = (ctx as { sessionManager?: { getSessionId?: () => string } } | undefined)
+      ?.sessionManager;
+    try {
+      return manager?.getSessionId?.() ?? "session";
+    } catch {
+      return "session";
+    }
+  };
+
+  pi.on("session_start", async (_event, ctx) => {
+    try {
+      ledger.useSession(sessionIdOf(ctx));
+    } catch {
+      /* telemetry only */
+    }
+  });
+
   pi.on("message_end", async (event, ctx) => {
     try {
       const message = event.message;
       if (message?.role === "assistant") {
         const model = (ctx as ModelView)?.model?.id ?? "session";
-        ledger.record(message.usage, model);
+        ledger.record(message.usage, model, sessionIdOf(ctx));
       }
     } catch {
       /* never break the turn */
@@ -266,8 +286,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     // Flush queued appends, then drop rows beyond the retained window and
     // rewrite the file so it cannot grow without limit.
     try {
-      await ledger.flush();
-      ledger.compact();
+      await ledger.close();
     } catch {
       /* telemetry must never break shutdown */
     }

@@ -1,9 +1,9 @@
 /**
  * pi-cache — usage ledger.
  *
- * One responsibility: record per-request cache usage, keep in-memory
- * session totals, persist rows through an injected sink, and bound the
- * retained window so the ledger cannot grow without limit. Writing and
+ * One responsibility: record per-request cache usage, keep global and
+ * current-session totals, persist rows through an injected sink, and bound
+ * the retained window so the ledger cannot grow without limit. Writing and
  * rewriting go through the sink so the file side stays a single owner.
  * Telemetry must never break the session, so failures are swallowed.
  */
@@ -36,7 +36,7 @@ export interface RecordSink {
   append(row: UsageRow): void;
   /** All rows currently persisted on disk (for rehydration on load). */
   load(): UsageRow[];
-  /** Replace the persisted rows atomically (retention/compaction). */
+  /** Replace the persisted rows atomically; snapshot `rows` at call time. */
   rewrite(rows: UsageRow[]): void;
   /** Resolve once every queued append has landed. */
   flush(): Promise<void>;
@@ -44,9 +44,9 @@ export interface RecordSink {
 
 export class CacheLedger {
   private rows: UsageRow[] = [];
-  /** This process's own rows only — the auto-compaction trigger reads these
-   *  last-usage/gap signals from the live session, never from rehydrated
-   *  history. */
+  /** Rows belonging to the current session id, rebuilt from the retained
+   *  window by `useSession` so session stats survive reloads. Empty until
+   *  the id is known; the auto-compaction trigger reads its last row. */
   private sessionRows: UsageRow[] = [];
   private seq = 0;
   /** Per-process boot nonce so row ids are unique across reloads. */
@@ -55,26 +55,108 @@ export class CacheLedger {
   private readonly enabled: boolean;
   /** Retained row window; `<= 0` means unbounded. */
   private readonly maxRows: number;
+  /** True when the last merge dropped duplicate lines from disk. */
+  private duplicateLines = false;
+  /** The active session identity, once known. */
+  private sessionId: string | undefined;
 
   constructor(sink: RecordSink, enabled: boolean, maxRows: number = 0) {
     this.sink = sink;
     this.enabled = enabled;
     this.maxRows = maxRows > 0 ? maxRows : Number.POSITIVE_INFINITY;
-    // Rehydrate rows persisted by earlier processes, deduped by id and
-    // ordered (ts, seq). Bound the file at load; rewrite only when rows
-    // were actually dropped.
-    this.rows = this.normalize(sink.load());
+    this.mergeLatest();
     this.noteSeq();
-    if (this.rows.length > this.maxRows) {
-      this.trim();
-      this.sink.rewrite(this.rows);
-    }
+    this.retain();
+  }
+
+  /** Adopt the active session id and rebuild its persisted row window. */
+  useSession(sessionId: string): void {
+    this.sessionId = sessionId;
+    this.sessionRows = this.rows.filter((row) => row.session === sessionId);
+    this.trim();
   }
 
   /** Record one assistant message's usage, if present. */
-  record(usage: Usage | undefined, model: string, session: string = "session"): void {
+  record(usage: Usage | undefined, model: string, session: string = this.sessionId ?? "session"): void {
     if (!usage || !this.enabled) return;
-    const row: UsageRow = {
+    const row = this.buildRow(usage, model, session);
+    this.rows.push(row);
+    if (this.sessionId === undefined || row.session === this.sessionId) {
+      this.sessionRows.push(row);
+    }
+    this.sink.append(row);
+    this.trim();
+  }
+
+  /** Aggregated counters over the retained ledger window (all processes). */
+  totals(): { input: number; cacheRead: number; cacheWrite: number; n: number } {
+    return this.sumRows(this.rows);
+  }
+
+  /** Aggregated counters over the current session's retained rows. */
+  sessionTotals(): { input: number; cacheRead: number; cacheWrite: number; n: number } {
+    return this.sumRows(this.sessionRows);
+  }
+
+  /** Last completed turn's usage for the current session, for the
+   *  auto-compaction trigger. */
+  lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined {
+    const last = this.sessionRows[this.sessionRows.length - 1];
+    return last ? { input: last.input, cacheRead: last.cacheRead, cacheWrite: last.cacheWrite } : undefined;
+  }
+
+  /** Milliseconds since the current session's last recorded turn ended. */
+  msSinceLastTurn(): number {
+    const last = this.sessionRows[this.sessionRows.length - 1];
+    return last ? Date.now() - last.ts : Number.POSITIVE_INFINITY;
+  }
+
+  /** Flush queued appends, then bound the file; call once at shutdown. */
+  async close(): Promise<void> {
+    await this.flush();
+    this.compact();
+  }
+
+  /**
+   * Merge the freshest on-disk rows and rewrite the file when the retained
+   * window dropped anything. Callers that may have pending appends should
+   * `flush()` first so the rewrite is the last write.
+   */
+  compact(): boolean {
+    this.mergeLatest();
+    return this.retain();
+  }
+
+  /** Resolve once every queued append has landed. */
+  flush(): Promise<void> {
+    return this.sink.flush();
+  }
+
+  /** Merge fresh disk rows into memory so a rewrite cannot drop sibling appends. */
+  private mergeLatest(): void {
+    const raw = this.sink.load();
+    const normalizedRaw = this.normalize(raw);
+    this.duplicateLines = normalizedRaw.length < raw.length;
+    this.rows = this.normalize([...this.rows, ...raw]);
+  }
+
+  /** Trim to the retained window; rewrite the file if anything was dropped. */
+  private retain(): boolean {
+    const dropped = this.trim();
+    if (!dropped && !this.duplicateLines) return false;
+    this.sink.rewrite(this.rows.slice());
+    this.duplicateLines = false;
+    return true;
+  }
+
+  /** Keep `seq` ahead of every rehydrated row so new ids stay unique. */
+  private noteSeq(): void {
+    for (const row of this.rows) if (row.seq >= this.seq) this.seq = row.seq + 1;
+  }
+
+  /** Build one ledger row from a recorded usage. */
+  private buildRow(usage: Usage, model: string, session: string): UsageRow {
+    return {
       id: `${process.pid}:${this.boot}:${this.seq}`,
       seq: this.seq++,
       ts: Date.now(),
@@ -87,74 +169,30 @@ export class CacheLedger {
       cacheWrite: usage.cacheWrite ?? 0,
       totalTokens: usage.totalTokens ?? 0,
     };
-    this.rows.push(row);
-    this.sessionRows.push(row);
-    this.sink.append(row);
-    this.trim();
   }
 
-  /** Aggregated counters over the retained ledger window (all processes). */
-  totals(): { input: number; cacheRead: number; cacheWrite: number; n: number } {
-    return this.sumRows(this.rows);
-  }
-
-  /** Aggregated counters over this process's own rows only. */
-  sessionTotals(): { input: number; cacheRead: number; cacheWrite: number; n: number } {
-    return this.sumRows(this.sessionRows);
-  }
-
-  /** Last completed turn's usage (this process only), for the
-   *  auto-compaction trigger. */
-  lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined {
-    const last = this.sessionRows[this.sessionRows.length - 1];
-    return last ? { input: last.input, cacheRead: last.cacheRead, cacheWrite: last.cacheWrite } : undefined;
-  }
-
-  /** Milliseconds since the last recorded turn ended (this process only). */
-  msSinceLastTurn(): number {
-    const last = this.sessionRows[this.sessionRows.length - 1];
-    return last ? Date.now() - last.ts : Number.POSITIVE_INFINITY;
-  }
-
-  /**
-   * Re-read the file (picking up sibling processes' rows), trim to the
-   * retained window, and rewrite the file when rows were dropped. Returns
-   * whether the file was rewritten.
-   */
-  compact(): boolean {
-    this.rows = this.normalize(this.sink.load());
-    const before = this.rows.length;
-    this.trim();
-    if (this.rows.length === before) return false;
-    this.sink.rewrite(this.rows);
-    return true;
-  }
-
-  /** Resolve once every queued append has landed. */
-  flush(): Promise<void> {
-    return this.sink.flush();
-  }
-
-  /** Dedupe by id and order by (ts, seq); newest last. */
+  /** Dedupe valid rows by id and order by (ts, seq); newest last. */
   private normalize(rows: UsageRow[]): UsageRow[] {
     const byId = new Map<string, UsageRow>();
-    for (const row of rows) byId.set(row.id, row);
+    for (const row of rows) {
+      if (!row || typeof row.id !== "string" || typeof row.seq !== "number") continue;
+      byId.set(row.id, row);
+    }
     return [...byId.values()].sort((a, b) => a.ts - b.ts || a.seq - b.seq);
   }
 
-  /** Keep `seq` ahead of every rehydrated row so new ids stay unique. */
-  private noteSeq(): void {
-    for (const row of this.rows) if (row.seq >= this.seq) this.seq = row.seq + 1;
+  /** Drop oldest rows beyond the window; returns whether either list shrank. */
+  private trim(): boolean {
+    const rowsBefore = this.rows.length;
+    const sessionBefore = this.sessionRows.length;
+    this.rows = this.trimToWindow(this.rows);
+    this.sessionRows = this.trimToWindow(this.sessionRows);
+    return this.rows.length !== rowsBefore || this.sessionRows.length !== sessionBefore;
   }
 
-  /** Drop the oldest rows beyond the retained window. */
-  private trim(): void {
-    if (this.rows.length > this.maxRows) {
-      this.rows.splice(0, this.rows.length - this.maxRows);
-    }
-    if (this.sessionRows.length > this.maxRows) {
-      this.sessionRows.splice(0, this.sessionRows.length - this.maxRows);
-    }
+  /** Keep only the newest `maxRows` entries of one collection. */
+  private trimToWindow(rows: UsageRow[]): UsageRow[] {
+    return rows.length > this.maxRows ? rows.slice(rows.length - this.maxRows) : rows;
   }
 
   private sumRows(rows: UsageRow[]): {
