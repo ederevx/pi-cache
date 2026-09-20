@@ -1,19 +1,23 @@
 /**
- * pi-cache — module constants and tunables.
+ * pi-cache — options loader and tunables.
  *
- * House style: tunables are centralized here (constants.ts), overridable
- * through PI_CACHE_* environment variables, mirroring the env-var settings
- * idiom common to pi extensions. Durable telemetry and pi-cache's
- * own user settings live in a hidden dot-directory under the agent dir
- * (see user-settings.ts), house-consistent hidden-dot-dir convention.
+ * House style: tunables are centralized here, overridable through
+ * PI_CACHE_* environment variables, mirroring the env-var settings idiom
+ * common to pi extensions. Durable telemetry, backups, and pi-cache's own
+ * user settings live in a hidden dot-directory under the agent dir (see
+ * user-settings.ts), house-consistent hidden-dot-dir convention. The
+ * loader owns env parsing so no module-level helper reads a global.
  */
 
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { UserSettingsStore, type UserSettings } from "./user-settings.ts";
 
-/** Runtime data directory for pi-cache's ledger and settings. Hidden dot-dir. */
+/** Runtime data directory for pi-cache's ledger, backups, and settings. */
 const LEDGER_DIR_NAME = ".pi-cache";
+const LEDGER_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "ledger.jsonl");
+const SETTINGS_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "settings.json");
+const BACKUP_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "backups");
 
 export interface PiCacheOptions {
   /** Whether telemetry is recorded at all. */
@@ -47,6 +51,8 @@ export interface PiCacheOptions {
   pressureColdFloor: number;
   /** Fallback provider cache lifetime (s) when the model declares none. */
   cacheTtlSeconds: number;
+  /** True when `PI_CACHE_RETENTION=long` selects the long cache tier. */
+  cacheRetentionLong: boolean;
   /** Fast cache-aware compaction override (default on; /cache-settings switch). */
   fastCompact: boolean;
   /** Separate fast branch-summary override (default on; its own switch). */
@@ -61,77 +67,74 @@ export interface PiCacheOptions {
   pressureColdPremium: number;
 }
 
-const envBool = (name: string, fallback: boolean): boolean => {
-  const raw = process.env[name];
-  if (raw === undefined) return fallback;
-  return raw === "1" || raw === "true" || raw === "yes";
-};
+export class OptionsLoader {
+  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
 
-/** parseFloat with a guarded default: unset/unparsable values fall back. */
-const envFloat = (name: string, fallback: number): number => {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
-  const n = parseFloat(raw);
-  return Number.isFinite(n) ? n : fallback;
-};
+  /** Resolve tunables: env overrides first, then owned settings, then defaults. */
+  load(): PiCacheOptions {
+    const stored: UserSettings = new UserSettingsStore(this.userSettingsPath()).load();
+    return {
+      telemetry: this.envBool("PI_CACHE_TELEMETRY", true),
+      sortTools: this.envBool("PI_CACHE_SORT_TOOLS", true),
+      dedupTools: this.envBool("PI_CACHE_DEDUP_TOOLS", true),
+      pinSession: this.envBool("PI_CACHE_PIN_SESSION", true),
+      advisory: this.envBool("PI_CACHE_ADVISORY", true),
+      ledgerPath: this.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT,
+      ledgerMaxRows: this.envInt("PI_CACHE_LEDGER_MAX_ROWS", 20000),
+      backupDir: this.env["PI_CACHE_BACKUP_DIR"] || BACKUP_DEFAULT,
+      backupKeep: this.envInt("PI_CACHE_LEDGER_BACKUPS", 3),
+      backupTtlDays: this.envInt("PI_CACHE_LEDGER_BACKUP_TTL_DAYS", 7),
+      backupMaxMb: this.envInt("PI_CACHE_LEDGER_BACKUP_MAX_MB", 32),
+      // Cache-favoring features are ON by default; set the env var to
+      // 0/off/false to disable.
+      autoCompact: this.envBool("PI_CACHE_AUTO_COMPACT", true),
+      cooldownSeconds: this.envFloat("PI_CACHE_COOLDOWN_SECONDS", 600),
+      pressureColdFloor: this.envFloat("PI_CACHE_PRESSURE_COLD_FLOOR", 0.2),
+      cacheTtlSeconds: this.envFloat("PI_CACHE_TTL_SECONDS", 300),
+      cacheRetentionLong: this.env["PI_CACHE_RETENTION"] === "long",
+      // Fast compaction: env beats the owned settings switch beats default on.
+      fastCompact: this.envBool("PI_CACHE_FAST_COMPACT", stored.fastCompaction ?? true),
+      // Branch summaries have their own switch (lossier than compaction).
+      fastBranchSummary: this.envBool(
+        "PI_CACHE_FAST_BRANCH_SUMMARY",
+        stored.fastBranchSummary ?? true,
+      ),
+      settingsPath: this.userSettingsPath(),
+      // Compaction-pressure ramp. Defaults: begin at 50% usable context,
+      // saturate at 85%; a fully warm request halves the pressure and a cold
+      // request earns a 25% premium (so pressure can exceed raw utilization).
+      pressureStart: this.envFloat("PI_CACHE_PRESSURE_START", 0.5),
+      pressureFull: this.envFloat("PI_CACHE_PRESSURE_FULL", 0.85),
+      pressureGamma: this.envFloat("PI_CACHE_PRESSURE_GAMMA", 2),
+      pressureCacheDiscount: this.envFloat("PI_CACHE_PRESSURE_CACHE_DISCOUNT", 0.5),
+      pressureColdPremium: this.envFloat("PI_CACHE_PRESSURE_COLD_PREMIUM", 0.25),
+    };
+  }
 
-/** parseInt with a guarded default: unset/unparsable values fall back. */
-const envInt = (name: string, fallback: number): number => {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) ? n : fallback;
-};
+  /** The owned settings file path (env override exists for hermetic tests). */
+  private userSettingsPath(): string {
+    return this.env["PI_CACHE_SETTINGS"] || SETTINGS_DEFAULT;
+  }
 
-const LEDGER_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "ledger.jsonl");
-const SETTINGS_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "settings.json");
+  private envBool(name: string, fallback: boolean): boolean {
+    const raw = this.env[name];
+    if (raw === undefined) return fallback;
+    return raw === "1" || raw === "true" || raw === "yes";
+  }
 
-/** The owned settings file path (env override exists for hermetic tests). */
-function userSettingsPath(): string {
-  return process.env["PI_CACHE_SETTINGS"] || SETTINGS_DEFAULT;
-}
+  /** parseFloat with a guarded default: unset/unparsable values fall back. */
+  private envFloat(name: string, fallback: number): number {
+    const raw = this.env[name];
+    if (raw === undefined || raw === "") return fallback;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : fallback;
+  }
 
-/** Resolve tunables: env overrides first, then owned settings, then defaults. */
-export function loadOptions(): PiCacheOptions {
-  const stored: UserSettings = new UserSettingsStore(userSettingsPath()).load();
-  return {
-    telemetry: envBool("PI_CACHE_TELEMETRY", true),
-    sortTools: envBool("PI_CACHE_SORT_TOOLS", true),
-    dedupTools: envBool("PI_CACHE_DEDUP_TOOLS", true),
-    pinSession: envBool("PI_CACHE_PIN_SESSION", true),
-    advisory: envBool("PI_CACHE_ADVISORY", true),
-    ledgerPath: process.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT,
-    ledgerMaxRows: envInt("PI_CACHE_LEDGER_MAX_ROWS", 20000),
-    backupDir:
-      process.env["PI_CACHE_BACKUP_DIR"] ||
-      join(getAgentDir(), LEDGER_DIR_NAME, "backups"),
-    backupKeep: envInt("PI_CACHE_LEDGER_BACKUPS", 3),
-    backupTtlDays: envInt("PI_CACHE_LEDGER_BACKUP_TTL_DAYS", 7),
-    backupMaxMb: envInt("PI_CACHE_LEDGER_BACKUP_MAX_MB", 32),
-    // Cache-favoring features are ON by default; set the env var to
-    // 0/off/false to disable.
-    autoCompact: envBool("PI_CACHE_AUTO_COMPACT", true),
-    cooldownSeconds: envFloat("PI_CACHE_COOLDOWN_SECONDS", 600),
-    pressureColdFloor: envFloat("PI_CACHE_PRESSURE_COLD_FLOOR", 0.2),
-    cacheTtlSeconds: envFloat("PI_CACHE_TTL_SECONDS", 300),
-    // Fast compaction: env beats the owned settings switch beats default on.
-    fastCompact: envBool(
-      "PI_CACHE_FAST_COMPACT",
-      stored.fastCompaction ?? true,
-    ),
-    // Branch summaries have their own switch (lossier than compaction).
-    fastBranchSummary: envBool(
-      "PI_CACHE_FAST_BRANCH_SUMMARY",
-      stored.fastBranchSummary ?? true,
-    ),
-    settingsPath: userSettingsPath(),
-    // Compaction-pressure ramp. Defaults: begin at 50% usable context,
-    // saturate at 85%; a fully warm request halves the pressure and a cold
-    // request earns a 25% premium (so pressure can exceed raw utilization).
-    pressureStart: envFloat("PI_CACHE_PRESSURE_START", 0.5),
-    pressureFull: envFloat("PI_CACHE_PRESSURE_FULL", 0.85),
-    pressureGamma: envFloat("PI_CACHE_PRESSURE_GAMMA", 2),
-    pressureCacheDiscount: envFloat("PI_CACHE_PRESSURE_CACHE_DISCOUNT", 0.5),
-    pressureColdPremium: envFloat("PI_CACHE_PRESSURE_COLD_PREMIUM", 0.25),
-  };
+  /** parseInt with a guarded default: unset/unparsable values fall back. */
+  private envInt(name: string, fallback: number): number {
+    const raw = this.env[name];
+    if (raw === undefined || raw === "") return fallback;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? n : fallback;
+  }
 }

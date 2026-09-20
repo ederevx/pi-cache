@@ -37,7 +37,7 @@
  * durable telemetry goes to the `.pi-cache/` dot-dir (see constants.ts).
  */
 
-import { loadOptions } from "./constants.ts";
+import { OptionsLoader } from "./constants.ts";
 import { CacheLedger } from "./ledger.ts";
 import { FileRecordSink } from "./sink.ts";
 import { BackupStore } from "./backup-store.ts";
@@ -60,7 +60,7 @@ import { dirname } from "node:path";
 type ModelView = { model?: { id?: string } | undefined } | undefined;
 
 export default function piCacheExtension(pi: ExtensionAPI): void {
-  const opts = loadOptions();
+  const opts = new OptionsLoader().load();
   // Sweep stale atomic-write temp files before the ledger/settings are read.
   new TempSweeper().sweep(dirname(opts.ledgerPath));
   // Pre-retention backups, bounded by their own ring/TTL/size GC.
@@ -69,11 +69,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     ttlMs: opts.backupTtlDays * 24 * 60 * 60 * 1000,
     maxBytes: opts.backupMaxMb * 1024 * 1024,
   });
-  try {
-    backups.prune();
-  } catch {
-    /* backup GC must never block extension load */
-  }
+  backups.prune();
   const ledger = new CacheLedger(
     new FileRecordSink(opts.ledgerPath, backups),
     opts.telemetry,
@@ -114,7 +110,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     const model = ctx?.model as
       | { promptCache?: { short?: number; long?: number } }
       | undefined;
-    const retention = process.env["PI_CACHE_RETENTION"] === "long" ? "long" : "short";
+    const retention = opts.cacheRetentionLong ? "long" : "short";
     const seconds = model?.promptCache?.[retention];
     return typeof seconds === "number" && seconds > 0
       ? seconds * 1000
