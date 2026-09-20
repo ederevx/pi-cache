@@ -12,22 +12,23 @@
  *   before_provider_request — tools sort/dedup + head-churn watch (+
  *                             provider session-id pin for stateless runs)
  *   turn_end                 — turn bookkeeping for auto-compaction
- *   agent_settled            — cache-aware auto-compaction: compact only
- *                              in a cold window (provider cache already
- *                              lost) or when the prefix head churns /
- *                              affinity rotates; pi's own normal
- *                              summarizer compaction runs unchanged
- *   session_before_compact   — warm-cache advisory (observational only;
- *                              never alters or cancels compaction)
+ *   agent_settled            — cache-aware auto-compaction: a probabilistic
+ *                              compaction-pressure draw whose probability
+ *                              rises with context tokens; cold/churn gating
+ *                              is relaxed while fast compaction is on
+ *   session_before_compact   — warm-cache advisory (observational) then,
+ *                              when fast compaction is on, the cache-aware
+ *                              override that replaces pi's summarizer for
+ *                              EVERY compaction reason ("overall")
  *   session_compact          — compaction telemetry
  *
- * Command:
- *   /cache-stats             — session cache-ratio, churn, affinity
- *   /cache-settings          — resolved PI_CACHE_* options
+ * Commands:
+ *   /cache-stats             — session cache-ratio, churn, affinity, compactions
+ *   /cache-settings          — fast-compaction switch + resolved options
  *
- * Config: PI_CACHE_* environment variables only (no config JSON — house
- * rule); durable telemetry to the `.pi-cache/` dot-dir under the agent
- * dir (see constants.ts).
+ * Config: PI_CACHE_* environment variables and pi-cache's owned settings
+ * JSON (`~/.pi/agent/.pi-cache/settings.json`, toggled by /cache-settings);
+ * durable telemetry goes to the `.pi-cache/` dot-dir (see constants.ts).
  */
 
 import { loadOptions } from "./constants.ts";
@@ -38,6 +39,9 @@ import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
 import { SessionPinner } from "./session-pin.ts";
 import { AutocompactController } from "./autocompact.ts";
+import { CompactionPressure } from "./pressure.ts";
+import { FastCompactionController } from "./fastcompact.ts";
+import { UserSettingsStore } from "./user-settings.ts";
 import { SettingsPresenter } from "./settings.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -54,11 +58,22 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const advisor = new CompactionAdvisor({ enabled: opts.advisory });
   const affinity = new AffinityObserver();
   const sessionPinner = opts.pinSession ? new SessionPinner() : null;
+  const pressure = new CompactionPressure({
+    start: opts.pressureStart,
+    full: opts.pressureFull,
+    gamma: opts.pressureGamma,
+    cacheDiscount: opts.pressureCacheDiscount,
+    coldPremium: opts.pressureColdPremium,
+  });
+  const fastcompact = new FastCompactionController({ enabled: opts.fastCompact });
   const autocompact = new AutocompactController({
     enabled: opts.autoCompact,
     cooldownSeconds: opts.cooldownSeconds,
     minGapSeconds: opts.minGapSeconds,
+    cacheNeutral: opts.fastCompact,
+    pressure,
   });
+  const settingsStore = new UserSettingsStore(opts.settingsPath);
   const settingsPresenter = new SettingsPresenter();
   /** Compactions our controller completed (telemetry for /cache-stats). */
   let compactions = 0;
@@ -104,19 +119,13 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   pi.on("agent_settled", async (_event, ctx) => {
     // Cache-aware auto-compaction (default on). agent_settled is the
     // guaranteed-idle point (no retry or output pending), so compact()
-    // cannot abort live work here. We compact only when the provider
-    // cache is already lost: a cold last turn (TTL expiry after a gap),
-    // or a churning/rotating prefix head — never mid-warm-cache. Pi's
-    // own summarizer compaction then runs unchanged.
+    // cannot abort live work here. The context gate is a probabilistic
+    // pressure draw that rises with token count; with fast compaction on
+    // the compaction is prefix-stable, so the cold/churn gate is relaxed.
     try {
       if (!opts.autoCompact) return;
       const usage = ctx.getContextUsage?.();
-      // Feed the live cache-health signals into the trigger: session-local
-      // last-usage/gap from the ledger, plus prefix-head churn (normalizer)
-      // and session-affinity rotation (affinity) — a churned or rotating
-      // prefix is already invalidating the provider cache, so compaction
-      // there is not additive (inert ledger defaults would swallow them).
-      const verdict = autocompact.decide(usage?.percent, {
+      const verdict = autocompact.decide(usage, {
         lastUsage: () => ledger.lastUsage(),
         msSinceLastTurn: () => ledger.msSinceLastTurn(),
         headChurn: () => normalizer.churn(),
@@ -139,12 +148,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.on("session_before_compact", async (event) => {
     // Warm-cache advisory (observational only). Returns nothing, so the
-    // built-in compaction proposal is never altered.
+    // fast-compaction listener's result below is preserved.
     try {
+      const preparation = event?.preparation;
+      if (!preparation) return;
       const tip = advisor.suggest(
         ledger.totals(),
-        event.preparation.messagesToSummarize.length,
-        event.preparation.tokensBefore,
+        preparation.messagesToSummarize.length,
+        preparation.tokensBefore,
       );
       if (tip) pi.appendEntry("pi-cache-advisory", { message: tip });
     } catch {
@@ -152,8 +163,23 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     }
   });
 
+  pi.on("session_before_compact", async (event) => {
+    // Fast cache-aware override ("overall"): when enabled, replace pi's
+    // default LLM summarizer for EVERY reason (manual/threshold/overflow)
+    // with the byte-stable stub at pi's own cut point. Returning no result
+    // (disabled, malformed, or any error) leaves pi's summarizer intact.
+    try {
+      const proposal = fastcompact.propose(event?.preparation);
+      if (!proposal) return;
+      return { compaction: proposal };
+    } catch {
+      /* fail-open: never wedge a compaction */
+    }
+  });
+
   pi.on("session_compact", async (event) => {
     try {
+      fastcompact.recordCompaction();
       if (event?.compactionEntry) {
         pi.appendEntry("pi-cache-compaction", {
           keptEntryId: event.compactionEntry.firstKeptEntryId,
@@ -167,10 +193,19 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("cache-settings", {
-    description: "List pi-cache options in the settings-UI layout",
+    description: "Toggle fast compaction and list pi-cache options",
     handler: async (_args, ctx) => {
       try {
-        settingsPresenter.present(opts, ctx.ui, ctx.mode);
+        const selected = await settingsPresenter.choose(opts, ctx.ui, ctx.mode);
+        if (selected !== "fastCompact") return;
+        // The switch: flip, apply live, and persist to the owned settings
+        // file so the choice survives reloads and restarts.
+        const enabled = !fastcompact.enabled;
+        fastcompact.setEnabled(enabled);
+        autocompact.setCacheNeutral(enabled);
+        opts.fastCompact = enabled;
+        settingsStore.save({ fastCompaction: enabled });
+        ctx.ui?.notify?.(`pi-cache: fast compaction ${enabled ? "on" : "off"} (saved)`, "info");
       } catch {
         console.error("pi-cache: could not render settings");
       }
@@ -183,7 +218,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const base = ledger.summary();
       const churn = normalizer.churn();
       const line = churn > 0 ? `${base}, head churn ${churn}` : base;
-      const text = `${line}, ${affinity.status()}, compactions ${compactions}`;
+      const text =
+        `${line}, ${affinity.status()}, compactions ${compactions} ` +
+        `(fast ${fastcompact.stats().compactions}, fast ${fastcompact.enabled ? "on" : "off"})`;
       // Command output is emitted through ctx (handler return values are
       // discarded by pi); toast in UI mode, fall back to stderr otherwise.
       try {

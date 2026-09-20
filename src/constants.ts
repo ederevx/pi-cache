@@ -3,15 +3,16 @@
  *
  * House style: tunables are centralized here (constants.ts), overridable
  * through PI_CACHE_* environment variables, mirroring the env-var settings
- * idiom used by pi extensions. No config JSON is written; durable
- * telemetry lives in a hidden dot-directory under the agent dir,
- * house-consistent hidden-dot-dir convention.
+ * idiom used by pi extensions. Durable telemetry and pi-cache's
+ * own user settings live in a hidden dot-directory under the agent dir
+ * (see user-settings.ts), house-consistent hidden-dot-dir convention.
  */
 
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { UserSettingsStore, type UserSettings } from "./user-settings.ts";
 
-/** Runtime data directory for pi-cache's ledger. Hidden dot-dir: house rule. */
+/** Runtime data directory for pi-cache's ledger and settings. Hidden dot-dir. */
 export const LEDGER_DIR_NAME = ".pi-cache";
 
 export interface PiCacheOptions {
@@ -34,6 +35,16 @@ export interface PiCacheOptions {
   cooldownSeconds: number;
   /** Minimum idle gap (s) that indicates a provider TTL expired. */
   minGapSeconds: number;
+  /** Fast cache-aware compaction override (default on; /cache-settings switch). */
+  fastCompact: boolean;
+  /** Absolute path of pi-cache's owned user-settings JSON. */
+  settingsPath: string;
+  /** Probabilistic compaction-pressure model tunables. */
+  pressureStart: number;
+  pressureFull: number;
+  pressureGamma: number;
+  pressureCacheDiscount: number;
+  pressureColdPremium: number;
 }
 
 const envBool = (name: string, fallback: boolean): boolean => {
@@ -51,9 +62,16 @@ const envFloat = (name: string, fallback: number): number => {
 };
 
 const LEDGER_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "ledger.jsonl");
+const SETTINGS_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "settings.json");
 
-/** Resolve tunables: env overrides first, then defaults. */
+/** The owned settings file path (env override exists for hermetic tests). */
+export function userSettingsPath(): string {
+  return process.env["PI_CACHE_SETTINGS"] || SETTINGS_DEFAULT;
+}
+
+/** Resolve tunables: env overrides first, then owned settings, then defaults. */
 export function loadOptions(): PiCacheOptions {
+  const stored: UserSettings = new UserSettingsStore(userSettingsPath()).load();
   return {
     telemetry: envBool("PI_CACHE_TELEMETRY", true),
     sortTools: envBool("PI_CACHE_SORT_TOOLS", true),
@@ -66,5 +84,19 @@ export function loadOptions(): PiCacheOptions {
     autoCompact: envBool("PI_CACHE_AUTO_COMPACT", true),
     cooldownSeconds: envFloat("PI_CACHE_COOLDOWN_SECONDS", 600),
     minGapSeconds: envFloat("PI_CACHE_MIN_GAP_SECONDS", 240),
+    // Fast compaction: env beats the owned settings switch beats default on.
+    fastCompact: envBool(
+      "PI_CACHE_FAST_COMPACT",
+      stored.fastCompaction ?? true,
+    ),
+    settingsPath: userSettingsPath(),
+    // Compaction-pressure ramp. Defaults: begin at 50% usable context,
+    // saturate at 85%; a fully warm request halves the pressure and a cold
+    // request earns a 25% premium (so pressure can exceed raw utilization).
+    pressureStart: envFloat("PI_CACHE_PRESSURE_START", 0.5),
+    pressureFull: envFloat("PI_CACHE_PRESSURE_FULL", 0.85),
+    pressureGamma: envFloat("PI_CACHE_PRESSURE_GAMMA", 2),
+    pressureCacheDiscount: envFloat("PI_CACHE_PRESSURE_CACHE_DISCOUNT", 0.5),
+    pressureColdPremium: envFloat("PI_CACHE_PRESSURE_COLD_PREMIUM", 0.25),
   };
 }

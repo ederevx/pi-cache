@@ -7,6 +7,7 @@
 
 import { test, assert, assertEq } from "./harness.ts";
 import { AutocompactController } from "../src/autocompact.ts";
+import { CompactionPressure } from "../src/pressure.ts";
 
 const opts = { enabled: true, cooldownSeconds: 0, minGapSeconds: 240 };
 
@@ -96,4 +97,33 @@ test("autocompact: cooldown turns gate repeated compaction", () => {
   assertEq(blocked.reason, "cooldown");
   c.noteTurn(6);
   assertEq(c.decide(85, signals()).shouldCompact, true, "cooldown turns elapsed");
+});
+
+test("autocompact: pressure draw fires at high tokens", () => {
+  const pressure = new CompactionPressure({ random: () => 0 });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure });
+  c.noteTurn(0);
+  const verdict = c.decide({ tokens: 180_000, contextWindow: 200_000, percent: 90 }, signals());
+  assertEq(verdict.shouldCompact, true);
+  assertEq(verdict.reason, "compaction pressure");
+  assert(verdict.probability === 1, "saturated pressure probability");
+});
+
+test("autocompact: pressure draw can decline below the ramp", () => {
+  const pressure = new CompactionPressure({ random: () => 0.999999 });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure });
+  c.noteTurn(0);
+  const verdict = c.decide({ tokens: 120_000, contextWindow: 200_000, percent: 60 }, signals());
+  assertEq(verdict.shouldCompact, false);
+  assertEq(verdict.reason, "pressure below draw");
+});
+
+test("autocompact: cache-neutral fast compaction relaxes the warm gate", () => {
+  const warm = signals({ lastUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }) });
+  const plain = new AutocompactController(opts);
+  plain.noteTurn(0);
+  assertEq(plain.decide(90, warm).shouldCompact, false, "warm block without fast compaction");
+  const neutral = new AutocompactController({ ...opts, cacheNeutral: true });
+  neutral.noteTurn(0);
+  assertEq(neutral.decide(90, warm).shouldCompact, true, "warm allowed when cache-neutral");
 });

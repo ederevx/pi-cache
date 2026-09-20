@@ -16,8 +16,10 @@ Checks:
   2. Extension formatting: the entry module (src/index.ts) declares a
      default export, and src/ contains only .ts files (no .mjs or
      stray artifacts).
-  3. Soft-compaction removal completeness: the removed feature's
-     identifiers must not reappear in src/.
+  3. Legacy soft-compaction/store identifiers must not reappear in
+     src/. Fast cache-aware compaction is an intentional reintroduction
+     under new names (fastcompact.ts, FastCompactionController,
+     FAST_SUMMARY_STUB); only the retired store/legacy names stay banned.
 """
 
 import os

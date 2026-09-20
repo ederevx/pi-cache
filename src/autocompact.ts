@@ -3,8 +3,8 @@
  *
  * One responsibility: decide whether to programmatically trigger
  * compaction, and when. Compaction itself is cache-transparent (pi
- * summarizes with cacheRetention:"none" and a fresh routing session),
- * so the only cache-aware choice is WHEN: the expensive part (summarizer
+ * summarizes with cacheRetention:"none" and a fresh routing session), so
+ * the only cache-aware choice is WHEN: the expensive part (summarizer
  * plus the next full prefix re-write) should land in a window that is
  * already cold, never mid-warm-cache.
  *
@@ -17,11 +17,20 @@
  * anyway (TTL expiry after a gap, provider move, churn), so compaction
  * piles no extra write cost on a warm window.
  *
+ * Compaction pressure: when a `CompactionPressure` model is supplied, the
+ * fixed percent threshold is replaced by a probabilistic draw whose
+ * probability rises with context tokens (and cache/cold economics), so a
+ * larger context is monotonically more likely to compact. `cacheNeutral`
+ * (fast compaction on) relaxes the cold-window requirement, because the
+ * fast override makes the compaction itself prefix-stable.
+ *
  * Guards (audit, docs/implementation-reference.md): only fire when the
  * agent is idle (agent_settled / ctx.isIdle); only when no compaction
  * entry is last in the session; never within the cooldown window; fire-
  * and-forget via callbacks; all decisions owned here.
  */
+
+import type { CompactionPressure } from "./pressure.ts";
 
 export interface AutocompactSignal {
   /** Last completed turn's usage, if any. */
@@ -34,17 +43,34 @@ export interface AutocompactSignal {
   affinityRotated(): boolean;
 }
 
+/** The context-usage fields the controller reads (pi's `ContextUsage`). */
+export interface ContextUsageLike {
+  percent?: number | null;
+  tokens?: number | null;
+  contextWindow?: number;
+}
+
 export interface AutocompactOptions {
   enabled: boolean;
   /** Minimum seconds between automatic compactions. */
   cooldownSeconds: number;
   /** Minimum idle-so-far gap (s) that indicates a provider TTL expired. */
   minGapSeconds: number;
+  /**
+   * Fast compaction is active, so a compaction is prefix-stable and a warm
+   * window costs nothing extra: relax the cold/churn requirement.
+   */
+  cacheNeutral?: boolean;
+  /** Probabilistic pressure model; absent = fixed percent threshold. */
+  pressure?: CompactionPressure;
 }
 
 export interface AutocompactVerdict {
   shouldCompact: boolean;
   reason: string | undefined;
+  /** Reported pressure/probability when the pressure model decided. */
+  pressure?: number;
+  probability?: number;
 }
 
 export class AutocompactController {
@@ -66,30 +92,75 @@ export class AutocompactController {
     this.lastTurnIndex = turnIndex;
   }
 
+  /** Live switch: fast compaction changed from /cache-settings. */
+  setCacheNeutral(cacheNeutral: boolean): void {
+    this.opts.cacheNeutral = cacheNeutral;
+  }
+
   /** Decide after a run settled (agent_settled guarantees idle). */
   decide(
-    contextPercent: number | undefined,
+    usageOrPercent: number | ContextUsageLike | undefined,
     signals: AutocompactSignal,
   ): AutocompactVerdict {
     if (!this.opts.enabled) return { shouldCompact: false, reason: undefined };
     const usage = signals.lastUsage();
     if (!usage) return { shouldCompact: false, reason: "no usage yet" };
+
+    const percent =
+      typeof usageOrPercent === "number"
+        ? usageOrPercent
+        : (usageOrPercent?.percent ?? undefined);
+    const tokens =
+      typeof usageOrPercent === "object" && usageOrPercent !== null
+        ? (usageOrPercent.tokens ?? undefined)
+        : undefined;
+    const contextWindow =
+      typeof usageOrPercent === "object" && usageOrPercent !== null
+        ? usageOrPercent.contextWindow
+        : undefined;
+
     const cold = usage.cacheRead + usage.input > 0
       ? usage.cacheRead / (usage.cacheRead + usage.input) <= AutocompactController.COLD_RATIO
       : false;
     // A churning prefix head (tools/system not byte-stable) or a rotating
     // provider session-affinity header invalidates the provider cache
     // regardless of TTL — the window is already cold, so the cost of
-    // compaction is not additive here. This is the natural trigger for
-    // pi-cache's own tool-sort/dedup churn signal and the affinity observer.
+    // compaction is not additive here.
     const churned = signals.headChurn() > 0 || signals.affinityRotated();
-    if (!cold && !churned) return { shouldCompact: false, reason: "cache warm" };
+    // Without fast compaction a warm window must not be compacted (the
+    // summarizer plus full prefix re-write would be charged fresh).
+    if (!cold && !churned && !this.opts.cacheNeutral) {
+      return { shouldCompact: false, reason: "cache warm" };
+    }
+
+    // Context gate: a probabilistic pressure draw when the model and a
+    // token count exist, else the fixed percent threshold.
+    let pressure: number | undefined;
+    let probability: number | undefined;
     if (
-      typeof contextPercent !== "number" ||
-      contextPercent < AutocompactController.MIN_CONTEXT_PERCENT
+      this.opts.pressure &&
+      typeof tokens === "number" &&
+      typeof contextWindow === "number"
+    ) {
+      const verdict = this.opts.pressure.sample({
+        tokens,
+        contextWindow,
+        reserveTokens: 0,
+        cacheRead: usage.cacheRead,
+        input: usage.input,
+      });
+      pressure = verdict.pressure;
+      probability = verdict.probability;
+      if (!verdict.fire) {
+        return { shouldCompact: false, reason: "pressure below draw", pressure, probability };
+      }
+    } else if (
+      typeof percent !== "number" ||
+      percent < AutocompactController.MIN_CONTEXT_PERCENT
     ) {
       return { shouldCompact: false, reason: "context below threshold" };
     }
+
     const gapMs = signals.msSinceLastTurn();
     const neverCompacted = this.lastCompactedTurn < 0;
     const cooldownOk =
@@ -97,14 +168,24 @@ export class AutocompactController {
         Date.now() - this.lastCompactedAt >= this.opts.cooldownSeconds * 1000) &&
       (neverCompacted ||
         this.lastTurnIndex - this.lastCompactedTurn >= AutocompactController.COOLDOWN_TURNS);
-    if (!cooldownOk) return { shouldCompact: false, reason: "cooldown" };
+    if (!cooldownOk) return { shouldCompact: false, reason: "cooldown", pressure, probability };
     // Only a TTL-style cold gap needs a minimum elapsed time to confirm the
-    // provider prefix was truly lost; churn/rotation is already visible, so
-    // the gap requirement is waived for that path.
-    if (!churned && gapMs < this.opts.minGapSeconds * 1000) {
-      return { shouldCompact: false, reason: "cold without a gap" };
+    // provider prefix was truly lost; churn/rotation and cache-neutral fast
+    // compaction are already visible/safe, so the gap requirement is waived.
+    if (!churned && !this.opts.cacheNeutral && gapMs < this.opts.minGapSeconds * 1000) {
+      return { shouldCompact: false, reason: "cold without a gap", pressure, probability };
     }
-    return { shouldCompact: true, reason: churned ? "churned prefix + context threshold" : "cold window + context threshold" };
+    return {
+      shouldCompact: true,
+      reason: this.reason(churned, pressure !== undefined),
+      pressure,
+      probability,
+    };
+  }
+
+  private reason(churned: boolean, fromPressure: boolean): string {
+    if (fromPressure) return "compaction pressure";
+    return churned ? "churned prefix + context threshold" : "cold window + context threshold";
   }
 
   /** Record a successful compaction to reset the cooldowns. */

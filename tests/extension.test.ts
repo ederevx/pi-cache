@@ -18,6 +18,7 @@ import {
 } from "./harness.ts";
 import { join } from "node:path";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { FAST_SUMMARY_STUB } from "../src/fastcompact.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
 
@@ -84,7 +85,9 @@ const PI_CACHE_KEYS = [
   "PI_CACHE_PIN_SESSION",
   "PI_CACHE_ADVISORY",
   "PI_CACHE_AUTO_COMPACT",
+  "PI_CACHE_FAST_COMPACT",
   "PI_CACHE_LEDGER",
+  "PI_CACHE_SETTINGS",
 ];
 
 function assertToolNames(tools: Array<{ name: string }>, expected: string[]): void {
@@ -99,7 +102,8 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
   mkdirSync(root, { recursive: true });
   setEnv({
     PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
-    PI_CACHE_SOFT_MIN_TOKENS: "1000", // legacy var must be ignored
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+    PI_CACHE_FAST_COMPACT: "1",
   });
   try {
     const { default: factory } = await import("../src/index.ts");
@@ -165,6 +169,21 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     assertEq((compEntry.data as { keptEntryId: string }).keptEntryId, "E1");
     assertEq((compEntry.data as { fromExtension: boolean }).fromExtension, true);
 
+    // 4b. Fast compaction override: with the switch on, any compaction
+    // result is replaced by the byte-stable stub at pi's own cut point.
+    const compactResults = await pi.emit(
+      "session_before_compact",
+      {
+        preparation: { firstKeptEntryId: "E9", tokensBefore: 50_000, messagesToSummarize: [] },
+        reason: "threshold",
+      },
+      ctx,
+    );
+    const fast = compactResults[1] as { compaction?: { summary: string; firstKeptEntryId: string } } | undefined;
+    assert(fast?.compaction !== undefined, "fast override returned a compaction");
+    assertEq(fast!.compaction!.summary, FAST_SUMMARY_STUB);
+    assertEq(fast!.compaction!.firstKeptEntryId, "E9");
+
     // 5. /cache-stats reflects ledger + churn + affinity + compactions.
     let notified = "";
     const statsCtx = { ui: { notify: (text: string) => { notified = text; } } };
@@ -188,7 +207,7 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     };
     await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
     assertEq(selectTitle, "pi-cache settings");
-    assertEq(selectOptions.length, 6, "one settings row per option");
+    assertEq(selectOptions.length, 7, "one settings row per option");
 
     // 7. Fail-open: garbage events never throw.
     await pi.emit("message_end", null, null);
@@ -207,7 +226,9 @@ test("extension: warm-cache advisory is observational", async () => {
   mkdirSync(root, { recursive: true });
   setEnv({
     PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
     PI_CACHE_ADVISORY: "1",
+    PI_CACHE_FAST_COMPACT: "0",
   });
   try {
     const { default: factory } = await import("../src/index.ts");
@@ -250,6 +271,7 @@ test("extension: disabled features short-circuit", async () => {
   mkdirSync(root, { recursive: true });
   setEnv({
     PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
     PI_CACHE_AUTO_COMPACT: "0",
     PI_CACHE_PIN_SESSION: "0",
   });
@@ -274,6 +296,56 @@ test("extension: disabled features short-circuit", async () => {
     const statsCtx = { ui: { notify: (text: string) => { notified = text; } } };
     await pi.commands.get("cache-stats")!.handler([], statsCtx as never);
     assert(notified.includes("compactions 0"), "no compactions recorded");
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
+test("extension: fast-compaction switch toggles and persists", async () => {
+  const root = join(scratchDir(), "e2e-switch");
+  mkdirSync(root, { recursive: true });
+  const settingsFile = join(root, "settings.json");
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: settingsFile,
+    PI_CACHE_AUTO_COMPACT: "0",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    const ctx = {};
+
+    const before = await pi.emit(
+      "session_before_compact",
+      { preparation: { firstKeptEntryId: "E1", tokensBefore: 10, messagesToSummarize: [] }, reason: "manual" },
+      ctx,
+    );
+    assert(before[1] !== undefined, "fast compaction on by default");
+
+    // Select the Fast compaction row: it must flip off and persist.
+    let options: string[] = [];
+    const settingsCtx = {
+      mode: "tui",
+      ui: {
+        select: (_t: string, o: string[]) => {
+          options = o;
+          return Promise.resolve(o.find((line) => line.startsWith("Fast compaction:"))!);
+        },
+        notify: () => {},
+      },
+    };
+    await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
+    assert(options.some((line) => line.startsWith("Fast compaction:")), "switch row present");
+    const saved = JSON.parse(readFileSync(settingsFile, "utf8")) as { fastCompaction?: boolean };
+    assertEq(saved.fastCompaction, false, "switch persisted off");
+
+    const after = await pi.emit(
+      "session_before_compact",
+      { preparation: { firstKeptEntryId: "E2", tokensBefore: 10, messagesToSummarize: [] }, reason: "threshold" },
+      ctx,
+    );
+    assertEq(after[1], undefined, "fast compaction off after toggle");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }

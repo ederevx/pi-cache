@@ -1,12 +1,13 @@
 /**
- * pi-cache — settings presenter.
+ * pi-cache — settings presenter and switch selector.
  *
  * One responsibility: render the resolved PI_CACHE_* options in pi's
- * settings-UI layout. pi's extension selector takes PLAIN STRING options
+ * settings-UI layout and resolve the user's choice back to a row id. pi's
+ * extension selector takes PLAIN STRING options
  * (select(title, options: string[], opts?) -> Promise<string|undefined>),
- * so each row is formatted as "title — description (current: value)".
- * Fire-and-forget with a rejection guard; non-UI modes print the same
- * lines to stderr. Never mutates options (read-only view).
+ * so each row is formatted as "title: description — current: value" and
+ * matched back by identity. Non-UI modes print the same lines to stderr.
+ * Never mutates options (read-only view); the caller owns persistence.
  */
 
 import type { PiCacheOptions } from "./constants.ts";
@@ -20,7 +21,7 @@ export interface SettingRow {
 
 /** Formatted strings in pi's settings-row layout for the selector. */
 function formatRows(rows: SettingRow[]): string[] {
-  return rows.map((r) => `${r.description} — current: ${r.value}`);
+  return rows.map((r) => `${r.title}: ${r.description} — current: ${r.value}`);
 }
 
 export class SettingsPresenter {
@@ -34,27 +35,33 @@ export class SettingsPresenter {
       { id: "pinSession", title: "Session pin", description: "Inject a stable provider session id for stateless requests so sibling processes share the provider cache bucket", value: on(opts.pinSession) },
       { id: "advisory", title: "Compaction advisory", description: "Note warm-cache compactions that re-write the prefix", value: on(opts.advisory) },
       { id: "autoCompact", title: "Auto-compaction", description: "Compact in cold-window turns (cache already lost) at idle", value: on(opts.autoCompact) },
+      { id: "fastCompact", title: "Fast compaction", description: "Override pi's summarizer with a byte-stable fast cache-aware compaction", value: on(opts.fastCompact) },
     ];
   }
 
-  /** Present via pi's selector UI when available; else print the rows. */
-  present(opts: PiCacheOptions, ui: { select?: unknown } | undefined, mode: string | undefined): void {
+  /**
+   * Present via pi's selector UI when available and return the chosen row
+   * id; otherwise print the rows and return undefined.
+   */
+  async choose(
+    opts: PiCacheOptions,
+    ui: { select?: unknown } | undefined,
+    mode: string | undefined,
+  ): Promise<string | undefined> {
     const rows = this.rows(opts);
     const lines = formatRows(rows);
     if (mode === "tui" && ui && typeof ui.select === "function") {
       try {
-        const promise = (ui.select as (t: string, o: string[], _opts?: unknown) => Promise<unknown>)(
+        const selected = await (ui.select as (t: string, o: string[], _opts?: unknown) => Promise<unknown>)(
           "pi-cache settings",
           lines,
         );
-        void Promise.resolve(promise).catch(() => {
-          console.error("pi-cache-settings:\n  " + lines.join("\n  "));
-        });
-        return;
+        return rows.find((r, i) => lines[i] === selected)?.id;
       } catch {
-        /* fall through to stderr listing */
+        /* fall through to the stderr listing */
       }
     }
     console.error("pi-cache-settings:\n  " + lines.join("\n  "));
+    return undefined;
   }
 }
