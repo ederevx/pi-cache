@@ -31,8 +31,10 @@ As a pi package (see `docs/packages.md`):
 
 The repo declares its extension in `package.json` under the `pi` key
 (`pi.extensions` -> `./src/index.ts`) and lists the bundled pi core
-packages as `peerDependencies`. There is no build step and no third-party
-runtime dependency; pi loads `src/*.ts` in place.
+packages as `peerDependencies` and marks them optional in
+`peerDependenciesMeta`, so pi's `npm install` in a git clone does not
+vendor the host's bundled packages. There is no build step and no
+third-party runtime dependency; pi loads `src/*.ts` in place.
 
 As a flat extension copy:
 
