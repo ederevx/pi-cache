@@ -3,6 +3,19 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.1.3] - 2026-09-20
+
+### Fixed
+
+- Emit LF-only lookup records from the uninstall manifest helper; on
+  Windows, Python's text stdout translated each newline to CRLF, which
+  made every hash comparison fail and left every owned file in place.
+- Make the installer round-trip and the default-path assertions in the
+  test suite platform-independent, covering Windows backslash
+  separators and MSYS-style `/c/...` roots.
+
+[0.1.3]: https://github.com/ederevx/pi-cache/releases/tag/v0.1.3
+
 ## [0.1.2] - 2026-09-20
 
 ### Changed
