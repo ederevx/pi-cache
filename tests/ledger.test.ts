@@ -21,6 +21,12 @@ class MemorySink implements RecordSink {
   load(): UsageRow[] {
     return [...this.rows];
   }
+  rewrite(rows: UsageRow[]): void {
+    this.rows = rows.map((row) => ({ ...row }));
+  }
+  flush(): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 const usage = {
@@ -118,4 +124,45 @@ test("ledger: torn/corrupt ledger lines are skipped", () => {
   );
   const ledger = new CacheLedger(new FileRecordSink(file), true);
   assertEq(ledger.totals().n, 1, "only the valid line loads");
+});
+
+test("ledger: retention bounds the file and rewrites on load", () => {
+  const sink = new MemorySink();
+  const now = Date.now();
+  sink.rows = [0, 1, 2, 3, 4].map((i) => ({
+    id: `r${i}`,
+    seq: i,
+    ts: now + i,
+    pid: 1,
+    session: "s",
+    model: "m",
+    input: 1,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 1,
+  }));
+  const ledger = new CacheLedger(sink, true, 2);
+  assertEq(ledger.totals().n, 2, "only the newest rows retained");
+  assertEq(sink.rows.length, 2, "file rewritten to the retained window");
+  assertDeepEq(sink.rows.map((r) => r.id), ["r3", "r4"]);
+});
+
+test("ledger: compact rewrites only when rows were dropped", () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true, 2);
+  ledger.record(usage, "m", "s");
+  ledger.record(usage, "m", "s");
+  assertEq(ledger.compact(), false, "within the window: no rewrite");
+  ledger.record(usage, "m", "s");
+  assertEq(ledger.compact(), true, "over the window: rewrite");
+  assertEq(ledger.totals().n, 2);
+  assertEq(sink.rows.length, 2);
+});
+
+test("ledger: flush resolves through the sink", async () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true);
+  await ledger.flush();
+  assert(true, "flush resolved");
 });

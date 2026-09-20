@@ -1,23 +1,25 @@
 /**
  * pi-cache — file ledger sink.
  *
- * One responsibility: append serialized usage rows to a JSONL file under
- * the pi-cache dot-directory, creating the directory on demand. Errors
+ * One responsibility: own the ledger bytes — append rows, rehydrate them,
+ * atomically rewrite the retained window, and flush queued appends. Errors
  * are swallowed (fail-open): telemetry must never break the session.
  */
 
 import { appendFile, mkdir } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { RecordSink, UsageRow } from "./ledger.ts";
 
 export class FileRecordSink implements RecordSink {
-  private prepared: boolean = false;
+  private prepared = false;
+  /** Serializes appends; `flush` awaits the chain. */
+  private pending: Promise<void> = Promise.resolve();
 
   constructor(private readonly path: string) {}
 
   append(row: UsageRow): void {
-    void this.appendAsync(row);
+    this.pending = this.pending.then(() => this.appendAsync(row));
   }
 
   load(): UsageRow[] {
@@ -38,6 +40,24 @@ export class FileRecordSink implements RecordSink {
     } catch {
       return [];
     }
+  }
+
+  /** Replace the file with `rows` atomically (same-dir temp + rename). */
+  rewrite(rows: UsageRow[]): void {
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+      const tmp = `${this.path}.${process.pid}.tmp`;
+      const body = rows.map((row) => JSON.stringify(row)).join("\n");
+      writeFileSync(tmp, body.length > 0 ? body + "\n" : "", "utf8");
+      renameSync(tmp, this.path);
+      this.prepared = true;
+    } catch {
+      /* telemetry must never break the session */
+    }
+  }
+
+  async flush(): Promise<void> {
+    await this.pending;
   }
 
   private async appendAsync(row: UsageRow): Promise<void> {

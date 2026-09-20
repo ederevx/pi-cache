@@ -24,6 +24,7 @@
  *   session_compact_failed   — failure advisory
  *   session_before_tree      — fast cache-aware branch-summary override
  *   session_tree             — branch-summary telemetry
+ *   session_shutdown         — flush appends, then bound the ledger
  *
  * Commands:
  *   /cache-stats             — global + session cache stats, live pressure,
@@ -38,6 +39,7 @@
 import { loadOptions } from "./constants.ts";
 import { CacheLedger } from "./ledger.ts";
 import { FileRecordSink } from "./sink.ts";
+import { TempSweeper } from "./temp-sweep.ts";
 import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
@@ -50,13 +52,20 @@ import { UserSettingsStore } from "./user-settings.ts";
 import { SettingsPresenter } from "./settings.ts";
 import { CacheStatsPresenter } from "./stats.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { dirname } from "node:path";
 
 /** Normalize unknown handler payload shapes with a safe local view. */
 type ModelView = { model?: { id?: string } | undefined } | undefined;
 
 export default function piCacheExtension(pi: ExtensionAPI): void {
   const opts = loadOptions();
-  const ledger = new CacheLedger(new FileRecordSink(opts.ledgerPath), opts.telemetry);
+  // Sweep stale atomic-write temp files before the ledger/settings are read.
+  new TempSweeper().sweep(dirname(opts.ledgerPath));
+  const ledger = new CacheLedger(
+    new FileRecordSink(opts.ledgerPath),
+    opts.telemetry,
+    opts.ledgerMaxRows,
+  );
   const normalizer = new PrefixNormalizer({
     sortTools: opts.sortTools,
     dedupTools: opts.dedupTools,
@@ -250,6 +259,17 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       }
     } catch {
       /* telemetry only */
+    }
+  });
+
+  pi.on("session_shutdown", async () => {
+    // Flush queued appends, then drop rows beyond the retained window and
+    // rewrite the file so it cannot grow without limit.
+    try {
+      await ledger.flush();
+      ledger.compact();
+    } catch {
+      /* telemetry must never break shutdown */
     }
   });
 

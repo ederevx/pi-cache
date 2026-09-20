@@ -38,15 +38,20 @@ with the `/cache-settings` switch (which persists to pi-cache's owned
 the cache-window gate is relaxed because the override is prefix-stable,
 and with it off compaction stays inside cold/churned windows.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
-reloads. Live views: `/cache-stats` (global and session scopes, with live
-compaction pressure) and `/cache-settings`.
+reloads. The ledger keeps the most recent `PI_CACHE_LEDGER_MAX_ROWS` rows
+(default 20000, trimmed on load and at session shutdown), and stale
+atomic-write temp files are swept at load. Live views: `/cache-stats`
+(global and session scopes, with live compaction pressure) and
+`/cache-settings`.
 
 ## Uninstall
 
     bash scripts/uninstall.sh
 
-Removes exactly the manifest-owned files; the telemetry ledger is
-left in place.
+Removes exactly the manifest-owned files, hash-verified against the
+manifest so a repurposed path is never deleted. The telemetry ledger and
+settings are left in place; `bash scripts/uninstall.sh --purge` also
+removes them plus any stale temp files.
 
 ## Design pillars
 
@@ -85,9 +90,10 @@ left in place.
 ## Repo layout
 
 - `src/` — extension source (house layout: `index.ts` wiring + per-
-  responsibility modules: `ledger.ts`, `normalizer.ts`, `compaction.ts`,
-  `affinity.ts`, `session-pin.ts`, `autocompact.ts`, `pressure.ts`,
-  `fastcompact.ts`, `user-settings.ts`, `sink.ts`, `settings.ts`,
+  responsibility modules: `ledger.ts`, `sink.ts`, `normalizer.ts`,
+  `compaction.ts`, `affinity.ts`, `session-pin.ts`, `autocompact.ts`,
+  `pressure.ts`, `fastcompact.ts`, `fast-switch.ts`, `feature-switch.ts`,
+  `user-settings.ts`, `settings.ts`, `stats.ts`, `temp-sweep.ts`,
   `constants.ts`)
 - `tests/` — zero-dependency validation + OOP/format lint suite
   (`tests/run.ts`, `tests/oop_lint.py`, per-module tests, the

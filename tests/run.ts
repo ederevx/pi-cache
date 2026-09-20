@@ -38,6 +38,7 @@ try {
 import "./constants.test.ts";
 import "./ledger.test.ts";
 import "./normalizer.test.ts";
+import "./temp-sweep.test.ts";
 import "./advisor.test.ts";
 import "./affinity.test.ts";
 import "./session-pin.test.ts";
