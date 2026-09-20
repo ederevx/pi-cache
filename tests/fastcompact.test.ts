@@ -6,7 +6,7 @@
  */
 
 import { test, assert, assertEq } from "./harness.ts";
-import { FastCompactionController, FAST_SUMMARY_STUB } from "../src/fastcompact.ts";
+import { FastCompactionController, FAST_BRANCH_STUB, FAST_SUMMARY_STUB } from "../src/fastcompact.ts";
 
 const prep = { firstKeptEntryId: "E42", tokensBefore: 123_456 };
 
@@ -47,4 +47,14 @@ test("fastcompact: stats count completed fast compactions", () => {
   c.recordCompaction();
   c.recordCompaction();
   assertEq(c.stats().compactions, 2);
+});
+
+test("fastcompact: branch proposal mirrors pi's summarize guards", () => {
+  const c = new FastCompactionController({ enabled: true });
+  assertEq(c.proposeBranch(3, false), undefined, "no summary requested");
+  assertEq(c.proposeBranch(0, true), undefined, "nothing to summarize");
+  const proposal = c.proposeBranch(3, true);
+  assert(proposal !== undefined, "branch proposal expected");
+  assertEq(proposal!.summary, FAST_BRANCH_STUB);
+  assertEq(new FastCompactionController({ enabled: false }).proposeBranch(3, true), undefined);
 });
