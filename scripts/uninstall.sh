@@ -22,13 +22,16 @@ if [[ ! -f "$manifest" ]]; then
   exit 1
 fi
 
-# Emit "path<TAB>sha256" for every owned file.
+# Emit "path<TAB>sha256" for every owned file, LF-only: Windows text
+# stdout translates "\n" to "\r\n", which would trail every value with
+# a CR that bash mapfile keeps and every hash comparison then fails on.
 mapfile -t owned < <(python3 - "$manifest" <<'EOF'
 import json, sys
 m = json.load(open(sys.argv[1]))
 hashes = m.get("hashes", {})
+out = sys.stdout.buffer
 for path in m.get("owned", []):
-    print(f"{path}\t{hashes.get(path, '')}")
+    out.write(f"{path}\t{hashes.get(path, '')}\n".encode())
 EOF
 )
 
