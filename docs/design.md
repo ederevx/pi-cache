@@ -24,7 +24,8 @@ opt-in and A/B-validated.
 
 - `message_end` -> accumulate `message.usage{cacheRead, cacheWrite, input,
   output, cost}` per turn and per session; write append-only JSONL to the
-  extension's data dir; expose `/cache-stats` via `registerCommand`.
+  extension's data dir; expose `/cache-stats` (global + session scopes with
+  live compaction pressure) via `registerCommand`.
 - Uses raw usage fields only (Claude Code #94224 showed derived sums
   over-count ~2.5x).
 - Settles open questions with data: DeepSeek read pricing on this machine

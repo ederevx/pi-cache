@@ -21,10 +21,6 @@ export interface UserSettings {
 export class UserSettingsStore {
   constructor(private readonly file: string) {}
 
-  path(): string {
-    return this.file;
-  }
-
   load(): UserSettings {
     try {
       const parsed = JSON.parse(readFileSync(this.file, "utf8")) as unknown;

@@ -44,6 +44,7 @@ import "./session-pin.test.ts";
 import "./autocompact.test.ts";
 import "./pressure.test.ts";
 import "./fastcompact.test.ts";
+import "./stats.test.ts";
 import "./extension.test.ts";
 
 // 2. Unit + end-to-end suite.

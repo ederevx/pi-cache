@@ -9,7 +9,6 @@
  */
 
 import type { Usage } from "@earendil-works/pi-ai";
-import type { AutocompactSignal } from "./autocompact.ts";
 
 /** A single recorded request row in the ledger. */
 export interface UsageRow {
@@ -39,7 +38,7 @@ export interface RecordSink {
   load(): UsageRow[];
 }
 
-export class CacheLedger implements AutocompactSignal {
+export class CacheLedger {
   private rows: UsageRow[] = [];
   /** This process's own rows only — the auto-compaction trigger reads these
    *  last-usage/gap signals from the live session, never from rehydrated
@@ -85,9 +84,23 @@ export class CacheLedger implements AutocompactSignal {
     this.sink.append(row);
   }
 
-  /** Aggregated counters for summaries and advisors (cumulative). */
+  /** Aggregated counters over the whole ledger (all processes). */
   totals(): { input: number; cacheRead: number; cacheWrite: number; n: number } {
-    return this.rows.reduce(
+    return this.sumRows(this.rows);
+  }
+
+  /** Aggregated counters over this process's own rows only. */
+  sessionTotals(): { input: number; cacheRead: number; cacheWrite: number; n: number } {
+    return this.sumRows(this.sessionRows);
+  }
+
+  private sumRows(rows: UsageRow[]): {
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    n: number;
+  } {
+    return rows.reduce(
       (a, r) => ({
         input: a.input + r.input,
         cacheRead: a.cacheRead + r.cacheRead,
@@ -96,13 +109,6 @@ export class CacheLedger implements AutocompactSignal {
       }),
       { input: 0, cacheRead: 0, cacheWrite: 0, n: 0 },
     );
-  }
-
-  /** Cache-ratio numerator over the session; 0 when nothing recorded. */
-  cacheRatio(): number {
-    const t = this.totals();
-    const denom = t.input + t.cacheRead;
-    return denom > 0 ? t.cacheRead / denom : 0;
   }
 
   /** Last completed turn's usage (this process only), for the
@@ -116,27 +122,5 @@ export class CacheLedger implements AutocompactSignal {
   msSinceLastTurn(): number {
     const last = this.sessionRows[this.sessionRows.length - 1];
     return last ? Date.now() - last.ts : Number.POSITIVE_INFINITY;
-  }
-
-  /** Prefix-head churn (0 when no churn signal is available). */
-  headChurn(): number {
-    return 0;
-  }
-
-  /** Whether the provider session-affinity header has rotated (0/`false`
-   *  default when no affinity signal is wired). */
-  affinityRotated(): boolean {
-    return false;
-  }
-
-  /** One-line summary for the /cache-stats command and status widget. */
-  summary(): string {
-    const t = this.totals();
-    if (t.n === 0) return "pi-cache: no usage recorded yet";
-    return (
-      `pi-cache: ${t.n} req, read ${t.cacheRead.toLocaleString()} / ` +
-      `in ${t.input.toLocaleString()} (${(this.cacheRatio() * 100).toFixed(1)}%), ` +
-      `writes ${t.cacheWrite.toLocaleString()}`
-    );
   }
 }

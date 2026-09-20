@@ -13,7 +13,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { UserSettingsStore, type UserSettings } from "./user-settings.ts";
 
 /** Runtime data directory for pi-cache's ledger and settings. Hidden dot-dir. */
-export const LEDGER_DIR_NAME = ".pi-cache";
+const LEDGER_DIR_NAME = ".pi-cache";
 
 export interface PiCacheOptions {
   /** Whether telemetry is recorded at all. */
@@ -65,7 +65,7 @@ const LEDGER_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "ledger.jsonl");
 const SETTINGS_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "settings.json");
 
 /** The owned settings file path (env override exists for hermetic tests). */
-export function userSettingsPath(): string {
+function userSettingsPath(): string {
   return process.env["PI_CACHE_SETTINGS"] || SETTINGS_DEFAULT;
 }
 

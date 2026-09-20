@@ -58,10 +58,11 @@ test("ledger: ignores undefined usage and disabled ledger", () => {
   assertEq(sink2.rows.length, 0, "undefined usage records nothing");
 });
 
-test("ledger: totals, cache ratio, last usage, gap", () => {
+test("ledger: totals, session totals, last usage, gap", () => {
   const sink = new MemorySink();
   const ledger = new CacheLedger(sink, true);
-  assertEq(ledger.cacheRatio(), 0);
+  assertEq(ledger.totals().n, 0);
+  assertEq(ledger.sessionTotals().n, 0);
   assertEq(ledger.lastUsage(), undefined);
   assertEq(ledger.msSinceLastTurn(), Number.POSITIVE_INFINITY);
 
@@ -70,13 +71,14 @@ test("ledger: totals, cache ratio, last usage, gap", () => {
   assertEq(totals.n, 1);
   assertEq(totals.input, 100);
   assertEq(totals.cacheRead, 900);
-  assert(Math.abs(ledger.cacheRatio() - 0.9) < 1e-9, "cache ratio 0.9");
+  const session = ledger.sessionTotals();
+  assertEq(session.n, 1, "session totals count this process's rows");
+  assertEq(session.cacheRead, 900);
   assertDeepEq(
     { ...ledger.lastUsage() },
     { input: 100, cacheRead: 900, cacheWrite: 250 },
   );
   assert(ledger.msSinceLastTurn() < 5000, "gap is recent");
-  assert(ledger.summary().includes("1 req"), "summary counts requests");
 });
 
 test("ledger: rehydrates rows and dedups by row id", async () => {
@@ -93,11 +95,14 @@ test("ledger: rehydrates rows and dedups by row id", async () => {
     }
   }, "rows persisted");
 
-  // Second "process": a fresh ledger over the same file.
+  // Second "process": a fresh ledger over the same file. Rehydrated rows
+  // are global only; the new process's session starts empty.
   const b = new CacheLedger(new FileRecordSink(file), true);
   assertEq(b.totals().n, 2, "rehydrated cumulative totals");
+  assertEq(b.sessionTotals().n, 0, "rehydrated rows are not session rows");
   b.record(usage, "m", "s");
   assertEq(b.totals().n, 3);
+  assertEq(b.sessionTotals().n, 1, "only this process's row is session");
   await waitFor(() => {
     const rows = readFileSync(file, "utf8").split("\n").filter(Boolean).length;
     return rows === 3;
@@ -113,12 +118,4 @@ test("ledger: torn/corrupt ledger lines are skipped", () => {
   );
   const ledger = new CacheLedger(new FileRecordSink(file), true);
   assertEq(ledger.totals().n, 1, "only the valid line loads");
-});
-
-test("ledger: session signal stubs are inert", () => {
-  // The AutocompactSignal defaults on the ledger are intentional no-ops;
-  // the wiring feeds real churn/rotation signals instead.
-  const ledger = new CacheLedger(new MemorySink(), true);
-  assertEq(ledger.headChurn(), 0);
-  assertEq(ledger.affinityRotated(), false);
 });

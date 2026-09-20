@@ -23,7 +23,8 @@
  *   session_compact          — compaction telemetry
  *
  * Commands:
- *   /cache-stats             — session cache-ratio, churn, affinity, compactions
+ *   /cache-stats             — global + session cache stats, live pressure,
+ *                              churn, affinity, compactions
  *   /cache-settings          — fast-compaction switch + resolved options
  *
  * Config: PI_CACHE_* environment variables and pi-cache's owned settings
@@ -43,6 +44,7 @@ import { CompactionPressure } from "./pressure.ts";
 import { FastCompactionController } from "./fastcompact.ts";
 import { UserSettingsStore } from "./user-settings.ts";
 import { SettingsPresenter } from "./settings.ts";
+import { CacheStatsPresenter } from "./stats.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Normalize unknown handler payload shapes with a safe local view. */
@@ -75,6 +77,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
   const settingsStore = new UserSettingsStore(opts.settingsPath);
   const settingsPresenter = new SettingsPresenter();
+  const statsPresenter = new CacheStatsPresenter();
 
   pi.on("message_end", async (event, ctx) => {
     try {
@@ -207,14 +210,22 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("cache-stats", {
-    description: "Show pi-cache usage, cache ratio, churn, affinity, compactions",
+    description: "Show global and session cache stats with live pressure",
     handler: async (_args, ctx) => {
-      const base = ledger.summary();
-      const churn = normalizer.churn();
-      const line = churn > 0 ? `${base}, head churn ${churn}` : base;
-      const text =
-        `${line}, ${affinity.status()}, compactions ${autocompact.stats().compactions} ` +
-        `(fast ${fastcompact.stats().compactions}, fast ${fastcompact.enabled ? "on" : "off"})`;
+      const usage = ctx.getContextUsage?.();
+      const pressure = autocompact.currentPressure(usage, ledger.lastUsage());
+      const text = statsPresenter.render({
+        global: ledger.totals(),
+        session: ledger.sessionTotals(),
+        churn: normalizer.churn(),
+        affinity: affinity.status(),
+        compactions: autocompact.stats().compactions,
+        fastCompactions: fastcompact.stats().compactions,
+        fastEnabled: fastcompact.enabled,
+        pressure: pressure
+          ? { pressure: pressure.pressure, probability: pressure.probability }
+          : undefined,
+      });
       // Command output is emitted through ctx (handler return values are
       // discarded by pi); toast in UI mode, fall back to stderr otherwise.
       try {

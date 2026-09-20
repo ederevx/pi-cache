@@ -127,3 +127,25 @@ test("autocompact: cache-neutral fast compaction relaxes the warm gate", () => {
   neutral.noteTurn(0);
   assertEq(neutral.decide(90, warm).shouldCompact, true, "warm allowed when cache-neutral");
 });
+
+test("autocompact: currentPressure previews the live sample", () => {
+  const pressure = new CompactionPressure({ random: () => 0.5 });
+  const c = new AutocompactController({ ...opts, pressure });
+  const verdict = c.currentPressure(
+    { tokens: 180_000, contextWindow: 200_000, percent: 90 },
+    { input: 1000, cacheRead: 0, cacheWrite: 0 },
+  );
+  assert(verdict !== undefined, "verdict expected");
+  assert(verdict!.pressure > 0.9, "cold pressure exceeds utilization");
+  assertEq(
+    c.currentPressure({ tokens: null, contextWindow: 1 }, { input: 1, cacheRead: 0, cacheWrite: 0 }),
+    undefined,
+    "null tokens cannot be sampled",
+  );
+  assertEq(
+    c.currentPressure(undefined, { input: 1, cacheRead: 0, cacheWrite: 0 }),
+    undefined,
+    "missing window cannot be sampled",
+  );
+  assertEq(c.currentPressure({ tokens: 1, contextWindow: 2 }, undefined), undefined, "no usage");
+});

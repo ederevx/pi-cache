@@ -30,7 +30,7 @@
  * and-forget via callbacks; all decisions owned here.
  */
 
-import type { CompactionPressure } from "./pressure.ts";
+import type { CompactionPressure, PressureVerdict } from "./pressure.ts";
 
 export interface AutocompactSignal {
   /** Last completed turn's usage, if any. */
@@ -193,6 +193,18 @@ export class AutocompactController {
   }
 
   /**
+   * Public preview for /cache-stats: the current pressure verdict for a
+   * live context sample, or undefined when it cannot be sampled.
+   */
+  currentPressure(
+    usageView: ContextUsageLike | undefined,
+    usage: { input: number; cacheRead: number; cacheWrite: number } | undefined,
+  ): PressureVerdict | undefined {
+    if (!usage) return undefined;
+    return this.samplePressure(this.readContext(usageView), usage);
+  }
+
+  /**
    * Context gate: a probabilistic pressure draw when the model and a token
    * count exist, else the fixed percent threshold.
    */
@@ -206,18 +218,8 @@ export class AutocompactController {
     probability?: number;
     fromPressure: boolean;
   } {
-    if (
-      this.opts.pressure &&
-      typeof view.tokens === "number" &&
-      typeof view.contextWindow === "number"
-    ) {
-      const verdict = this.opts.pressure.sample({
-        tokens: view.tokens,
-        contextWindow: view.contextWindow,
-        reserveTokens: 0,
-        cacheRead: usage.cacheRead,
-        input: usage.input,
-      });
+    const verdict = this.samplePressure(view, usage);
+    if (verdict) {
       return {
         allowed: verdict.fire,
         reason: verdict.fire ? undefined : "pressure below draw",
@@ -233,6 +235,27 @@ export class AutocompactController {
       return { allowed: false, reason: "context below threshold", fromPressure: false };
     }
     return { allowed: true, fromPressure: false };
+  }
+
+  /** Sample the pressure model, or undefined without tokens + window. */
+  private samplePressure(
+    view: AutocompactView,
+    usage: { input: number; cacheRead: number; cacheWrite: number },
+  ): PressureVerdict | undefined {
+    if (
+      !this.opts.pressure ||
+      typeof view.tokens !== "number" ||
+      typeof view.contextWindow !== "number"
+    ) {
+      return undefined;
+    }
+    return this.opts.pressure.sample({
+      tokens: view.tokens,
+      contextWindow: view.contextWindow,
+      reserveTokens: 0,
+      cacheRead: usage.cacheRead,
+      input: usage.input,
+    });
   }
 
   /** Whether the seconds/turns cooldown since the last compaction elapsed. */
