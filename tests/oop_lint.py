@@ -43,6 +43,13 @@ TS_CONST_CONTAINER = re.compile(
     r"^\s*(export\s+)?const\s+\w+(\s*:[^=]+)?\s*=\s*(new\s+(Map|Set)\b|\{|\[)"
 )
 
+# Module-level helpers are owned logic, not classes: flag declarations
+# (the entry-point default export is the one allowed exception).
+TS_TOP_LEVEL_FUNCTION = re.compile(r"^\s*(export\s+)?(async\s+)?function\s+")
+TS_TOP_LEVEL_ARROW = re.compile(
+    r"^\s*(export\s+)?const\s+\w+(\s*:[^=]+)?\s*=\s*(async\s*)?\("
+)
+
 
 def strip_line_noise(line: str, in_block: bool) -> tuple[str, bool]:
     """Remove comments and string/template literals so brace counting and
@@ -101,6 +108,12 @@ def check_typescript(path: str) -> None:
                     fail(path, f"line {lineno}: {label}: {stripped[:60]}")
             if TS_CONST_CONTAINER.match(stripped):
                 fail(path, f"line {lineno}: top-level mutable const container: {stripped[:60]}")
+            if TS_TOP_LEVEL_FUNCTION.match(stripped) and not stripped.startswith(
+                "export default function"
+            ):
+                fail(path, f"line {lineno}: top-level function helper: {stripped[:60]}")
+            if TS_TOP_LEVEL_ARROW.match(stripped):
+                fail(path, f"line {lineno}: top-level arrow helper: {stripped[:60]}")
         depth += cleaned.count("{") - cleaned.count("}")
         if depth < 0:
             depth = 0

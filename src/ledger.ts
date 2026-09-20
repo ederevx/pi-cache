@@ -131,6 +131,9 @@ export class CacheLedger {
   /** Bound the file inside the sink's lock; true when it was rewritten. */
   private enforceRetention(): boolean {
     let changed = false;
+    // The callback mutates this ledger's own rows (owner-initiated) and
+    // returns the snapshot the sink should persist; the sink never keeps
+    // a live reference to them.
     this.sink.transform((raw) => {
       const duplicates = this.normalize(raw).length < raw.length;
       this.rows = this.normalize([...this.rows, ...raw]);

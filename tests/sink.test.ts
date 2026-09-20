@@ -11,6 +11,15 @@ import { readdirSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { UsageRow } from "../src/ledger.ts";
 
+/** Count retained backups without exposing a test-only method. */
+function backupCount(dir: string): number {
+  try {
+    return readdirSync(dir).filter((name) => name.endsWith(".jsonl")).length;
+  } catch {
+    return 0;
+  }
+}
+
 function row(i: number): UsageRow {
   return {
     id: `r${i}`,
@@ -71,8 +80,8 @@ test("sink: a shrinking rewrite captures a bounded backup", () => {
   const backups = new BackupStore(join(dir, "backups"), { keep: 3, ttlMs: 0, maxBytes: 0 });
   const sink = new FileRecordSink(file, backups);
   sink.rewrite([row(1), row(2), row(3)]);
-  assertEq(backups.count(), 0, "growth writes do not back up");
+  assertEq(backupCount(join(dir, "backups")), 0, "growth writes do not back up");
   sink.rewrite([row(1)]);
-  assertEq(backups.count(), 1, "shrinking rewrite captures the pre-image");
+  assertEq(backupCount(join(dir, "backups")), 1, "shrinking rewrite captures the pre-image");
   assertEq(sink.load().length, 1);
 });

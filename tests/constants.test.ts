@@ -8,7 +8,10 @@
 import { test, assert, assertEq, scratchDir } from "./harness.ts";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { loadOptions } from "../src/constants.ts";
+import { OptionsLoader } from "../src/constants.ts";
+
+/** Load options from the live process env (tests mutate it around calls). */
+const loadOptions = () => new OptionsLoader().load();
 
 /** Save the current env, apply overrides, run fn, restore. */
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
