@@ -3,6 +3,19 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.1.1] - 2026-09-20
+
+### Fixed
+
+- Mark the bundled pi core packages optional in `peerDependenciesMeta`. pi
+  installs a git package with `npm install --omit=dev`, which auto-installs
+  the root package's peer dependencies; without this, npm vendored
+  `@earendil-works/pi-ai` and `pi-coding-agent` and their transitive tree
+  (about 229 packages, 516 MB) into the clone even though the extension
+  resolves them through pi's loader aliases.
+
+[0.1.1]: https://github.com/ederevx/pi-cache/releases/tag/v0.1.1
+
 ## [0.1.0] - 2026-09-20
 
 Initial public release. pi-cache is a pi extension declared in `package.json`
