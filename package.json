@@ -1,6 +1,6 @@
 {
   "name": "pi-cache",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Prompt-cache-aware pi coding-agent extension: cache telemetry, stable prefix normalization, tool-schema hygiene, and cache-aware fast compaction.",
   "type": "module",
   "license": "MIT",
@@ -25,6 +25,14 @@
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   },
   "scripts": {
     "test": "node --experimental-strip-types --experimental-transform-types tests/run.ts"
