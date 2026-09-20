@@ -28,7 +28,7 @@
  * Commands:
  *   /cache-stats             — global + session cache stats, live pressure,
  *                              churn, affinity, compactions
- *   /cache-settings          — fast-compaction switch + resolved options
+ *   /cache-settings          — fast-compaction switches + resolved options
  *
  * Config: PI_CACHE_* environment variables and pi-cache's owned settings
  * JSON (`~/.pi/agent/.pi-cache/settings.json`, toggled by /cache-settings);
@@ -45,6 +45,7 @@ import { SessionPinner } from "./session-pin.ts";
 import { AutocompactController } from "./autocompact.ts";
 import { CompactionPressure } from "./pressure.ts";
 import { FastCompactionController } from "./fastcompact.ts";
+import { FastSwitchBoard } from "./fast-switch.ts";
 import { UserSettingsStore } from "./user-settings.ts";
 import { SettingsPresenter } from "./settings.ts";
 import { CacheStatsPresenter } from "./stats.ts";
@@ -70,7 +71,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     cacheDiscount: opts.pressureCacheDiscount,
     coldPremium: opts.pressureColdPremium,
   });
-  const fastcompact = new FastCompactionController({ enabled: opts.fastCompact });
+  const fastcompact = new FastCompactionController({
+    enabled: opts.fastCompact,
+    branchEnabled: opts.fastBranchSummary,
+  });
   const autocompact = new AutocompactController({
     enabled: opts.autoCompact,
     cooldownSeconds: opts.cooldownSeconds,
@@ -81,6 +85,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const settingsStore = new UserSettingsStore(opts.settingsPath);
   const settingsPresenter = new SettingsPresenter();
   const statsPresenter = new CacheStatsPresenter();
+  const switchBoard = new FastSwitchBoard(fastcompact, autocompact, settingsStore);
 
   /** Provider cache lifetime (ms) from the model's promptCache tier. */
   const cacheTtlMs = (ctx: { model?: unknown } | undefined): number => {
@@ -254,19 +259,15 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       try {
         const selected = await settingsPresenter.choose(
           opts,
-          fastcompact.enabled,
+          {
+            fastCompaction: fastcompact.enabled,
+            fastBranchSummary: fastcompact.branchEnabled,
+          },
           ctx.ui,
           ctx.mode,
         );
-        if (selected !== "fastCompact") return;
-        // The switch: flip, apply live, and persist to the owned settings
-        // file so the choice survives reloads and restarts. The live value
-        // is owned by the controller, never written back onto `opts`.
-        const enabled = !fastcompact.enabled;
-        fastcompact.setEnabled(enabled);
-        autocompact.setCacheNeutral(enabled);
-        settingsStore.save({ fastCompaction: enabled });
-        ctx.ui?.notify?.(`pi-cache: fast compaction ${enabled ? "on" : "off"} (saved)`, "info");
+        const message = selected ? switchBoard.toggle(selected) : undefined;
+        if (message) ctx.ui?.notify?.(message, "info");
       } catch {
         console.error("pi-cache: could not render settings");
       }
@@ -287,6 +288,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         compactions: autocompact.stats().compactions,
         fastCompactions: fastcompact.stats().compactions,
         fastEnabled: fastcompact.enabled,
+        branchEnabled: fastcompact.branchEnabled,
         pressure: pressure
           ? { pressure: pressure.pressure, probability: pressure.probability }
           : undefined,

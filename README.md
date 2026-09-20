@@ -17,8 +17,9 @@ reason (`manual`/`threshold`/`overflow`) with a byte-stable cache-aware
 override that replaces pi's LLM summarizer entirely, and answers a wanted
 `/tree` branch summary (`session_before_tree`) the same way. Turn fast
 compaction off with the `/cache-settings` switch or
-`PI_CACHE_FAST_COMPACT=off`, and pi's own normal summarizer runs
-unchanged. Installed in the pi runtime; paired A/B validation is the
+`PI_CACHE_FAST_COMPACT=off`; branch summaries have their own
+`PI_CACHE_FAST_BRANCH_SUMMARY` switch, and pi's own normal summarizer runs
+for whichever is off. Installed in the pi runtime; paired A/B validation is the
 remaining step.
 
 ## Installation
@@ -72,7 +73,8 @@ left in place.
    is `CompactionPressure` (probability ramps from 50% to 85% usable
    context, scaled by a graded cache coldness) and **fast compaction**
    overrides pi's summarizer via `session_before_compact` for every reason
-   and `session_before_tree` for a wanted branch summary.
+   and `session_before_tree` for a wanted branch summary (each with its own
+   switch: `PI_CACHE_FAST_COMPACT` / `PI_CACHE_FAST_BRANCH_SUMMARY`).
    `AutocompactController` also accounts for every completed
    compaction (its own trigger, pi's threshold/overflow, the override),
    and cooldowns (seconds + turns) gate repetition;

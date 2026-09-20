@@ -68,11 +68,11 @@ system/developer + first non-system message):
   never moves between compactions.
 - `session_before_tree` similarly accepts a `summary`; pi-cache answers a
   wanted `/tree` branch summary with the byte-stable `FAST_BRANCH_STUB`, so
-  that summarizer call is skipped too. This is the more lossy path: a
-  branch summary is persisted and prefix-relevant, and pi does not
-  accumulate file tracking from extension-provided summaries
-  (`prepareBranchEntries` skips `fromHook`), so turn fast compaction off
-  when branch preservation matters.
+  that summarizer call is skipped too. It has its own switch
+  (`PI_CACHE_FAST_BRANCH_SUMMARY`, `/cache-settings` row): this is the more
+  lossy path because a branch summary is persisted and prefix-relevant, and
+  pi does not accumulate file tracking from extension-provided summaries
+  (`prepareBranchEntries` skips `fromHook`).
 - Physics note: trimming the head still invalidates the prefix at the cut
   point; the win is the constant, cached stub plus the untouched kept
   window, not surgical preservation of the dropped span.

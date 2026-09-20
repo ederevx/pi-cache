@@ -16,6 +16,8 @@ import { dirname } from "node:path";
 export interface UserSettings {
   /** Fast cache-aware compaction override (the /cache-settings switch). */
   fastCompaction?: boolean;
+  /** Separate switch for the /tree branch-summary overlay. */
+  fastBranchSummary?: boolean;
 }
 
 export class UserSettingsStore {

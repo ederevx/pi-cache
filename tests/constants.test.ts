@@ -45,6 +45,7 @@ const CLEAN = {
   PI_CACHE_ADVISORY: undefined,
   PI_CACHE_AUTO_COMPACT: undefined,
   PI_CACHE_FAST_COMPACT: undefined,
+  PI_CACHE_FAST_BRANCH_SUMMARY: undefined,
   PI_CACHE_PRESSURE_START: undefined,
   PI_CACHE_PRESSURE_FULL: undefined,
   PI_CACHE_PRESSURE_GAMMA: undefined,
@@ -64,8 +65,10 @@ test("constants: default options", () => {
     assertEq(opts.advisory, true);
     // Cold-window auto-compaction is the default path.
     assertEq(opts.autoCompact, true);
-    // Fast cache-aware compaction is on by default.
+    // Fast cache-aware compaction is on by default; branch summaries have
+    // their own independently-defaulted switch.
     assertEq(opts.fastCompact, true);
+    assertEq(opts.fastBranchSummary, true);
     assert(opts.cooldownSeconds > 0, "cooldownSeconds default");
     assert(opts.pressureColdFloor > 0 && opts.pressureColdFloor < 1, "coldness floor default");
     assert(opts.cacheTtlSeconds > 0, "cache TTL fallback default");
@@ -90,6 +93,7 @@ test("constants: boolean env parsing", () => {
       PI_CACHE_ADVISORY: "false",
       PI_CACHE_AUTO_COMPACT: "no",
       PI_CACHE_FAST_COMPACT: "off",
+      PI_CACHE_FAST_BRANCH_SUMMARY: "0",
       PI_CACHE_SETTINGS: settingsPath("bool"),
     },
     () => {
@@ -101,6 +105,7 @@ test("constants: boolean env parsing", () => {
       assertEq(opts.advisory, false);
       assertEq(opts.autoCompact, false);
       assertEq(opts.fastCompact, false);
+      assertEq(opts.fastBranchSummary, false);
     },
   );
 });

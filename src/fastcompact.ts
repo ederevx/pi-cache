@@ -18,8 +18,12 @@
  * (fail-open: compaction must never be wedged).
  */
 
+import { FeatureSwitch } from "./feature-switch.ts";
+
 export interface FastCompactOptions {
   enabled: boolean;
+  /** Separate switch for the /tree branch-summary override. */
+  branchEnabled: boolean;
 }
 
 /** The subset of `CompactionPreparation` this controller reads. */
@@ -48,20 +52,31 @@ export const FAST_BRANCH_STUB =
   "compaction). Continue from the selected point below.";
 
 export class FastCompactionController {
-  private enabledFlag: boolean;
+  private readonly compaction: FeatureSwitch;
+  private readonly branch: FeatureSwitch;
   private compactions = 0;
 
   constructor(opts: FastCompactOptions) {
-    this.enabledFlag = opts.enabled;
+    this.compaction = new FeatureSwitch(opts.enabled);
+    this.branch = new FeatureSwitch(opts.branchEnabled);
   }
 
-  /** The live switch (toggled from /cache-settings). */
+  /** The live compaction switch (toggled from /cache-settings). */
   get enabled(): boolean {
-    return this.enabledFlag;
+    return this.compaction.enabled;
+  }
+
+  /** The live branch-summary switch (its own /cache-settings row). */
+  get branchEnabled(): boolean {
+    return this.branch.enabled;
   }
 
   setEnabled(enabled: boolean): void {
-    this.enabledFlag = enabled;
+    this.compaction.set(enabled);
+  }
+
+  setBranchEnabled(enabled: boolean): void {
+    this.branch.set(enabled);
   }
 
   /**
@@ -74,7 +89,7 @@ export class FastCompactionController {
     firstKeptEntryId: string;
     tokensBefore: number;
   } | undefined {
-    if (!this.enabledFlag) return undefined;
+    if (!this.compaction.enabled) return undefined;
     if (!preparation) return undefined;
     if (typeof preparation.firstKeptEntryId !== "string") return undefined;
     if (typeof preparation.tokensBefore !== "number") return undefined;
@@ -100,7 +115,7 @@ export class FastCompactionController {
     entriesToSummarize: number,
     userWantsSummary: boolean,
   ): { summary: string } | undefined {
-    if (!this.enabledFlag) return undefined;
+    if (!this.branch.enabled) return undefined;
     if (!userWantsSummary) return undefined;
     if (!(entriesToSummarize > 0)) return undefined;
     return { summary: FAST_BRANCH_STUB };
