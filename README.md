@@ -39,7 +39,8 @@ the cache-window gate is relaxed because the override is prefix-stable,
 and with it off compaction stays inside cold/churned windows.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. The ledger keeps the most recent `PI_CACHE_LEDGER_MAX_ROWS` rows
-(default 20000, trimmed on load and at session shutdown), and stale
+(default 20000, trimmed on load and at session shutdown), session stats
+are rebuilt from it on session start so they survive reloads, and stale
 atomic-write temp files are swept at load. Live views: `/cache-stats`
 (global and session scopes, with live compaction pressure) and
 `/cache-settings`.

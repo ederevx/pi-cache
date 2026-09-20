@@ -37,6 +37,7 @@ try {
 // Test modules self-register on import.
 import "./constants.test.ts";
 import "./ledger.test.ts";
+import "./sink.test.ts";
 import "./normalizer.test.ts";
 import "./temp-sweep.test.ts";
 import "./advisor.test.ts";
