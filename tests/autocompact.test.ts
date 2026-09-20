@@ -161,3 +161,14 @@ test("autocompact: currentPressure previews the live sample", () => {
   );
   assertEq(c.currentPressure({ tokens: 1, contextWindow: 2 }, undefined), undefined, "no usage");
 });
+
+test("autocompact: fast compaction triggers on warm token pressure", () => {
+  const pressure = new CompactionPressure({ random: () => 0 });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure });
+  c.noteTurn(0);
+  const warm = signals({ lastUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }) });
+  const verdict = c.decide({ tokens: 180_000, contextWindow: 200_000, percent: 90 }, warm);
+  assertEq(verdict.shouldCompact, true);
+  assertEq(verdict.reason, "compaction pressure");
+  assert(verdict.probability === 1, "neutral pressure saturates");
+});

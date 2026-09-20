@@ -106,7 +106,8 @@ compaction is on, makes the compaction itself prefix-stable:
    `utilization = tokens / (contextWindow - reserveTokens)` mapped through
    a `start=0.5`/`full=0.85`/`gamma=2` ramp to a probability, scaled by a
    cache `coldness` in [0,1] (0 warm, 1 cold): warm is discounted, cold
-   premium-loaded. Probability is monotonically nondecreasing in token
+   premium-loaded. With fast compaction on the factor is neutral (1), so a
+   warm cache cannot suppress the token ramp. Probability is monotonically nondecreasing in token
    count, and the raw pressure can exceed utilization for a cold context
    ("beyond the actual token cost"). The draw uses an injected RNG.
 2. At `agent_settled` (guaranteed idle) the draw decides whether to

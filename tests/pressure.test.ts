@@ -104,3 +104,12 @@ test("pressure: coldness is clamped to [0,1]", () => {
   assertEq(at(-5), at(0));
   assertEq(at(5), at(1));
 });
+
+test("pressure: neutral ignores the warm discount", () => {
+  const p = pressure();
+  const warm = { tokens: 160_000, contextWindow: 200_000, reserveTokens: 0, coldness: 0 };
+  const discounted = p.sample(warm);
+  const neutral = p.sample({ ...warm, neutral: true });
+  assert(neutral.pressure > discounted.pressure, "neutral is not discounted");
+  assertEq(neutral.pressure, 0.8, "neutral pressure is plain utilization");
+});
