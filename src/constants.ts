@@ -60,11 +60,13 @@ export interface PiCacheOptions {
   /** Absolute path of pi-cache's owned user-settings JSON. */
   settingsPath: string;
   /** Probabilistic compaction-pressure model tunables. */
-  pressureStart: number;
-  pressureFull: number;
-  pressureGamma: number;
-  pressureCacheDiscount: number;
-  pressureColdPremium: number;
+  pressureContinuation: number;
+  pressureMaxRequests: number;
+  pressureKeepFraction: number;
+  pressureSummaryCost: number;
+  pressureDegradeStart: number;
+  pressureDegradeFull: number;
+  pressureDegradeGamma: number;
 }
 
 export class OptionsLoader {
@@ -100,14 +102,19 @@ export class OptionsLoader {
         stored.fastBranchSummary ?? true,
       ),
       settingsPath: this.userSettingsPath(),
-      // Compaction-pressure ramp. Defaults: begin at 50% usable context,
-      // saturate at 85%; a fully warm request halves the pressure and a cold
-      // request earns a 25% premium (so pressure can exceed raw utilization).
-      pressureStart: this.envFloat("PI_CACHE_PRESSURE_START", 0.5),
-      pressureFull: this.envFloat("PI_CACHE_PRESSURE_FULL", 0.85),
-      pressureGamma: this.envFloat("PI_CACHE_PRESSURE_GAMMA", 2),
-      pressureCacheDiscount: this.envFloat("PI_CACHE_PRESSURE_CACHE_DISCOUNT", 0.5),
-      pressureColdPremium: this.envFloat("PI_CACHE_PRESSURE_COLD_PREMIUM", 0.25),
+      // Compaction pressure: expected-cost economics (write amortization
+      // over the expected remaining requests) composed with context
+      // degradation (the onset where long-context quality starts to fall).
+      // The horizon is `1 / (1 - continuation)` capped at maxRequests;
+      // keepFraction estimates the retained suffix a compaction rewrites;
+      // summaryCost is zero under fast compaction.
+      pressureContinuation: this.envFloat("PI_CACHE_PRESSURE_CONTINUATION", 0.15),
+      pressureMaxRequests: this.envFloat("PI_CACHE_PRESSURE_MAX_REQUESTS", 8),
+      pressureKeepFraction: this.envFloat("PI_CACHE_PRESSURE_KEEP_FRACTION", 0.2),
+      pressureSummaryCost: this.envFloat("PI_CACHE_PRESSURE_SUMMARY_COST", 0),
+      pressureDegradeStart: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_START", 0.5),
+      pressureDegradeFull: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_FULL", 0.85),
+      pressureDegradeGamma: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_GAMMA", 2),
     };
   }
 
