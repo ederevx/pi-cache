@@ -12,7 +12,10 @@
  *   before_provider_headers  — observe session-affinity header stability
  *   before_provider_request — tools sort/dedup + head-churn watch (+
  *                             provider session-id pin for stateless runs)
- *   turn_end                 — turn bookkeeping for auto-compaction
+ *   turn_end                 — reconcile landed warm refreshes + turn
+ *                              bookkeeping for auto-compaction
+ *   cache_warming_decision   — observe pi's warm intent and reconcile the
+ *                              persisted cache_warm entries
  *   agent_settled            — cache-aware auto-compaction: a compaction
  *                              pressure draw blending context degradation
  *                              with expected-cost cache economics
@@ -179,6 +182,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     try {
       gate.reset();
       idleTrigger.disarm();
+      warming.reconcile(ctx);
       ledger.useSession(signals.sessionIdOf(ctx));
       idleTrigger.arm(ctx);
     } catch {
@@ -216,8 +220,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("turn_end", async (event) => {
+  pi.on("turn_end", async (event, ctx) => {
     try {
+      warming.reconcile(ctx);
       autocompact.noteTurn(event.turnIndex);
     } catch {
       /* bookkeeping only */
@@ -227,8 +232,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   pi.on("input", async (event, ctx) => {
     // Before-turn trigger: a cold, idle prompt is deferred by awaiting
     // compaction here; pi awaits input handlers before it builds the turn, so
-    // the prompt then continues with the compacted context.
+    // the prompt then continues with the compacted context. Reconcile the
+    // warm tail first so the decision sees a refresh that landed while idle.
     try {
+      warming.reconcile(ctx);
       await beforeTurn.handle(event, ctx);
     } catch {
       /* fail-open: never block the prompt */
@@ -240,11 +247,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     idleTrigger.disarm();
   });
 
-  pi.on("cache_warming_decision", async (event) => {
+  pi.on("cache_warming_decision", async (event, ctx) => {
     // Observational: a warm refresh resets the provider cache TTL, so the
-    // idle trigger must not compact a cache pi just kept alive.
+    // idle trigger must not compact a cache pi just kept alive. The decision
+    // is only the intent; reconcile the persisted entries first so a refresh
+    // that already landed wins, then record the new intent.
     try {
-      warming.note(event?.action);
+      warming.reconcile(ctx);
+      warming.noteDecision(event?.action);
     } catch {
       /* observational only */
     }
@@ -259,6 +269,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     // timer so a session that then sits idle still compacts when the cache
     // expires.
     try {
+      warming.reconcile(ctx);
       if (!opts.autoCompact) return;
       void compactionTrigger.tryCompact(ctx);
       idleTrigger.arm(ctx);
