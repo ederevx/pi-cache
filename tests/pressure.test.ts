@@ -41,7 +41,10 @@ test("pressure: economics does not scale with token count", () => {
   const small = p.sample({ tokens: 20_000, contextWindow: 200_000, coldness: 1, rates });
   const large = p.sample({ tokens: 80_000, contextWindow: 200_000, coldness: 1, rates });
   assert(small.economics > 0, "a cold prefix pressures");
-  assertEq(small.economics, large.economics, "occupancy cancels out of the cost ratio");
+  assert(
+    Math.abs(small.economics - large.economics) < 1e-9,
+    "occupancy cancels out of the cost ratio (float tolerance)",
+  );
   assertEq(small.degradation, 0, "still below the onset");
   assertEq(large.degradation, 0, "still below the onset");
 });
@@ -75,6 +78,20 @@ test("pressure: explicit coldness is clamped to [0,1]", () => {
     p.sample({ tokens: 120_000, contextWindow: 200_000, coldness, rates }).pressure;
   assertEq(at(-5), at(0));
   assertEq(at(5), at(1));
+});
+
+test("pressure: a negative degradation gamma stays bounded", () => {
+  // Regression: a negative exponent used to make pressure Infinity/NaN.
+  const p = new CompactionPressure({
+    economics: new CacheEconomics({ keepFraction: 0, continuationProbability: 0.6 }),
+    degradation: new ContextDegradation({ start: 0.5, full: 0.85, gamma: -1 }),
+    random: () => 0,
+  });
+  const verdict = p.sample({ tokens: 120_000, contextWindow: 200_000, coldness: 1, rates });
+  assert(Number.isFinite(verdict.pressure), `pressure ${verdict.pressure}`);
+  assert(verdict.pressure >= 0 && verdict.pressure <= 1, "pressure within [0,1]");
+  assert(Number.isFinite(verdict.probability), `probability ${verdict.probability}`);
+  assert(verdict.probability >= 0 && verdict.probability <= 1, "probability within [0,1]");
 });
 
 test("pressure: the injected RNG drives the draw", () => {

@@ -25,7 +25,7 @@ export interface EconomicsInput {
   tokens: number;
   /** Cache coldness in `[0,1]`: 0 warm (reads hit), 1 cold (reads miss). */
   coldness: number;
-  /** One compaction's summarizer cost in the same per-million units. */
+  /** One compaction's summarizer cost, an absolute cost in the same units. */
   summaryCost: number;
 }
 
@@ -59,7 +59,15 @@ export class CacheEconomics {
   private readonly opts: CacheEconomicsOptions;
 
   constructor(opts: Partial<CacheEconomicsOptions> = {}) {
-    this.opts = { ...CacheEconomics.DEFAULTS, ...opts };
+    const merged = { ...CacheEconomics.DEFAULTS, ...opts };
+    this.opts = {
+      continuationProbability: CacheEconomics.finite(
+        merged.continuationProbability,
+        CacheEconomics.DEFAULTS.continuationProbability,
+      ),
+      maxRequests: CacheEconomics.finite(merged.maxRequests, CacheEconomics.DEFAULTS.maxRequests),
+      keepFraction: CacheEconomics.finite(merged.keepFraction, CacheEconomics.DEFAULTS.keepFraction),
+    };
   }
 
   /**
@@ -108,5 +116,10 @@ export class CacheEconomics {
   /** Price one token count at a per-million rate. */
   private price(rate: number, tokens: number): number {
     return (rate * tokens) / 1_000_000;
+  }
+
+  /** A finite number or the fallback (guards API callers from NaN). */
+  private static finite(value: number, fallback: number): number {
+    return Number.isFinite(value) ? value : fallback;
   }
 }
