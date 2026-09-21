@@ -638,3 +638,74 @@ test("extension: fast branch-summary switch toggles independently", async () => 
     unsetEnv(PI_CACHE_KEYS);
   }
 });
+
+test("extension: option rows toggle, persist, and take effect", async () => {
+  const root = join(scratchDir(), "e2e-option-switch");
+  mkdirSync(root, { recursive: true });
+  const settingsFile = join(root, "settings.json");
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: settingsFile,
+    PI_CACHE_AUTO_COMPACT: "0",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+
+    // One recorded turn makes the ledger non-empty.
+    const usageEvent = {
+      message: {
+        role: "assistant",
+        usage: { input: 1000, output: 50, cacheRead: 5, cacheWrite: 950, totalTokens: 2000 },
+      },
+    };
+    await pi.emit("message_end", usageEvent, { model: { id: "m1" } });
+    let notified = "";
+    const statsCtx = {
+      getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
+      ui: {
+        notify: (text: string) => {
+          notified = text;
+        },
+      },
+    };
+    await pi.commands.get("cache-stats")!.handler([], statsCtx as never);
+    assert(notified.includes("global: 1 req"), "telemetry on records the turn: " + notified);
+
+    // Toggle Telemetry off through the two-column view.
+    let view: { selectItem(id: string): void; handleInput(data: string): void } | undefined;
+    const settingsCtx = {
+      mode: "tui",
+      ui: {
+        custom: async (
+          factory: (
+            tui: unknown,
+            theme: { fg: (c: string, t: string) => string },
+            kb: unknown,
+            done: () => void,
+          ) => { selectItem(id: string): void; handleInput(data: string): void },
+        ): Promise<void> => {
+          view = factory({}, { fg: (_c, t) => t }, {}, () => {});
+        },
+        notify: (text: string) => {
+          notified = text;
+        },
+      },
+    };
+    await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
+    assert(view !== undefined, "telemetry row present");
+    view.selectItem("telemetry");
+    view.handleInput("\r");
+    assert(notified.includes("telemetry off"), "notification: " + notified);
+    const saved = JSON.parse(readFileSync(settingsFile, "utf8")) as { telemetry?: boolean };
+    assertEq(saved.telemetry, false, "telemetry persisted off");
+
+    // A second turn is dropped, so the ledger stays at one row.
+    await pi.emit("message_end", usageEvent, { model: { id: "m1" } });
+    await pi.commands.get("cache-stats")!.handler([], statsCtx as never);
+    assert(notified.includes("global: 1 req"), "telemetry off drops the new turn: " + notified);
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});

@@ -127,6 +127,16 @@ export class AutocompactController {
     this.cacheNeutral = cacheNeutral;
   }
 
+  /** The live auto-compaction master switch (toggled from /cache-settings). */
+  get enabled(): boolean {
+    return this.opts.enabled;
+  }
+
+  /** Live switch: auto-compaction changed from /cache-settings. */
+  setEnabled(enabled: boolean): void {
+    this.opts.enabled = enabled;
+  }
+
   /** Decide after a run settled (agent_settled guarantees idle). */
   decide(
     usageOrPercent: number | ContextUsageLike | undefined,

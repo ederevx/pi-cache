@@ -46,14 +46,14 @@ export class CacheSettingsView extends Container {
     this.list.selectItem(id);
   }
 
-  /** One SettingItem: an editable row cycles on/off, others are display-only. */
+  /** One SettingItem: every row cycles its on/off value in place. */
   private static toItem(row: SettingRow): SettingItem {
     return {
       id: row.id,
       label: row.title,
       description: row.description,
       currentValue: row.value,
-      values: row.editable ? ["on", "off"] : undefined,
+      values: ["on", "off"],
     };
   }
 
