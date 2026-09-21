@@ -311,6 +311,36 @@ test("extension: settings dismissal stays silent", async () => {
   }
 });
 
+test("extension: settings selector failure falls back to the listing", async () => {
+  const root = join(scratchDir(), "e2e-settings-throw");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    let printed = false;
+    const original = console.error;
+    console.error = () => {
+      printed = true;
+    };
+    try {
+      await pi.commands.get("cache-settings")!.handler([], {
+        ui: { select: () => Promise.reject(new Error("no selector")) },
+        mode: "tui",
+      } as never);
+    } finally {
+      console.error = original;
+    }
+    assertEq(printed, true, "a throwing selector falls back to the listing");
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
 test("extension: warm-cache advisory is observational", async () => {
   const root = join(scratchDir(), "e2e-warm");
   mkdirSync(root, { recursive: true });
