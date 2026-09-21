@@ -376,8 +376,20 @@ test("extension: input defers a cold prompt until compaction completes", async (
     };
     await pi.emit("input", { text: "hello", source: "interactive" }, compactCtx);
     assertEq(completed, true, "the prompt was deferred until compaction completed");
-    // The warming observer is observational and must never throw.
-    await pi.emit("cache_warming_decision", { action: "warm" }, {});
+    // The warming observer is observational and must never throw; a landed
+    // refresh in the session tail is reconciled alongside the decision.
+    await pi.emit(
+      "cache_warming_decision",
+      { action: "warm" },
+      {
+        sessionManager: {
+          getEntries: () => [
+            { type: "message", id: "m1" },
+            { type: "usage", id: "w1", kind: "cache_warm", timestamp: new Date().toISOString() },
+          ],
+        },
+      },
+    );
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
