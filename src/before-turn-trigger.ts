@@ -26,9 +26,11 @@ export class BeforeTurnTrigger<Ctx, Event> {
 
   /** Handle one input; returns after the prompt is safe to continue. */
   async handle(event: Event, ctx: Ctx): Promise<void> {
+    // Any input means the user is active and the idle timer is stale, even
+    // when this trigger is disabled or the input is not deferrable.
+    this.opts.disarmIdle();
     if (!this.opts.enabled) return;
     if (!this.opts.eligible(event)) return;
-    this.opts.disarmIdle();
     if (!this.opts.shouldCompact(ctx)) return;
     try {
       await this.opts.compact(ctx);
