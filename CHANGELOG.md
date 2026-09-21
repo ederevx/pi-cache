@@ -3,6 +3,34 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.2.1] - 2026-09-20
+
+### Fixed
+
+- Floor the expected-cost compaction pressure on a minimum live context
+  (`PI_CACHE_PRESSURE_MIN_TOKENS`, default 50000). Because the economics
+  term is flat in token count it fired on a trivial cold context, pi
+  refused to compact, and the unguarded async `ctx.compact` onError
+  callback then appended to a stale extension ctx and exited pi with
+  status 1.
+- Fail-open the async auto-compaction `onError` callback like every other
+  hook, so a refused or failed compaction can never break the process.
+- Bound the ledger file during a long session, not only on load and
+  shutdown, and sweep abandoned atomic-write temps during a backup prune.
+- Match only the exact `.tmp` suffix when sweeping temps, so an unrelated
+  file that merely contains `.tmp` is never deleted.
+- Give ledger backups a pid-qualified atomic name so sibling processes
+  cannot collide or leave a partial file counted as a backup.
+
+### Changed
+
+- Move the live signal readers (model cost rates, cache TTL, session id,
+  autocompact signals) into a `SessionSignals` class, and split the
+  multi-purpose normalizer, autocompaction, backup, and settings methods
+  into single-purpose helpers. No behavior change.
+
+[0.2.1]: https://github.com/ederevx/pi-cache/releases/tag/v0.2.1
+
 ## [0.2.0] - 2026-09-20
 
 ### Changed
