@@ -48,10 +48,14 @@ cache-favoring features are ON by default (tools sort/dedup, session
 pin, compaction pressure, fast compaction, advisories, telemetry);
 disable any with its `PI_CACHE_*` env var (see `src/constants.ts`) or
 with the `/cache-settings` switch (which persists to pi-cache's owned
-`~/.pi/agent/.pi-cache/settings.json`). Auto-compaction fires on an idle
-`agent_settled` when the pressure draw passes; with fast compaction on
-the cache-window gate is relaxed because the override is prefix-stable,
-and with it off compaction stays inside cold/churned windows.
+`~/.pi/agent/.pi-cache/settings.json`). Auto-compaction fires at three
+idle points when the pressure draw passes: after a turn settles
+(`agent_settled`), on a session-scoped timer when the provider cache TTL
+expires while pi sits idle (`PI_CACHE_IDLE_TRIGGER`), and when a cold
+prompt arrives before a turn (the `input` handler defers the prompt until
+compaction finishes, `PI_CACHE_BEFORE_TURN`). With fast compaction on the
+cache-window gate is relaxed because the override is prefix-stable, and
+with it off compaction stays inside cold/churned windows.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. The ledger keeps the most recent `PI_CACHE_LEDGER_MAX_ROWS` rows
 (default 20000, trimmed on load, in-session once a full window of
