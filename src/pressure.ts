@@ -104,7 +104,8 @@ export class CompactionPressure {
 
   /** Either reason suffices: `1 - (1 - degradation)(1 - economics)`. */
   private static combine(degradation: number, economics: number): number {
-    return 1 - (1 - degradation) * (1 - economics);
+    const combined = 1 - (1 - degradation) * (1 - economics);
+    return CompactionPressure.clamp(combined);
   }
 
   /** Explicit coldness when given, else derived from the cached share. */
@@ -122,7 +123,7 @@ export class CompactionPressure {
   private probabilityFor(pressure: number): number {
     const span = Math.max(1e-9, this.opts.full - this.opts.start);
     const ramp = (pressure - this.opts.start) / span;
-    return Math.pow(Math.max(0, Math.min(1, ramp)), this.opts.gamma);
+    return CompactionPressure.clamp(Math.pow(CompactionPressure.clamp(ramp), this.opts.gamma));
   }
 
   private static clamp(value: number): number {
