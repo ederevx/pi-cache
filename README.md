@@ -119,8 +119,8 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
   `compaction.ts`, `affinity.ts`, `session-pin.ts`, `autocompact.ts`,
   `pressure.ts`, `economics.ts`, `context-degradation.ts`,
   `fastcompact.ts`, `fast-switch.ts`, `feature-switch.ts`,
-  `user-settings.ts`, `settings.ts`, `stats.ts`, `temp-sweep.ts`,
-  `constants.ts`)
+  `user-settings.ts`, `settings.ts`, `settings-view.ts`, `stats.ts`,
+  `temp-sweep.ts`, `constants.ts`)
 - `tests/` — zero-dependency validation + OOP/format lint suite
   (`tests/run.ts`, `tests/oop_lint.py`, per-module tests, the
   installer round-trip, and the mock-pi wiring test)

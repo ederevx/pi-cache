@@ -217,22 +217,23 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     assert(notified.includes("head churn 1"), "stats reports churn: " + notified);
     assert(notified.includes("compactions 1"), "stats reports compact count: " + notified);
 
-    // 6. /cache-settings lists the current option rows.
-    let selectTitle = "";
-    let selectOptions: string[] = [];
+    // 6. /cache-settings renders the two-column custom view.
+    let customCalled = false;
+    let renderedText = "";
     const settingsCtx = {
       ui: {
-        select: (title: string, options: string[]) => {
-          selectTitle = title;
-          selectOptions = options;
-          return Promise.resolve("x");
+        custom: async (factory: (tui: unknown, theme: { fg: (c: string, t: string) => string }, kb: unknown, done: () => void) => { render(w: number): string[] }) => {
+          customCalled = true;
+          const component = factory({}, { fg: (_c, t) => t }, {}, () => {});
+          renderedText = component.render(80).join("\n");
         },
       },
       mode: "tui",
     };
     await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
-    assertEq(selectTitle, "pi-cache settings");
-    assertEq(selectOptions.length, 8, "one settings row per option");
+    assert(customCalled, "the two-column custom view was requested");
+    assert(renderedText.includes("Fast compaction"), "renders the fast-compaction row");
+    assert(renderedText.includes("Telemetry"), "renders the option rows");
 
     // 7. Fail-open: garbage events never throw.
     await pi.emit("message_end", null, null);
@@ -301,19 +302,19 @@ test("extension: settings dismissal stays silent", async () => {
     };
     try {
       await pi.commands.get("cache-settings")!.handler([], {
-        ui: { select: () => Promise.resolve(undefined) },
+        ui: { custom: () => Promise.resolve(undefined) },
         mode: "tui",
       } as never);
     } finally {
       console.error = original;
     }
-    assertEq(errored, false, "a dismissed selector prints nothing");
+    assertEq(errored, false, "a dismissed view prints nothing");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
 });
 
-test("extension: settings selector failure falls back to the listing", async () => {
+test("extension: settings custom-view failure falls back to the listing", async () => {
   const root = join(scratchDir(), "e2e-settings-throw");
   mkdirSync(root, { recursive: true });
   setEnv({
@@ -331,13 +332,13 @@ test("extension: settings selector failure falls back to the listing", async () 
     };
     try {
       await pi.commands.get("cache-settings")!.handler([], {
-        ui: { select: () => Promise.reject(new Error("no selector")) },
+        ui: { custom: () => Promise.reject(new Error("no view")) },
         mode: "tui",
       } as never);
     } finally {
       console.error = original;
     }
-    assertEq(printed, true, "a throwing selector falls back to the listing");
+    assertEq(printed, true, "a throwing view falls back to the listing");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
@@ -527,20 +528,33 @@ test("extension: fast-compaction switch toggles and persists", async () => {
     );
     assert(before[0] !== undefined, "fast compaction on by default");
 
-    // Select the Fast compaction row: it must flip off and persist.
-    let options: string[] = [];
+    // Drive the two-column view: select the Fast compaction row and
+    // confirm it, which must flip the switch off, persist, and notify.
+    let view: { selectItem(id: string): void; handleInput(data: string): void } | undefined;
+    let notified = "";
     const settingsCtx = {
       mode: "tui",
       ui: {
-        select: (_t: string, o: string[]) => {
-          options = o;
-          return Promise.resolve(o.find((line) => line.startsWith("Fast compaction:"))!);
+        custom: async (
+          factory: (
+            tui: unknown,
+            theme: { fg: (c: string, t: string) => string },
+            kb: unknown,
+            done: () => void,
+          ) => { selectItem(id: string): void; handleInput(data: string): void },
+        ): Promise<void> => {
+          view = factory({}, { fg: (_c, t) => t }, {}, () => {});
         },
-        notify: () => {},
+        notify: (text: string) => {
+          notified = text;
+        },
       },
     };
     await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
-    assert(options.some((line) => line.startsWith("Fast compaction:")), "switch row present");
+    assert(view !== undefined, "switch row present");
+    view.selectItem("fastCompaction");
+    view.handleInput("\r");
+    assert(notified.includes("fast compaction off"), "notification: " + notified);
     const saved = JSON.parse(readFileSync(settingsFile, "utf8")) as { fastCompaction?: boolean };
     assertEq(saved.fastCompaction, false, "switch persisted off");
 
@@ -574,15 +588,27 @@ test("extension: fast branch-summary switch toggles independently", async () => 
     const before = await pi.emit("session_before_tree", treePrep, ctx);
     assert(before[0] !== undefined, "fast branch summary on by default");
 
+    let view: { selectItem(id: string): void; handleInput(data: string): void } | undefined;
     const settingsCtx = {
       mode: "tui",
       ui: {
-        select: (_t: string, o: string[]) =>
-          Promise.resolve(o.find((line) => line.startsWith("Fast branch summary:"))!),
+        custom: async (
+          factory: (
+            tui: unknown,
+            theme: { fg: (c: string, t: string) => string },
+            kb: unknown,
+            done: () => void,
+          ) => { selectItem(id: string): void; handleInput(data: string): void },
+        ): Promise<void> => {
+          view = factory({}, { fg: (_c, t) => t }, {}, () => {});
+        },
         notify: () => {},
       },
     };
     await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
+    assert(view !== undefined, "branch switch row present");
+    view.selectItem("fastBranchSummary");
+    view.handleInput("\r");
     const saved = JSON.parse(readFileSync(settingsFile, "utf8")) as {
       fastBranchSummary?: boolean;
     };

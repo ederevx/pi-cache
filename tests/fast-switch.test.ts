@@ -23,17 +23,25 @@ function board() {
   return { board: new FastSwitchBoard(fast, autocompact, store), fast, file };
 }
 
-test("fast-switch: toggling compaction flips the controller and persists", () => {
+test("fast-switch: setting compaction off flips the controller and persists", () => {
   const { board: b, fast, file } = board();
-  const message = b.toggle("fastCompaction");
+  const message = b.set("fastCompaction", "off");
   assert(message !== undefined && message.includes("off"), "off message");
   assertEq(fast.enabled, false);
   assertEq((JSON.parse(readFileSync(file, "utf8")) as { fastCompaction?: boolean }).fastCompaction, false);
 });
 
-test("fast-switch: toggling branch summary is independent and persisted", () => {
+test("fast-switch: setting compaction on flips it back", () => {
+  const { board: b, fast } = board();
+  b.set("fastCompaction", "off");
+  const message = b.set("fastCompaction", "on");
+  assert(message !== undefined && message.includes("on"), "on message");
+  assertEq(fast.enabled, true);
+});
+
+test("fast-switch: setting branch summary is independent and persisted", () => {
   const { board: b, fast, file } = board();
-  b.toggle("fastBranchSummary");
+  b.set("fastBranchSummary", "off");
   assertEq(fast.branchEnabled, false);
   assertEq(fast.enabled, true, "compaction switch untouched");
   assertEq(
@@ -44,7 +52,7 @@ test("fast-switch: toggling branch summary is independent and persisted", () => 
 
 test("fast-switch: an unknown id changes nothing", () => {
   const { board: b, fast } = board();
-  assertEq(b.toggle("nope"), undefined);
+  assertEq(b.set("nope", "on"), undefined);
   assertEq(fast.enabled, true);
   assertEq(fast.branchEnabled, true);
 });

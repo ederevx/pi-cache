@@ -52,6 +52,7 @@ import "./economics.test.ts";
 import "./context-degradation.test.ts";
 import "./pressure.test.ts";
 import "./fastcompact.test.ts";
+import "./settings.test.ts";
 import "./fast-switch.test.ts";
 import "./stats.test.ts";
 import "./extension.test.ts";

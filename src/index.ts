@@ -30,7 +30,7 @@
  * Commands:
  *   /cache-stats             — global + session cache stats, live pressure,
  *                              churn, affinity, compactions
- *   /cache-settings          — fast-compaction switches + resolved options
+ *   /cache-settings          — two-column switch/option editor
  *
  * Config: PI_CACHE_* environment variables and pi-cache's owned settings
  * JSON (`~/.pi/agent/.pi-cache/settings.json`, toggled by /cache-settings);
@@ -365,10 +365,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("cache-settings", {
-    description: "Toggle fast compaction and list pi-cache options",
+    description: "Edit fast compaction and list pi-cache options",
     handler: async (_args, ctx) => {
       try {
-        const selected = await settingsPresenter.choose(
+        await settingsPresenter.present(
           opts,
           {
             fastCompaction: fastcompact.enabled,
@@ -376,9 +376,11 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
           },
           ctx.ui,
           ctx.mode,
+          (id, value) => {
+            const message = switchBoard.set(id, value);
+            if (message) ctx.ui?.notify?.(message, "info");
+          },
         );
-        const message = selected ? switchBoard.toggle(selected) : undefined;
-        if (message) ctx.ui?.notify?.(message, "info");
       } catch {
         console.error("pi-cache: could not render settings");
       }
