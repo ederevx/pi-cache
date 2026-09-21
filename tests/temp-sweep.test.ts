@@ -28,6 +28,20 @@ test("temp-sweep: removes only abandoned temp files", () => {
   assertEq(existsSync(manifestTmp), false);
 });
 
+test("temp-sweep: a .tmp substring in a non-temp name is kept", () => {
+  const dir = join(scratchDir(), "sweep-substring");
+  mkdirSync(dir, { recursive: true });
+  const keep = join(dir, "notes.tmp.bak");
+  const keep2 = join(dir, "data.tmpdir");
+  writeFileSync(keep, "x");
+  writeFileSync(keep2, "x");
+  utimesSync(keep, past, past);
+  utimesSync(keep2, past, past);
+  assertEq(new TempSweeper().sweep(dir), 0);
+  assertEq(existsSync(keep), true, "a .tmp substring is not a temp");
+  assertEq(existsSync(keep2), true, "a .tmp prefix is not a temp");
+});
+
 test("temp-sweep: a fresh temp file is left for its writer", () => {
   const dir = join(scratchDir(), "sweep-fresh");
   mkdirSync(dir, { recursive: true });

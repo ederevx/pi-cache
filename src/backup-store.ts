@@ -7,7 +7,7 @@
  * growing forever. Every operation is best-effort.
  */
 
-import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 
 export interface BackupOptions {
@@ -40,16 +40,37 @@ export class BackupStore {
 
   /** Copy `source` into the store, then enforce the retention policy. */
   capture(source: string): void {
+    this.storeCopy(source);
+    this.prune();
+  }
+
+  /**
+   * Copy `source` under a unique, atomic name. The pid plus a per-instance
+   * sequence keeps sibling processes from overwriting one another's
+   * pre-image; writing to a temp name and renaming keeps a torn copy from
+   * being counted as a valid backup. Best-effort: a failure never breaks
+   * the caller.
+   */
+  private storeCopy(source: string): void {
+    let tmp: string | undefined;
     try {
       mkdirSync(this.dir, { recursive: true });
       const seq = this.seq++;
       const stamp = new Date(this.now()).toISOString().replace(/[:.]/g, "-");
       const stem = basename(source, extname(source));
-      copyFileSync(source, join(this.dir, `${stamp}-${seq}-${stem}.jsonl`));
+      const final = join(this.dir, `${stamp}-${process.pid}-${seq}-${stem}.jsonl`);
+      tmp = `${final}.tmp`;
+      copyFileSync(source, tmp);
+      renameSync(tmp, final);
     } catch {
-      /* a backup is best-effort; never break the caller */
+      if (tmp !== undefined) {
+        try {
+          rmSync(tmp, { force: true });
+        } catch {
+          /* an ignored temp never counts as a backup */
+        }
+      }
     }
-    this.prune();
   }
 
   /** Bound the store by ring, TTL, and total size. */
@@ -71,7 +92,7 @@ export class BackupStore {
     for (const file of files) if (file.mtimeMs < cutoff) this.remove(file.path);
   }
 
-  /** Keep the newest backups up to the total-size cap. */
+  /** Keep the newest backups up to the total-size cap (oldest dropped). */
   private applySize(files: BackupFile[]): void {
     if (this.opts.maxBytes <= 0) return;
     let total = 0;

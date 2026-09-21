@@ -30,6 +30,18 @@ test("backup-store: capture copies the source and ring-prunes", () => {
   assertEq(count(dir), 2, "ring keeps only the newest");
 });
 
+test("backup-store: capture leaves no temp or partial file", () => {
+  const root = scratchDir();
+  const dir = join(root, "backups-atomic");
+  const src = join(root, "ledger-atomic.jsonl");
+  writeFileSync(src, "row-a\n");
+  const store = new BackupStore(dir, { keep: 10, ttlMs: 0, maxBytes: 0 });
+  store.capture(src);
+  const names = readdirSync(dir);
+  assertEq(names.filter((n) => n.endsWith(".tmp")).length, 0, "no temp left");
+  assertEq(names.filter((n) => n.endsWith(".jsonl")).length, 1, "one backup");
+});
+
 test("backup-store: prune drops backups past the TTL", () => {
   const root = scratchDir();
   const dir = join(root, "backups-ttl");
