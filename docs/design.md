@@ -177,11 +177,12 @@ cache-read rate):
 2. Otherwise the last request's cached share maps linearly from <=5%
    (`COLD_RATIO`) = 1 to >=50% = 0.
 3. A time ramp raises it toward 1 as the time since the cache was last
-   touched (the last turn or a pi warm refresh, whichever is newer)
-   approaches the provider cache lifetime from `ctx.model.promptCache`
-   (fallback `PI_CACHE_TTL_SECONDS`), combined by their maximum. The warm
-   observer keeps the idle trigger from compacting a cache pi just
-   rewarmed.
+   touched (the last turn, or a pi warm refresh recorded from the
+   `cache_warming_decision` intent and confirmed by the persisted
+   `cache_warm` usage entry, whichever is newer) approaches the provider
+   cache lifetime from `ctx.model.promptCache` (fallback
+   `PI_CACHE_TTL_SECONDS`), combined by their maximum. The warm observer
+   keeps the idle trigger from compacting a cache pi just rewarmed.
 4. A warm-cache floor (`PI_CACHE_PRESSURE_COLD_FLOOR`, default 0.2) still
    blocks a non-churned, non-cache-neutral warm cache; the old min-gap
    gate is gone because it measured about zero at `agent_settled`.
