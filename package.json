@@ -1,6 +1,6 @@
 {
   "name": "pi-cache",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Prompt-cache-aware pi coding-agent extension: cache telemetry, stable prefix normalization, tool-schema hygiene, and cache-aware fast compaction.",
   "type": "module",
   "license": "MIT",
