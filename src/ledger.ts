@@ -111,6 +111,12 @@ export class CacheLedger {
     return last ? Date.now() - last.ts : Number.POSITIVE_INFINITY;
   }
 
+  /** Globally-unique id of the current session's last row, if any. */
+  lastRowId(): string | undefined {
+    const last = this.sessionRows[this.sessionRows.length - 1];
+    return last?.id;
+  }
+
   /** Flush queued appends, then bound the file; call once at shutdown. */
   async close(): Promise<void> {
     await this.flush();
