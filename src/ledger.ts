@@ -57,7 +57,7 @@ export class CacheLedger {
   /** Per-process boot nonce so row ids are unique across reloads. */
   private boot = Math.floor(Math.random() * 0x10000).toString(16);
   private readonly sink: RecordSink;
-  private readonly enabled: boolean;
+  private enabledOn: boolean;
   /** Retained row window; `<= 0` means unbounded. */
   private readonly maxRows: number;
   /** The active session identity, once known. */
@@ -65,7 +65,7 @@ export class CacheLedger {
 
   constructor(sink: RecordSink, enabled: boolean, maxRows: number = 0) {
     this.sink = sink;
-    this.enabled = enabled;
+    this.enabledOn = enabled;
     this.maxRows = maxRows > 0 ? maxRows : Number.POSITIVE_INFINITY;
     this.enforceRetention();
     this.noteSeq();
@@ -77,9 +77,19 @@ export class CacheLedger {
     this.sessionRows = this.rows.filter((row) => row.session === sessionId);
   }
 
+  /** The live telemetry switch (toggled from /cache-settings). */
+  get enabled(): boolean {
+    return this.enabledOn;
+  }
+
+  /** Turn ledger recording on or off in place. */
+  setEnabled(enabled: boolean): void {
+    this.enabledOn = enabled;
+  }
+
   /** Record one assistant message's usage, if present. */
   record(usage: Usage | undefined, model: string, session: string = this.sessionId ?? "session"): void {
-    if (!usage || !this.enabled) return;
+    if (!usage || !this.enabledOn) return;
     const row = this.buildRow(usage, model, session);
     this.rows.push(row);
     this.noteSessionRow(row);

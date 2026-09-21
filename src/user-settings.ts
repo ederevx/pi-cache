@@ -14,6 +14,18 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface UserSettings {
+  /** Record per-request cache usage to the ledger. */
+  telemetry?: boolean;
+  /** Deterministic tool order for byte-stable prefixes. */
+  sortTools?: boolean;
+  /** Drop exact-duplicate tool schemas from the payload. */
+  dedupTools?: boolean;
+  /** Stable provider session-id pinning for stateless requests. */
+  pinSession?: boolean;
+  /** Log compaction advisories. */
+  advisory?: boolean;
+  /** Cache-aware automatic compaction. */
+  autoCompact?: boolean;
   /** Fast cache-aware compaction override (the /cache-settings switch). */
   fastCompaction?: boolean;
   /** Separate switch for the /tree branch-summary overlay. */
@@ -38,6 +50,13 @@ export class UserSettingsStore {
     const next: UserSettings = { ...this.load(), ...patch };
     this.writeAtomic(next);
     return next;
+  }
+
+  /** Set one owned boolean flag and persist it (settings switch board). */
+  saveFlag(id: keyof UserSettings, enabled: boolean): UserSettings {
+    const patch: UserSettings = {};
+    patch[id] = enabled;
+    return this.save(patch);
   }
 
   /** Write the complete document to a sibling temp file, then rename it. */

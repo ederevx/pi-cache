@@ -12,7 +12,9 @@
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 export interface IdleTriggerOptions<Ctx> {
-  enabled: boolean;
+  /** Whether the trigger may arm; read live so toggling auto-compaction
+   *  off in /cache-settings stops scheduling immediately. */
+  isEnabled(): boolean;
   /** pi is idle (not streaming and not already compacting). */
   isIdle(ctx: Ctx): boolean;
   /** Milliseconds since the cache was last touched (turn or warm). */
@@ -35,7 +37,7 @@ export class IdleTrigger<Ctx> {
 
   /** (Re)arm the timer to fire when the current cache TTL elapses. */
   arm(ctx: Ctx): void {
-    if (!this.opts.enabled) return;
+    if (!this.opts.isEnabled()) return;
     this.disarm();
     const remaining = this.opts.ttlMs(ctx) - this.opts.idleMs(ctx);
     if (!Number.isFinite(remaining)) return;

@@ -1,8 +1,8 @@
 /**
  * pi-cache — options/env resolution tests.
  * loadOptions() must resolve every PI_CACHE_* override from environment
- * variables, fall back to pi-cache's owned settings JSON for the fast
- * compaction switch, and otherwise use the documented defaults.
+ * variables, fall back to pi-cache's owned settings JSON for each option,
+ * and otherwise use the documented defaults.
  */
 
 import { test, assert, assertEq, scratchDir } from "./harness.ts";
@@ -151,6 +151,43 @@ test("constants: env overrides the owned settings switch", () => {
   withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file, PI_CACHE_FAST_COMPACT: "1" }, () => {
     assertEq(loadOptions().fastCompact, true);
   });
+});
+
+test("constants: owned settings drive every option", () => {
+  const file = settingsPath("all-owned");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      telemetry: false,
+      sortTools: false,
+      dedupTools: false,
+      pinSession: false,
+      advisory: false,
+      autoCompact: false,
+    }),
+  );
+  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file }, () => {
+    const opts = loadOptions();
+    assertEq(opts.telemetry, false);
+    assertEq(opts.sortTools, false);
+    assertEq(opts.dedupTools, false);
+    assertEq(opts.pinSession, false);
+    assertEq(opts.advisory, false);
+    assertEq(opts.autoCompact, false);
+  });
+});
+
+test("constants: env overrides an owned option", () => {
+  const file = settingsPath("option-override");
+  writeFileSync(file, JSON.stringify({ telemetry: false, autoCompact: false }));
+  withEnv(
+    { ...CLEAN, PI_CACHE_SETTINGS: file, PI_CACHE_TELEMETRY: "1", PI_CACHE_AUTO_COMPACT: "1" },
+    () => {
+      const opts = loadOptions();
+      assertEq(opts.telemetry, true, "env wins over stored");
+      assertEq(opts.autoCompact, true, "env wins over stored");
+    },
+  );
 });
 
 test("constants: ledger path override", () => {
