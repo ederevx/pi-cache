@@ -1,10 +1,12 @@
 /**
  * pi-cache — stale temp-file sweeper.
  *
- * One responsibility: remove `*.tmp*` siblings left by an interrupted
+ * One responsibility: remove `*.tmp` siblings left by an interrupted
  * atomic write, while leaving recent temps alone so a sibling process's
- * in-flight write is never deleted. Fail-open: a missing directory or an
- * undeletable file is ignored, and callers get the count removed.
+ * in-flight write is never deleted. Only the exact `.tmp` suffix pi-cache
+ * writes is matched, so an unrelated file that merely mentions `.tmp` is
+ * never touched. Fail-open: a missing directory or an undeletable file is
+ * ignored, and callers get the count removed.
  */
 
 import { readdirSync, rmSync, statSync } from "node:fs";
@@ -22,7 +24,7 @@ export class TempSweeper {
     let removed = 0;
     try {
       for (const name of readdirSync(dir)) {
-        if (!name.includes(".tmp")) continue;
+        if (!name.endsWith(".tmp")) continue;
         const full = join(dir, name);
         try {
           if (statSync(full).mtimeMs > cutoff) continue; // possibly in-flight

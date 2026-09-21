@@ -6,7 +6,7 @@
 
 import { test, assertEq, scratchDir } from "./harness.ts";
 import { BackupStore } from "../src/backup-store.ts";
-import { writeFileSync, utimesSync, readdirSync } from "node:fs";
+import { writeFileSync, utimesSync, readdirSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const baseOpts = { keep: 3, ttlMs: 0, maxBytes: 0 };
@@ -28,6 +28,30 @@ test("backup-store: capture copies the source and ring-prunes", () => {
   const store = new BackupStore(dir, { ...baseOpts, keep: 2 });
   for (let i = 0; i < 5; i++) store.capture(src);
   assertEq(count(dir), 2, "ring keeps only the newest");
+});
+
+test("backup-store: capture leaves no temp or partial file", () => {
+  const root = scratchDir();
+  const dir = join(root, "backups-atomic");
+  const src = join(root, "ledger-atomic.jsonl");
+  writeFileSync(src, "row-a\n");
+  const store = new BackupStore(dir, { keep: 10, ttlMs: 0, maxBytes: 0 });
+  store.capture(src);
+  const names = readdirSync(dir);
+  assertEq(names.filter((n) => n.endsWith(".tmp")).length, 0, "no temp left");
+  assertEq(names.filter((n) => n.endsWith(".jsonl")).length, 1, "one backup");
+});
+
+test("backup-store: prune sweeps an abandoned capture temp", () => {
+  const root = scratchDir();
+  const dir = join(root, "backups-temp");
+  mkdirSync(dir, { recursive: true });
+  const stale = join(dir, "old.jsonl.123.tmp");
+  writeFileSync(stale, "partial");
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  utimesSync(stale, old, old);
+  new BackupStore(dir, baseOpts).prune();
+  assertEq(existsSync(stale), false, "abandoned temp swept");
 });
 
 test("backup-store: prune drops backups past the TTL", () => {

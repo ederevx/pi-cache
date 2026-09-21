@@ -44,6 +44,7 @@ import "./temp-sweep.test.ts";
 import "./advisor.test.ts";
 import "./affinity.test.ts";
 import "./session-pin.test.ts";
+import "./signals.test.ts";
 import "./autocompact.test.ts";
 import "./economics.test.ts";
 import "./context-degradation.test.ts";

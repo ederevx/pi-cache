@@ -142,32 +142,26 @@ export class AutocompactController {
       return { shouldCompact: false, reason: "cache warm", coldness };
     }
 
+    return this.verdict(view, usage, signals, coldness, churned);
+  }
+
+  /** Gate then cooldown, then assemble the compact verdict. */
+  private verdict(
+    view: AutocompactView,
+    usage: { input: number; cacheRead: number; cacheWrite: number },
+    signals: AutocompactSignal,
+    coldness: number,
+    churned: boolean,
+  ): AutocompactVerdict {
     const gate = this.contextGate(view, usage, coldness, signals.costRates?.());
+    const base = { pressure: gate.pressure, probability: gate.probability, coldness };
     if (!gate.allowed) {
-      return {
-        shouldCompact: false,
-        reason: gate.reason,
-        pressure: gate.pressure,
-        probability: gate.probability,
-        coldness,
-      };
+      return { shouldCompact: false, reason: gate.reason, ...base };
     }
     if (!this.cooldownElapsed()) {
-      return {
-        shouldCompact: false,
-        reason: "cooldown",
-        pressure: gate.pressure,
-        probability: gate.probability,
-        coldness,
-      };
+      return { shouldCompact: false, reason: "cooldown", ...base };
     }
-    return {
-      shouldCompact: true,
-      reason: this.reason(churned, gate.fromPressure),
-      pressure: gate.pressure,
-      probability: gate.probability,
-      coldness,
-    };
+    return { shouldCompact: true, reason: this.reason(churned, gate.fromPressure), ...base };
   }
 
   /** Normalize the caller's number/ContextUsage into a plain view. */
