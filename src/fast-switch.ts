@@ -3,7 +3,7 @@
  *
  * One responsibility: apply and persist the two fast-compaction switches
  * (the compaction override and the /tree branch summary) so the command
- * handler only routes the chosen row id. It owns the switch side effects —
+ * handler only routes a row's new value. It owns the switch side effects —
  * flipping the controller flag, keeping auto-compaction's cache-neutral
  * relaxation in sync, and saving the owned settings — and returns the
  * notification text. It never touches UI.
@@ -20,10 +20,10 @@ export class FastSwitchBoard {
     private readonly store: UserSettingsStore,
   ) {}
 
-  /** Flip the chosen switch, persist it, and return the notification. */
-  toggle(id: string): string | undefined {
-    if (id === "fastCompaction") return this.setCompaction(!this.fast.enabled);
-    if (id === "fastBranchSummary") return this.setBranchSummary(!this.fast.branchEnabled);
+  /** Set the named switch from its "on"/"off" value and notify. */
+  set(id: string, value: string): string | undefined {
+    if (id === "fastCompaction") return this.setCompaction(value === "on");
+    if (id === "fastBranchSummary") return this.setBranchSummary(value === "on");
     return undefined;
   }
 
