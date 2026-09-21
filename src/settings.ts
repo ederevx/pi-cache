@@ -56,19 +56,35 @@ export class SettingsPresenter {
   ): Promise<string | undefined> {
     const rows = this.rows(opts, live);
     const lines = this.formatRows(rows);
-    if (mode === "tui" && ui && typeof ui.select === "function") {
-      try {
-        const selected = await (ui.select as (t: string, o: string[], _opts?: unknown) => Promise<unknown>)(
-          "pi-cache settings",
-          lines,
-        );
-        return rows.find((r, i) => lines[i] === selected)?.id;
-      } catch {
-        /* fall through to the stderr listing */
-      }
+    const selected = await this.selectRow(ui, mode, lines);
+    if (selected !== undefined) {
+      return rows.find((r, i) => lines[i] === selected)?.id;
     }
-    console.error("pi-cache-settings:\n  " + lines.join("\n  "));
+    this.printRows(lines);
     return undefined;
+  }
+
+  /** Present pi's selector in TUI mode; undefined when unavailable/dismissed. */
+  private async selectRow(
+    ui: { select?: unknown } | undefined,
+    mode: string | undefined,
+    lines: string[],
+  ): Promise<string | undefined> {
+    if (mode !== "tui" || !ui || typeof ui.select !== "function") return undefined;
+    try {
+      const selected = await (ui.select as (t: string, o: string[], _opts?: unknown) => Promise<unknown>)(
+        "pi-cache settings",
+        lines,
+      );
+      return typeof selected === "string" ? selected : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Print the same rows to stderr for non-UI modes. */
+  private printRows(lines: string[]): void {
+    console.error("pi-cache-settings:\n  " + lines.join("\n  "));
   }
 
   /** Formatted strings in pi's settings-row layout for the selector. */
