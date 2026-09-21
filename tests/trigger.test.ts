@@ -217,11 +217,26 @@ test("before-turn-trigger: defers only an eligible cold idle prompt", async () =
   assertEq(disarms, 1, "idle timer disarmed");
   await trigger.handle({ source: "interactive", streamingBehavior: "steer" }, {});
   assertEq(compactions, 1, "a steer while streaming is not deferred");
+  assertEq(disarms, 2, "an ineligible input still disarms the idle timer");
   await trigger.handle({ source: "extension" }, {});
   assertEq(compactions, 1, "our own re-sent prompt is not intercepted");
+  assertEq(disarms, 3, "an extension-source input still disarms the idle timer");
   shouldCompact = false;
   await trigger.handle({ source: "interactive" }, {});
   assertEq(compactions, 1, "a warm prompt is not deferred");
+});
+
+test("before-turn-trigger: disarm happens even when disabled", async () => {
+  let disarms = 0;
+  const trigger = new BeforeTurnTrigger<FakeCtx, { source?: string }>({
+    enabled: false,
+    eligible: () => true,
+    shouldCompact: () => true,
+    compact: async () => true,
+    disarmIdle: () => disarms++,
+  });
+  await trigger.handle({ source: "interactive" }, {});
+  assertEq(disarms, 1, "a disabled trigger still clears the idle timer on input");
 });
 
 test("before-turn-trigger: a failing compaction still lets the prompt through", async () => {

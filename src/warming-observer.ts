@@ -15,7 +15,9 @@ export class WarmingObserver {
 
   constructor(private readonly now: () => number = Date.now) {}
 
-  /** Record pi's (or another extension's) warming decision for one refresh. */
+  /** Record pi's (or another extension's) warming decision for one refresh.
+   *  The decision fires before the refresh, so a rejected warm still resets
+   *  the age; that is conservative and only delays idle compaction. */
   note(action: WarmingAction | undefined): void {
     if (action === "warm") this.lastWarmAt = this.now();
   }
