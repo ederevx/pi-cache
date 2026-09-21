@@ -48,18 +48,16 @@ import { AffinityObserver } from "./affinity.ts";
 import { SessionPinner } from "./session-pin.ts";
 import { AutocompactController } from "./autocompact.ts";
 import { CompactionPressure } from "./pressure.ts";
-import { CacheEconomics, type CostRates } from "./economics.ts";
+import { CacheEconomics } from "./economics.ts";
 import { ContextDegradation } from "./context-degradation.ts";
 import { FastCompactionController } from "./fastcompact.ts";
 import { FastSwitchBoard } from "./fast-switch.ts";
+import { SessionSignals, type SessionContextView } from "./signals.ts";
 import { UserSettingsStore } from "./user-settings.ts";
 import { SettingsPresenter } from "./settings.ts";
 import { CacheStatsPresenter } from "./stats.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { dirname } from "node:path";
-
-/** Normalize unknown handler payload shapes with a safe local view. */
-type ModelView = { model?: { id?: string } | undefined } | undefined;
 
 export default function piCacheExtension(pi: ExtensionAPI): void {
   const opts = new OptionsLoader().load();
@@ -115,57 +113,22 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const statsPresenter = new CacheStatsPresenter();
   const switchBoard = new FastSwitchBoard(fastcompact, autocompact, settingsStore);
 
-  /** Provider cache lifetime (ms) from the model's promptCache tier. */
-  const cacheTtlMs = (ctx: { model?: unknown } | undefined): number => {
-    const model = ctx?.model as
-      | { promptCache?: { short?: number; long?: number } }
-      | undefined;
-    const retention = opts.cacheRetentionLong ? "long" : "short";
-    const seconds = model?.promptCache?.[retention];
-    return typeof seconds === "number" && seconds > 0
-      ? seconds * 1000
-      : opts.cacheTtlSeconds * 1000;
-  };
-
-  /** Model cache cost rates (per million tokens), when the model declares them. */
-  const costRates = (ctx: { model?: unknown } | undefined): CostRates | undefined => {
-    const cost = (ctx?.model as
-      | { cost?: { input?: number; cacheRead?: number; cacheWrite?: number } }
-      | undefined)?.cost;
-    if (typeof cost?.input !== "number" || typeof cost?.cacheRead !== "number") {
-      return undefined;
-    }
-    return {
-      input: cost.input,
-      cacheRead: cost.cacheRead,
-      cacheWrite: typeof cost.cacheWrite === "number" ? cost.cacheWrite : 0,
-    };
-  };
-
-  /** The live session signals the autocompaction decision reads. */
-  const autocompactSignals = (ctx: { model?: unknown } | undefined) => ({
-    lastUsage: () => ledger.lastUsage(),
-    msSinceLastTurn: () => ledger.msSinceLastTurn(),
-    headChurn: () => normalizer.churn(),
-    affinityRotated: () => affinity.rotated(),
-    cacheTtlMs: () => cacheTtlMs(ctx),
-    costRates: () => costRates(ctx),
-  });
-
-  /** The live session id the core exposes, or a stable fallback. */
-  const sessionIdOf = (ctx: unknown): string => {
-    const manager = (ctx as { sessionManager?: { getSessionId?: () => string } } | undefined)
-      ?.sessionManager;
-    try {
-      return manager?.getSessionId?.() ?? "session";
-    } catch {
-      return "session";
-    }
-  };
+  const signals = new SessionSignals(
+    {
+      cacheRetentionLong: opts.cacheRetentionLong,
+      fallbackTtlSeconds: opts.cacheTtlSeconds,
+    },
+    {
+      lastUsage: () => ledger.lastUsage(),
+      msSinceLastTurn: () => ledger.msSinceLastTurn(),
+      headChurn: () => normalizer.churn(),
+      affinityRotated: () => affinity.rotated(),
+    },
+  );
 
   pi.on("session_start", async (_event, ctx) => {
     try {
-      ledger.useSession(sessionIdOf(ctx));
+      ledger.useSession(signals.sessionIdOf(ctx));
     } catch {
       /* telemetry only */
     }
@@ -175,8 +138,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     try {
       const message = event.message;
       if (message?.role === "assistant") {
-        const model = (ctx as ModelView)?.model?.id ?? "session";
-        ledger.record(message.usage, model, sessionIdOf(ctx));
+        const model = (ctx as SessionContextView | undefined)?.model?.id ?? "session";
+        ledger.record(message.usage, model, signals.sessionIdOf(ctx));
       }
     } catch {
       /* never break the turn */
@@ -218,7 +181,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     try {
       if (!opts.autoCompact) return;
       const usage = ctx.getContextUsage?.();
-      const verdict = autocompact.decide(usage, autocompactSignals(ctx));
+      const verdict = autocompact.decide(usage, signals.for(ctx as SessionContextView | undefined));
       if (verdict.shouldCompact) {
         ctx.compact?.({
           onError: () => {
@@ -356,8 +319,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     description: "Show global and session cache stats with live pressure",
     handler: async (_args, ctx) => {
       const usage = ctx.getContextUsage?.();
-      const signals = autocompactSignals(ctx);
-      const pressure = autocompact.currentPressure(usage, ledger.lastUsage(), signals);
+      const liveSignals = signals.for(ctx as SessionContextView | undefined);
+      const pressure = autocompact.currentPressure(usage, ledger.lastUsage(), liveSignals);
       const text = statsPresenter.render({
         global: ledger.totals(),
         session: ledger.sessionTotals(),
