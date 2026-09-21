@@ -281,6 +281,36 @@ test("extension: async auto-compact failure is fail-open", async () => {
   }
 });
 
+test("extension: settings dismissal stays silent", async () => {
+  const root = join(scratchDir(), "e2e-settings-dismiss");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    let errored = false;
+    const original = console.error;
+    console.error = () => {
+      errored = true;
+    };
+    try {
+      await pi.commands.get("cache-settings")!.handler([], {
+        ui: { select: () => Promise.resolve(undefined) },
+        mode: "tui",
+      } as never);
+    } finally {
+      console.error = original;
+    }
+    assertEq(errored, false, "a dismissed selector prints nothing");
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
 test("extension: warm-cache advisory is observational", async () => {
   const root = join(scratchDir(), "e2e-warm");
   mkdirSync(root, { recursive: true });
