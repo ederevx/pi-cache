@@ -85,6 +85,8 @@ const PI_CACHE_KEYS = [
   "PI_CACHE_PIN_SESSION",
   "PI_CACHE_ADVISORY",
   "PI_CACHE_AUTO_COMPACT",
+  "PI_CACHE_IDLE_TRIGGER",
+  "PI_CACHE_BEFORE_TURN",
   "PI_CACHE_FAST_COMPACT",
   "PI_CACHE_FAST_BRANCH_SUMMARY",
   "PI_CACHE_LEDGER",
@@ -336,6 +338,88 @@ test("extension: settings selector failure falls back to the listing", async () 
       console.error = original;
     }
     assertEq(printed, true, "a throwing selector falls back to the listing");
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
+test("extension: input defers a cold prompt until compaction completes", async () => {
+  const root = join(scratchDir(), "e2e-before-turn");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    await pi.emit(
+      "message_end",
+      {
+        message: {
+          role: "assistant",
+          usage: { input: 1000, output: 50, cacheRead: 5, cacheWrite: 950, totalTokens: 2000 },
+        },
+      },
+      { model: { id: "m1" } },
+    );
+    await pi.emit("turn_end", { turnIndex: 0 }, {});
+    let completed = false;
+    const compactCtx = {
+      getContextUsage: () => ({ percent: 85, tokens: 60_000 }),
+      compact: (args: Record<string, unknown>) => {
+        (args.onComplete as (() => void) | undefined)?.();
+        completed = true;
+      },
+    };
+    await pi.emit("input", { text: "hello", source: "interactive" }, compactCtx);
+    assertEq(completed, true, "the prompt was deferred until compaction completed");
+    // The warming observer is observational and must never throw.
+    await pi.emit("cache_warming_decision", { action: "warm" }, {});
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
+test("extension: idle trigger fires at TTL expiry", async () => {
+  const root = join(scratchDir(), "e2e-idle-ttl");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+    PI_CACHE_FAST_COMPACT: "0",
+    PI_CACHE_TTL_SECONDS: "1",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    const compactCalls: Array<Record<string, unknown>> = [];
+    const ctx = {
+      getContextUsage: () => ({ percent: 85, tokens: 60_000 }),
+      isIdle: () => true,
+      sessionManager: { getSessionId: () => "sess1" },
+      compact: (args: Record<string, unknown>) => {
+        compactCalls.push(args);
+        (args.onComplete as (() => void) | undefined)?.();
+      },
+    };
+    // A warm cache is not compacted at settle without fast compaction.
+    await pi.emit(
+      "message_end",
+      {
+        message: {
+          role: "assistant",
+          usage: { input: 100, output: 50, cacheRead: 900, cacheWrite: 0, totalTokens: 1050 },
+        },
+      },
+      { model: { id: "m1" } },
+    );
+    await pi.emit("turn_end", { turnIndex: 0 }, {});
+    await pi.emit("agent_settled", {}, ctx);
+    assertEq(compactCalls.length, 0, "warm settle does not compact");
+    await waitFor(() => compactCalls.length >= 1, "idle TTL compaction fired", 2500);
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }

@@ -39,6 +39,8 @@ export interface SignalSources {
   msSinceLastTurn(): number;
   headChurn(): number;
   affinityRotated(): boolean;
+  /** Milliseconds since pi last warmed the cache, when observed. */
+  msSinceLastWarm?(): number | undefined;
 }
 
 export class SessionSignals {
@@ -84,10 +86,23 @@ export class SessionSignals {
     return {
       lastUsage: () => this.sources.lastUsage(),
       msSinceLastTurn: () => this.sources.msSinceLastTurn(),
+      msSinceCacheTouch: () => this.msSinceCacheTouch(),
       headChurn: () => this.sources.headChurn(),
       affinityRotated: () => this.sources.affinityRotated(),
       cacheTtlMs: () => this.cacheTtlMs(ctx),
       costRates: () => this.costRates(ctx),
     };
+  }
+
+  /**
+   * Milliseconds since the cache was last touched. A pi warm refresh resets
+   * the provider TTL, so the idle ramp must measure from the most recent of
+   * the last turn and the last warm; otherwise the idle trigger could compact
+   * a cache pi just kept alive.
+   */
+  msSinceCacheTouch(): number {
+    const turn = this.sources.msSinceLastTurn();
+    const warm = this.sources.msSinceLastWarm?.();
+    return typeof warm === "number" && Number.isFinite(warm) ? Math.min(turn, warm) : turn;
   }
 }
