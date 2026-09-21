@@ -38,7 +38,7 @@ test("economics: a warm low-horizon prefix loses", () => {
 test("economics: occupancy cancels out of the ratio", () => {
   const e = new CacheEconomics();
   const at = (tokens: number) => e.pressure(rates, { tokens, coldness: 1, summaryCost: 0 });
-  assertEq(at(20_000), at(80_000), "cost ratio is flat in token count");
+  assert(Math.abs(at(20_000) - at(80_000)) < 1e-9, "cost ratio is flat in token count");
   assert(at(20_000) > 0, "still pressures");
 });
 
@@ -57,4 +57,15 @@ test("economics: zero tokens and zero rates yield no pressure", () => {
     e.pressure({ input: 0, cacheRead: 0, cacheWrite: 0 }, { tokens: 120_000, coldness: 1, summaryCost: 0 }),
     0,
   );
+});
+
+test("economics: non-finite options fall back safely", () => {
+  const e = new CacheEconomics({
+    continuationProbability: Number.NaN,
+    maxRequests: Number.POSITIVE_INFINITY,
+    keepFraction: Number.NaN,
+  });
+  assertEq(e.horizon(), 1 / (1 - 0.15), "continuation falls back");
+  const pressure = e.pressure(rates, { tokens: 120_000, coldness: 1, summaryCost: 0 });
+  assert(Number.isFinite(pressure) && pressure >= 0 && pressure <= 1, `bounded ${pressure}`);
 });

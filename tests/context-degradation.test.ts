@@ -36,3 +36,11 @@ test("degradation: gamma biases the ramp toward the top", () => {
     "squared ramp is lower",
   );
 });
+
+test("degradation: a negative gamma stays bounded", () => {
+  // Regression: pow(0, negative) used to yield Infinity and break [0,1].
+  const model = new ContextDegradation({ start: 0.5, full: 0.85, gamma: -1 });
+  assertEq(model.pressure(20_000, 200_000), 0, "below the onset is exactly zero");
+  const above = model.pressure(160_000, 200_000);
+  assert(Number.isFinite(above) && above >= 0 && above <= 1, `bounded ${above}`);
+});

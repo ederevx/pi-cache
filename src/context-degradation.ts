@@ -28,14 +28,23 @@ export class ContextDegradation {
   private readonly opts: ContextDegradationOptions;
 
   constructor(opts: Partial<ContextDegradationOptions> = {}) {
-    this.opts = { ...ContextDegradation.DEFAULTS, ...opts };
+    this.opts = {
+      ...ContextDegradation.DEFAULTS,
+      ...opts,
+      // A negative exponent would invert the ramp (and make a zero ramp
+      // Infinity), so the exponent is clamped non-negative.
+      gamma: Math.max(0, opts.gamma ?? ContextDegradation.DEFAULTS.gamma),
+    };
   }
 
   /** Degradation pressure in `[0,1]` for a token count against the window. */
   pressure(tokens: number, contextWindow: number): number {
     const occupancy = Math.max(0, tokens) / Math.max(1, contextWindow);
     const span = Math.max(1e-9, this.opts.full - this.opts.start);
-    const ramp = (occupancy - this.opts.start) / span;
-    return Math.pow(Math.max(0, Math.min(1, ramp)), this.opts.gamma);
+    const ramp = Math.max(0, Math.min(1, (occupancy - this.opts.start) / span));
+    // Guard `Math.pow(0, 0)`: at/below the onset the pressure is 0 for any
+    // exponent, including a clamped-to-zero negative one.
+    if (ramp <= 0) return 0;
+    return Math.max(0, Math.min(1, Math.pow(ramp, this.opts.gamma)));
   }
 }

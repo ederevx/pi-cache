@@ -54,11 +54,13 @@ const CLEAN = {
   PI_CACHE_BACKUP_DIR: undefined,
   PI_CACHE_FAST_COMPACT: undefined,
   PI_CACHE_FAST_BRANCH_SUMMARY: undefined,
-  PI_CACHE_PRESSURE_START: undefined,
-  PI_CACHE_PRESSURE_FULL: undefined,
-  PI_CACHE_PRESSURE_GAMMA: undefined,
-  PI_CACHE_PRESSURE_CACHE_DISCOUNT: undefined,
-  PI_CACHE_PRESSURE_COLD_PREMIUM: undefined,
+  PI_CACHE_PRESSURE_CONTINUATION: undefined,
+  PI_CACHE_PRESSURE_MAX_REQUESTS: undefined,
+  PI_CACHE_PRESSURE_KEEP_FRACTION: undefined,
+  PI_CACHE_PRESSURE_SUMMARY_COST: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_START: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_FULL: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_GAMMA: undefined,
   PI_CACHE_PRESSURE_COLD_FLOOR: undefined,
   PI_CACHE_TTL_SECONDS: undefined,
 };
@@ -174,6 +176,31 @@ test("constants: numeric parsing falls back on garbage", () => {
 });
 
 // Unused legacy env vars must not crash option resolution.
+test("constants: pressure env overrides resolve", () => {
+  withEnv(
+    {
+      PI_CACHE_PRESSURE_CONTINUATION: "0.4",
+      PI_CACHE_PRESSURE_MAX_REQUESTS: "3",
+      PI_CACHE_PRESSURE_KEEP_FRACTION: "0.5",
+      PI_CACHE_PRESSURE_SUMMARY_COST: "12",
+      PI_CACHE_PRESSURE_DEGRADE_START: "0.3",
+      PI_CACHE_PRESSURE_DEGRADE_FULL: "0.7",
+      PI_CACHE_PRESSURE_DEGRADE_GAMMA: "1.5",
+      PI_CACHE_SETTINGS: settingsPath("pressure"),
+    },
+    () => {
+      const opts = loadOptions();
+      assertEq(opts.pressureContinuation, 0.4);
+      assertEq(opts.pressureMaxRequests, 3);
+      assertEq(opts.pressureKeepFraction, 0.5);
+      assertEq(opts.pressureSummaryCost, 12);
+      assertEq(opts.pressureDegradeStart, 0.3);
+      assertEq(opts.pressureDegradeFull, 0.7);
+      assertEq(opts.pressureDegradeGamma, 1.5);
+    },
+  );
+});
+
 test("constants: removed env vars are ignored harmlessly", () => {
   withEnv(
     {

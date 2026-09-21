@@ -10,9 +10,10 @@ git tag, and the `version` in `package.json` matches the newest tag.
 - Rebuild compaction pressure around expected cost instead of context-window
   occupancy. `CompactionPressure` now blends an expected-cost economics model
   (write amortization, coldness, expected remaining requests) with a
-  context-degradation onset, combined by inclusion-exclusion; occupancy
+  context-degradation onset, combined by inclusion-exclusion. Occupancy
   cancels out of the cost ratio, so a warm low-horizon prefix no longer
-  pressures merely for being large. Costs come from `ctx.model.cost`.
+  pressures merely for being large; it still rises with occupancy through
+  the degradation onset. Costs come from `ctx.model.cost`.
 - Replace the `PI_CACHE_PRESSURE_START`/`_FULL`/`_CACHE_DISCOUNT`/
   `_COLD_PREMIUM` tunables with `_CONTINUATION`, `_MAX_REQUESTS`,
   `_KEEP_FRACTION`, `_SUMMARY_COST`, `_DEGRADE_START`, `_DEGRADE_FULL`, and

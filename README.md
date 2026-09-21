@@ -84,8 +84,9 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
 3. **Tool-schema hygiene** — deterministic tool ordering, dedup, and removal
    of volatile fields (cwd, absolute paths) from tool definitions.
 4. **Cache-aware compaction** — the trigger is an expected-cost
-   probabilistic pressure (coldness and prefix amortization, not a
-   token ramp), and when fast compaction is on the compaction itself
+   probabilistic pressure (coldness and prefix amortization drive it,
+   with a context-degradation onset as the occupancy guard), and when fast
+   compaction is on the compaction itself
    is a byte-stable O(1) override at pi's own cut point, so the cached
    prefix head never moves. Fast compaction replaces pi's summarizer for
    all reasons; with it off, pi's own normal summarizer runs unchanged in
