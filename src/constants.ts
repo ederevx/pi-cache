@@ -64,6 +64,8 @@ export interface PiCacheOptions {
   pressureMaxRequests: number;
   pressureKeepFraction: number;
   pressureSummaryCost: number;
+  /** Minimum live context tokens before economics pressure may fire. */
+  pressureMinTokens: number;
   pressureDegradeStart: number;
   pressureDegradeFull: number;
   pressureDegradeGamma: number;
@@ -112,6 +114,7 @@ export class OptionsLoader {
       pressureMaxRequests: this.envFloat("PI_CACHE_PRESSURE_MAX_REQUESTS", 8),
       pressureKeepFraction: this.envFloat("PI_CACHE_PRESSURE_KEEP_FRACTION", 0.2),
       pressureSummaryCost: this.envFloat("PI_CACHE_PRESSURE_SUMMARY_COST", 0),
+      pressureMinTokens: this.envInt("PI_CACHE_PRESSURE_MIN_TOKENS", 50_000),
       pressureDegradeStart: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_START", 0.5),
       pressureDegradeFull: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_FULL", 0.85),
       pressureDegradeGamma: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_GAMMA", 2),
