@@ -3,6 +3,23 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.4.0] - 2026-09-21
+
+### Added
+
+- Confirm landed cache-warm refreshes from the persisted `cache_warm` usage
+  entries: `WarmingObserver.reconcile` scans the session tail newest-first
+  (across branches, deduped by entry id) at session start, turn end, input,
+  the warm decision, and agent settle, and the measured cache age is the
+  most recent of the decision intent and the confirmation.
+- Render `/cache-settings` in pi's two-column settings layout (padded label
+  | current value, selected-row description and key hint, search and mouse
+  support) using pi-tui's `SettingsList`; the two live fast-compaction
+  switches cycle in place and persist, while the env-resolved options stay
+  display-only.
+
+[0.4.0]: https://github.com/ederevx/pi-cache/releases/tag/v0.4.0
+
 ## [0.3.0] - 2026-09-21
 
 ### Added
