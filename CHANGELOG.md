@@ -3,7 +3,7 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
-## [Unreleased]
+## [0.2.0] - 2026-09-20
 
 ### Changed
 
@@ -18,6 +18,8 @@ git tag, and the `version` in `package.json` matches the newest tag.
   `_COLD_PREMIUM` tunables with `_CONTINUATION`, `_MAX_REQUESTS`,
   `_KEEP_FRACTION`, `_SUMMARY_COST`, `_DEGRADE_START`, `_DEGRADE_FULL`, and
   `_DEGRADE_GAMMA`.
+
+[0.2.0]: https://github.com/ederevx/pi-cache/releases/tag/v0.2.0
 
 ## [0.1.3] - 2026-09-20
 
