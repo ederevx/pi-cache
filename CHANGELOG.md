@@ -3,6 +3,20 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.5.0] - 2026-09-21
+
+### Fixed
+
+- Make every `/cache-settings` row editable. The six option rows (telemetry,
+  sort tools, dedup tools, session pin, compaction advisory, auto-compaction)
+  now cycle on/off and persist like the two fast-compaction switches, instead
+  of silently ignoring Enter/Space while the list hint promised a change. Each
+  option applies to its live owning controller, the idle and before-turn
+  triggers read the auto-compaction switch through a predicate, and the owned
+  settings file now backs all eight options below `PI_CACHE_*` env precedence.
+
+[0.5.0]: https://github.com/ederevx/pi-cache/releases/tag/v0.5.0
+
 ## [0.4.0] - 2026-09-21
 
 ### Added
