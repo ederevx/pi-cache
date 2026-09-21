@@ -119,7 +119,10 @@ compaction is on, makes the compaction itself prefix-stable:
    `start=0.1`/`full=0.6`/`gamma=2` ramp yields the Bernoulli probability;
    the draw uses an injected RNG. Costs come from `ctx.model.cost`
    per-million rates; absent rates leave economics at 0, so the
-   degradation onset gates alone.
+   degradation onset gates alone. Because economics is flat in token
+   count, the pressure path is additionally floored on a minimum live
+   context (`PI_CACHE_PRESSURE_MIN_TOKENS`, default 50 000) so a trivially
+   small, still-cold prefix cannot request a compaction pi then refuses.
 2. At `agent_settled` (guaranteed idle) the draw decides whether to
    `ctx.compact()`. A warm-cache coldness floor applies first (a model
    summarizer must not run mid-warm-cache); fast compaction relaxes that
