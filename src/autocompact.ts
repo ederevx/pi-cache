@@ -69,6 +69,9 @@ export interface AutocompactOptions {
   cacheNeutral?: boolean;
   /** Non-fast summarizer cost in per-million tokens (0 default). */
   summaryCost?: number;
+  /** Minimum live context tokens before economics pressure may fire;
+   *  0 or negative disables the floor. */
+  minTokens?: number;
   /** Probabilistic pressure model; absent = fixed percent threshold. */
   pressure?: CompactionPressure;
 }
@@ -94,6 +97,8 @@ export class AutocompactController {
   private static readonly COOLDOWN_TURNS = 5;
   /** Default coldness floor below which a warm cache is never compacted. */
   private static readonly DEFAULT_COLD_FLOOR = 0.2;
+  /** Default minimum live context before economics pressure may fire. */
+  private static readonly DEFAULT_MIN_TOKENS = 50_000;
 
   private lastCompactedAt = 0;
   private lastCompactedTurn = -1;
@@ -213,6 +218,17 @@ export class AutocompactController {
     return this.opts.coldFloor ?? AutocompactController.DEFAULT_COLD_FLOOR;
   }
 
+  /** Minimum live context tokens before economics pressure may fire. */
+  private minTokens(): number {
+    return this.opts.minTokens ?? AutocompactController.DEFAULT_MIN_TOKENS;
+  }
+
+  /** Whether the sampled context is below the economics pressure floor. */
+  private belowMinimum(view: AutocompactView): boolean {
+    const floor = this.minTokens();
+    return floor > 0 && typeof view.tokens === "number" && view.tokens < floor;
+  }
+
   /**
    * Public preview for /cache-stats: the current pressure verdict for a
    * live context sample, or undefined when it cannot be sampled.
@@ -246,6 +262,17 @@ export class AutocompactController {
   } {
     const verdict = this.samplePressure(view, usage, coldness, rates);
     if (verdict) {
+      // The expected-cost term is flat in token count, so without a floor it
+      // fires on a trivially small context that pi refuses to compact.
+      if (this.belowMinimum(view)) {
+        return {
+          allowed: false,
+          reason: "context below minimum",
+          pressure: verdict.pressure,
+          probability: verdict.probability,
+          fromPressure: true,
+        };
+      }
       return {
         allowed: verdict.fire,
         reason: verdict.fire ? undefined : "pressure below draw",
