@@ -57,25 +57,17 @@ export class PrefixNormalizer {
     let changed = false;
 
     if (this.opts.dedupTools) {
-      const seen = new Set<string>();
-      const deduped: ToolLike[] = [];
-      for (const tool of result) {
-        const key = JSON.stringify(tool);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        deduped.push(tool);
-      }
-      if (deduped.length !== result.length) {
+      const deduped = this.dedup(result);
+      if (deduped !== result) {
         result = deduped;
         changed = true;
       }
     }
 
     if (this.opts.sortTools) {
-      const byName = [...result];
-      byName.sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
-      if (JSON.stringify(byName) !== JSON.stringify(result)) {
-        result = byName;
+      const sorted = this.sortByName(result);
+      if (sorted !== result) {
+        result = sorted;
         changed = true;
       }
     }
@@ -83,20 +75,44 @@ export class PrefixNormalizer {
     if (changed) {
       // Re-pin a trailing Anthropic cache_control marker to the new last
       // tool (sort/dedup move it otherwise, breaking the breakpoint).
-      if (hasMarker && marker !== undefined) {
-        result = result.map((t) => {
-          if (t.cache_control === undefined) return t;
-          const cleaned = { ...t };
-          delete cleaned.cache_control;
-          return cleaned;
-        });
-        const last = { ...result[result.length - 1] };
-        last.cache_control = marker;
-        result[result.length - 1] = last;
-      }
+      if (hasMarker && marker !== undefined) result = this.repinMarker(result, marker);
       body.tools = result;
     }
     return changed;
+  }
+
+  /** Drop exact-duplicate tool schemas; returns the same array when unchanged. */
+  private dedup(tools: ToolLike[]): ToolLike[] {
+    const seen = new Set<string>();
+    const deduped: ToolLike[] = [];
+    for (const tool of tools) {
+      const key = JSON.stringify(tool);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(tool);
+    }
+    return deduped.length === tools.length ? tools : deduped;
+  }
+
+  /** Deterministic name order; returns the same array when already sorted. */
+  private sortByName(tools: ToolLike[]): ToolLike[] {
+    const byName = [...tools];
+    byName.sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
+    return JSON.stringify(byName) === JSON.stringify(tools) ? tools : byName;
+  }
+
+  /** Move a trailing cache_control marker onto the new last tool. */
+  private repinMarker(tools: ToolLike[], marker: unknown): ToolLike[] {
+    const stripped = tools.map((t) => {
+      if (t.cache_control === undefined) return t;
+      const cleaned = { ...t };
+      delete cleaned.cache_control;
+      return cleaned;
+    });
+    const last = { ...stripped[stripped.length - 1] };
+    last.cache_control = marker;
+    stripped[stripped.length - 1] = last;
+    return stripped;
   }
 
   /** Track byte-stability of the prefix-relevant head (tools + leading system). */

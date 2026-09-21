@@ -150,6 +150,14 @@ test("ledger: retention bounds the file and rewrites on load", () => {
   assertDeepEq(sink.rows.map((r) => r.id), ["r3", "r4"]);
 });
 
+test("ledger: retention bounds the file during a long session", () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true, 2);
+  for (let i = 0; i < 6; i++) ledger.record(usage, "m", "s");
+  assertEq(sink.rows.length, 2, "file bounded without waiting for close");
+  assertEq(ledger.totals().n, 2, "in-memory window retained");
+});
+
 test("ledger: compact rewrites only when rows were dropped", () => {
   const sink = new MemorySink();
   const ledger = new CacheLedger(sink, true, 2);
