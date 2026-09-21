@@ -123,14 +123,24 @@ compaction is on, makes the compaction itself prefix-stable:
    count, the pressure path is additionally floored on a minimum live
    context (`PI_CACHE_PRESSURE_MIN_TOKENS`, default 50 000) so a trivially
    small, still-cold prefix cannot request a compaction pi then refuses.
-2. At `agent_settled` (guaranteed idle) the draw decides whether to
-   `ctx.compact()`. A warm-cache coldness floor applies first (a model
+2. The draw is evaluated at three idle points through one
+   `CompactionTrigger`: `agent_settled` (a run fully settled), a
+   session-scoped TTL timer that fires when the provider cache expires
+   while pi sits idle, and the `input` hook when a cold prompt arrives
+   before a turn. A warm-cache coldness floor applies first (a model
    summarizer must not run mid-warm-cache); fast compaction relaxes that
    floor because the override is prefix-stable.
-3. Strict guardrails: cooldown (min turns + min seconds after any
-   compaction); never fire while streaming or when core reports overflow
-   recovery (`willRetry`); never fire when a compaction is already in
-   progress; all decisions in one `AutocompactController` class.
+3. The before-turn path defers the prompt by awaiting compaction inside
+   the `input` handler (pi awaits those handlers before building the
+   turn, so the prompt then continues against the compacted context; no
+   re-send, so a print-mode prompt cannot be lost). The idle path fires
+   only when `ctx.isIdle()`, is unref'd, and is disarmed on `input`,
+   `agent_start`, and `session_shutdown`. Strict guardrails: cooldown
+   (min turns + min seconds after any compaction); never fire while
+   streaming or when core reports overflow recovery (`willRetry`); never
+   fire when a compaction is already in progress (`CompactionGate` allows
+   one per idle window, keyed by session + last ledger row); all
+   decisions in one `AutocompactController` class.
 4. When fast compaction is on, the `session_before_compact` proposal
    replaces pi's summarizer for *every* reason with the byte-stable
    `FAST_SUMMARY_STUB` at pi's own cut point (no model call), and
@@ -149,13 +159,14 @@ confirmed by the 0.86.0 audit: `session_before_compact` returning
 
 Feasibility confirmed against the pi 0.86 extension API:
 `ctx.compact({customInstructions, onComplete, onError})` is fire-and-forget
-(`void`); compaction summaries are cache-transparent (`cacheRetention:"none"`,
-fresh routing session), so the trigger only times the *next* turn's re-write.
-The safe point is `agent_settled` (guaranteed idle — no pending retry or
-overflow recovery), not `turn_end` (compact() aborts live
-work). Guards in code: `agent_settled` + `ctx.isIdle()` + cooldown
-(turns/seconds) + last-entry-compaction check via pi's own stale guards;
-opt-in `PI_CACHE_AUTO_COMPACT`.
+(`void`) but its `onComplete`/`onError` callbacks let an `input` handler
+await it; it aborts a live run, so it is only ever called from an idle
+point. Compaction summaries are cache-transparent
+(`cacheRetention:"none"`, fresh routing session), so the trigger only
+times the *next* turn's re-write. Guards in code: `ctx.isIdle()` +
+cooldown (turns/seconds) + `CompactionGate`; opt-in
+`PI_CACHE_AUTO_COMPACT`, with `PI_CACHE_IDLE_TRIGGER` and
+`PI_CACHE_BEFORE_TURN` selecting the timing points.
 
 **Coldness model (implemented 2026-09-20).** `AutocompactController`
 computes `coldness` and feeds it to `CompactionPressure`, where it sets
@@ -165,9 +176,12 @@ cache-read rate):
 1. Churn/rotation sets coldness 1 (the prefix is definitively invalid).
 2. Otherwise the last request's cached share maps linearly from <=5%
    (`COLD_RATIO`) = 1 to >=50% = 0.
-3. A time ramp raises it toward 1 as `msSinceLastTurn` approaches the
-   provider cache lifetime from `ctx.model.promptCache` (fallback
-   `PI_CACHE_TTL_SECONDS`), combined by their maximum.
+3. A time ramp raises it toward 1 as the time since the cache was last
+   touched (the last turn or a pi warm refresh, whichever is newer)
+   approaches the provider cache lifetime from `ctx.model.promptCache`
+   (fallback `PI_CACHE_TTL_SECONDS`), combined by their maximum. The warm
+   observer keeps the idle trigger from compacting a cache pi just
+   rewarmed.
 4. A warm-cache floor (`PI_CACHE_PRESSURE_COLD_FLOOR`, default 0.2) still
    blocks a non-churned, non-cache-neutral warm cache; the old min-gap
    gate is gone because it measured about zero at `agent_settled`.
