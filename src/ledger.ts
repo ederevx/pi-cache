@@ -52,6 +52,8 @@ export class CacheLedger {
    *  the id is known; the auto-compaction trigger reads its last row. */
   private sessionRows: UsageRow[] = [];
   private seq = 0;
+  /** Appends since the last in-session file compaction (see record). */
+  private appendsSinceCompact = 0;
   /** Per-process boot nonce so row ids are unique across reloads. */
   private boot = Math.floor(Math.random() * 0x10000).toString(16);
   private readonly sink: RecordSink;
@@ -83,6 +85,7 @@ export class CacheLedger {
     this.noteSessionRow(row);
     this.sink.append(row);
     this.trim();
+    this.maybeCompactFile();
   }
 
   /** Aggregated counters over the retained ledger window (all processes). */
@@ -190,6 +193,19 @@ export class CacheLedger {
     this.rows = this.trimToWindow(this.rows);
     this.sessionRows = this.trimToWindow(this.sessionRows);
     return this.rows.length !== rowsBefore || this.sessionRows.length !== sessionBefore;
+  }
+
+  /**
+   * Bound the file during a long session, not only at load/shutdown: after
+   * one full window of appends the file holds the window plus those appends,
+   * so rewrite it to the retained set. A no-op when unbounded.
+   */
+  private maybeCompactFile(): void {
+    if (this.maxRows === Number.POSITIVE_INFINITY) return;
+    this.appendsSinceCompact++;
+    if (this.appendsSinceCompact < this.maxRows) return;
+    this.appendsSinceCompact = 0;
+    this.enforceRetention();
   }
 
   /** Keep only the newest `maxRows` entries of one collection. */
