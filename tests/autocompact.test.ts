@@ -18,6 +18,8 @@ function baseSignals() {
   return {
     lastUsage: () => ({ input: 1000, cacheRead: 0, cacheWrite: 0 }),
     msSinceLastTurn: () => 300_000,
+    /** Absent by default so the idle ramp falls back to the last turn. */
+    msSinceCacheTouch: undefined as (() => number) | undefined,
     headChurn: () => 0,
     affinityRotated: () => false,
   };
@@ -80,6 +82,24 @@ test("autocompact: the TTL idle ramp raises coldness", () => {
   );
   assertEq(later.shouldCompact, true, "time makes a warm cache compactable");
   assert(later.coldness !== undefined && later.coldness >= 0.2, "coldness cleared the floor");
+});
+
+test("autocompact: the cache-touch ramp uses the most recent warm", () => {
+  const warm = () => ({ input: 100, cacheRead: 900, cacheWrite: 0 });
+  const c = new AutocompactController(opts);
+  c.noteTurn(0);
+  // A warm cache whose last turn was long ago but which pi warmed recently
+  // must not be treated as cold by the idle ramp.
+  const recent = c.decide(
+    85,
+    signals({ lastUsage: warm, msSinceCacheTouch: () => 1000, cacheTtlMs: () => 300_000 }),
+  );
+  assertEq(recent.shouldCompact, false, "a recent warm keeps the cache warm");
+  const expired = c.decide(
+    85,
+    signals({ lastUsage: warm, msSinceCacheTouch: () => 300_000, cacheTtlMs: () => 300_000 }),
+  );
+  assertEq(expired.shouldCompact, true, "an expired cache touch makes it compactable");
 });
 
 test("autocompact: churned prefix is cold", () => {

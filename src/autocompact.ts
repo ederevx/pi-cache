@@ -33,6 +33,9 @@ export interface AutocompactSignal {
   lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined;
   /** Milliseconds since the last completed turn (TTL-gap ramp). */
   msSinceLastTurn(): number;
+  /** Milliseconds since the cache was last touched (last turn or a pi warm
+   *  refresh); falls back to `msSinceLastTurn` when absent. */
+  msSinceCacheTouch?(): number;
   /** Number of times the prefix head changed this session (normalizer.churn). */
   headChurn(): number;
   /** Whether the provider session-affinity header has rotated (affinity.rotated). */
@@ -193,7 +196,7 @@ export class AutocompactController {
     const observed = this.observedColdness(usage);
     const ttlMs = signals?.cacheTtlMs?.();
     if (!signals || typeof ttlMs !== "number" || ttlMs <= 0) return observed;
-    const idleMs = signals.msSinceLastTurn();
+    const idleMs = signals.msSinceCacheTouch?.() ?? signals.msSinceLastTurn();
     if (!Number.isFinite(idleMs) || idleMs <= 0) return observed;
     return Math.max(observed, Math.min(1, idleMs / ttlMs));
   }

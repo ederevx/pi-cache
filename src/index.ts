@@ -53,10 +53,16 @@ import { ContextDegradation } from "./context-degradation.ts";
 import { FastCompactionController } from "./fastcompact.ts";
 import { FastSwitchBoard } from "./fast-switch.ts";
 import { SessionSignals, type SessionContextView } from "./signals.ts";
+import { CompactionGate } from "./compaction-gate.ts";
+import { CompactionRequest } from "./compaction-request.ts";
+import { CompactionTrigger } from "./compaction-trigger.ts";
+import { IdleTrigger } from "./idle-trigger.ts";
+import { BeforeTurnTrigger } from "./before-turn-trigger.ts";
+import { WarmingObserver } from "./warming-observer.ts";
 import { UserSettingsStore } from "./user-settings.ts";
 import { SettingsPresenter } from "./settings.ts";
 import { CacheStatsPresenter } from "./stats.ts";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { dirname } from "node:path";
 
 export default function piCacheExtension(pi: ExtensionAPI): void {
@@ -113,6 +119,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const statsPresenter = new CacheStatsPresenter();
   const switchBoard = new FastSwitchBoard(fastcompact, autocompact, settingsStore);
 
+  const warming = new WarmingObserver();
+
   const signals = new SessionSignals(
     {
       cacheRetentionLong: opts.cacheRetentionLong,
@@ -121,14 +129,58 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     {
       lastUsage: () => ledger.lastUsage(),
       msSinceLastTurn: () => ledger.msSinceLastTurn(),
+      msSinceLastWarm: () => warming.msSinceLastWarm(),
       headChurn: () => normalizer.churn(),
       affinityRotated: () => affinity.rotated(),
     },
   );
 
+  // Compaction is triggered from three points through one coordinator: the
+  // settled run end, the TTL idle timer, and a cold before-turn prompt. The
+  // gate sizes them to one per idle window; the request makes ctx.compact()
+  // awaitable so the before-turn path can defer the prompt.
+  const gate = new CompactionGate();
+  const compactionRequest = new CompactionRequest(() => {
+    try {
+      pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" });
+    } catch {
+      /* an async compact callback must never break the process */
+    }
+  });
+  const compactionTrigger = new CompactionTrigger<ExtensionContext>({
+    shouldCompact: (ctx) =>
+      autocompact.decide(
+        ctx.getContextUsage?.(),
+        signals.for(ctx as unknown as SessionContextView),
+      ).shouldCompact,
+    keyOf: (ctx) => `${signals.sessionIdOf(ctx)}:${ledger.lastRowId() ?? "none"}`,
+    gate,
+    request: compactionRequest,
+  });
+  const idleTrigger = new IdleTrigger<ExtensionContext>({
+    enabled: opts.autoCompact && opts.idleTrigger,
+    isIdle: (ctx) => ctx.isIdle?.() === true,
+    idleMs: () => signals.msSinceCacheTouch(),
+    ttlMs: (ctx) => signals.cacheTtlMs(ctx as unknown as SessionContextView),
+    compact: (ctx) => compactionTrigger.tryCompact(ctx),
+  });
+  const beforeTurn = new BeforeTurnTrigger<
+    ExtensionContext,
+    { streamingBehavior?: string; source?: string }
+  >({
+    enabled: opts.autoCompact && opts.beforeTurn,
+    eligible: (event) => event?.streamingBehavior === undefined && event?.source !== "extension",
+    shouldCompact: (ctx) => compactionTrigger.shouldCompact(ctx),
+    compact: (ctx) => compactionTrigger.tryCompact(ctx),
+    disarmIdle: () => idleTrigger.disarm(),
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     try {
+      gate.reset();
+      idleTrigger.disarm();
       ledger.useSession(signals.sessionIdOf(ctx));
+      idleTrigger.arm(ctx);
     } catch {
       /* telemetry only */
     }
@@ -172,27 +224,44 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     }
   });
 
+  pi.on("input", async (event, ctx) => {
+    // Before-turn trigger: a cold, idle prompt is deferred by awaiting
+    // compaction here; pi awaits input handlers before it builds the turn, so
+    // the prompt then continues with the compacted context.
+    try {
+      await beforeTurn.handle(event, ctx);
+    } catch {
+      /* fail-open: never block the prompt */
+    }
+  });
+
+  pi.on("agent_start", async () => {
+    // A run started: the idle timer is no longer relevant.
+    idleTrigger.disarm();
+  });
+
+  pi.on("cache_warming_decision", async (event) => {
+    // Observational: a warm refresh resets the provider cache TTL, so the
+    // idle trigger must not compact a cache pi just kept alive.
+    try {
+      warming.note(event?.action);
+    } catch {
+      /* observational only */
+    }
+  });
+
   pi.on("agent_settled", async (_event, ctx) => {
     // Cache-aware auto-compaction (default on). agent_settled is the
     // guaranteed-idle point (no retry or output pending), so compact()
     // cannot abort live work here. The context gate blends the model
     // context degradation with expected-cost economics (a cold cache or an
-    // amortized prefix rewrite), not a raw token-count ramp.
+    // amortized prefix rewrite), not a raw token-count ramp. Arm the TTL
+    // timer so a session that then sits idle still compacts when the cache
+    // expires.
     try {
       if (!opts.autoCompact) return;
-      const usage = ctx.getContextUsage?.();
-      const verdict = autocompact.decide(usage, signals.for(ctx as SessionContextView | undefined));
-      if (verdict.shouldCompact) {
-        ctx.compact?.({
-          onError: () => {
-            try {
-              pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" });
-            } catch {
-              /* an async compact callback must never break the process */
-            }
-          },
-        });
-      }
+      void compactionTrigger.tryCompact(ctx);
+      idleTrigger.arm(ctx);
     } catch {
       /* automatic control must never break a turn */
     }
@@ -285,8 +354,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
-    // Flush queued appends, then drop rows beyond the retained window and
-    // rewrite the file so it cannot grow without limit.
+    // Stop the idle timer first so it cannot fire into a torn-down session,
+    // then flush queued appends and bound the ledger file.
+    idleTrigger.disarm();
     try {
       await ledger.close();
     } catch {

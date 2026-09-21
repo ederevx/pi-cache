@@ -45,6 +45,8 @@ import "./advisor.test.ts";
 import "./affinity.test.ts";
 import "./session-pin.test.ts";
 import "./signals.test.ts";
+import "./warming-observer.test.ts";
+import "./trigger.test.ts";
 import "./autocompact.test.ts";
 import "./economics.test.ts";
 import "./context-degradation.test.ts";
