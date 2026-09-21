@@ -14,8 +14,8 @@
  *                             provider session-id pin for stateless runs)
  *   turn_end                 — turn bookkeeping for auto-compaction
  *   agent_settled            — cache-aware auto-compaction: a compaction
- *                              pressure draw whose probability rises with
- *                              context tokens and cache coldness
+ *                              pressure draw blending context degradation
+ *                              with expected-cost cache economics
  *   session_before_compact   — warm-cache advisory (observational) then,
  *                              when fast compaction is on, the cache-aware
  *                              override that replaces pi's summarizer for
@@ -48,6 +48,8 @@ import { AffinityObserver } from "./affinity.ts";
 import { SessionPinner } from "./session-pin.ts";
 import { AutocompactController } from "./autocompact.ts";
 import { CompactionPressure } from "./pressure.ts";
+import { CacheEconomics, type CostRates } from "./economics.ts";
+import { ContextDegradation } from "./context-degradation.ts";
 import { FastCompactionController } from "./fastcompact.ts";
 import { FastSwitchBoard } from "./fast-switch.ts";
 import { UserSettingsStore } from "./user-settings.ts";
@@ -82,12 +84,18 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const advisor = new CompactionAdvisor({ enabled: opts.advisory });
   const affinity = new AffinityObserver();
   const sessionPinner = opts.pinSession ? new SessionPinner() : null;
+  const economics = new CacheEconomics({
+    continuationProbability: opts.pressureContinuation,
+    maxRequests: opts.pressureMaxRequests,
+    keepFraction: opts.pressureKeepFraction,
+  });
   const pressure = new CompactionPressure({
-    start: opts.pressureStart,
-    full: opts.pressureFull,
-    gamma: opts.pressureGamma,
-    cacheDiscount: opts.pressureCacheDiscount,
-    coldPremium: opts.pressureColdPremium,
+    economics,
+    degradation: new ContextDegradation({
+      start: opts.pressureDegradeStart,
+      full: opts.pressureDegradeFull,
+      gamma: opts.pressureDegradeGamma,
+    }),
   });
   const fastcompact = new FastCompactionController({
     enabled: opts.fastCompact,
@@ -98,6 +106,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     cooldownSeconds: opts.cooldownSeconds,
     coldFloor: opts.pressureColdFloor,
     cacheNeutral: opts.fastCompact,
+    summaryCost: opts.pressureSummaryCost,
     pressure,
   });
   const settingsStore = new UserSettingsStore(opts.settingsPath);
@@ -117,6 +126,21 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       : opts.cacheTtlSeconds * 1000;
   };
 
+  /** Model cache cost rates (per million tokens), when the model declares them. */
+  const costRates = (ctx: { model?: unknown } | undefined): CostRates | undefined => {
+    const cost = (ctx?.model as
+      | { cost?: { input?: number; cacheRead?: number; cacheWrite?: number } }
+      | undefined)?.cost;
+    if (typeof cost?.input !== "number" || typeof cost?.cacheRead !== "number") {
+      return undefined;
+    }
+    return {
+      input: cost.input,
+      cacheRead: cost.cacheRead,
+      cacheWrite: typeof cost.cacheWrite === "number" ? cost.cacheWrite : 0,
+    };
+  };
+
   /** The live session signals the autocompaction decision reads. */
   const autocompactSignals = (ctx: { model?: unknown } | undefined) => ({
     lastUsage: () => ledger.lastUsage(),
@@ -124,6 +148,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     headChurn: () => normalizer.churn(),
     affinityRotated: () => affinity.rotated(),
     cacheTtlMs: () => cacheTtlMs(ctx),
+    costRates: () => costRates(ctx),
   });
 
   /** The live session id the core exposes, or a stable fallback. */
@@ -186,9 +211,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   pi.on("agent_settled", async (_event, ctx) => {
     // Cache-aware auto-compaction (default on). agent_settled is the
     // guaranteed-idle point (no retry or output pending), so compact()
-    // cannot abort live work here. The context gate is a probabilistic
-    // pressure draw that rises with token count; with fast compaction on
-    // the compaction is prefix-stable, so the cold/churn gate is relaxed.
+    // cannot abort live work here. The context gate blends the model
+    // context degradation with expected-cost economics (a cold cache or an
+    // amortized prefix rewrite), not a raw token-count ramp.
     try {
       if (!opts.autoCompact) return;
       const usage = ctx.getContextUsage?.();

@@ -9,8 +9,9 @@ Design, research, and implementation complete (house-structured, OOP,
 validated by the zero-dependency suite under `tests/`; see
 `tests/run.ts`). Cache-aware compaction has two layers, both on by
 default. (1) The auto-compaction trigger is a probabilistic *compaction
-pressure* whose probability rises with context tokens and with a graded
-cache *coldness* (observed hit share + TTL idle ramp), with a warm-cache
+pressure* that blends context degradation as the window is approached
+with the expected cost of continuing versus rewriting the prefix
+(cache write amortization, coldness, TTL idle ramp), with a warm-cache
 floor and fast compaction relaxing it. (2) When **fast compaction** is
 on, pi-cache answers `session_before_compact` for *every* compaction
 reason (`manual`/`threshold`/`overflow`) with a byte-stable cache-aware
@@ -82,9 +83,9 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
    0% -> 97.6% cross-repo hit fix.
 3. **Tool-schema hygiene** — deterministic tool ordering, dedup, and removal
    of volatile fields (cwd, absolute paths) from tool definitions.
-4. **Cache-aware compaction** — the trigger is a token-driven
-   probabilistic pressure (warm cache discounted, cold cache
-   premium-loaded), and when fast compaction is on the compaction itself
+4. **Cache-aware compaction** — the trigger is an expected-cost
+   probabilistic pressure (coldness and prefix amortization, not a
+   token ramp), and when fast compaction is on the compaction itself
    is a byte-stable O(1) override at pi's own cut point, so the cached
    prefix head never moves. Fast compaction replaces pi's summarizer for
    all reasons; with it off, pi's own normal summarizer runs unchanged in
@@ -92,9 +93,9 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
 5. **Affinity guardrails** — keep OpenRouter sticky routing warm: one
    `session_id` per thread, never per turn; detect prefix-identity churn.
 6. **Compaction pressure + fast override** — the auto-compaction trigger
-   is `CompactionPressure` (probability ramps from 50% to 85% usable
-   context, scaled by a graded cache coldness, which fast compaction
-   neutralizes) and **fast compaction**
+   is `CompactionPressure`, combining the expected-cost economics model
+   (`src/economics.ts`) with the context-degradation onset
+   (`src/context-degradation.ts`); fast compaction
    overrides pi's summarizer via `session_before_compact` for every reason
    and `session_before_tree` for a wanted branch summary (each with its own
    switch: `PI_CACHE_FAST_COMPACT` / `PI_CACHE_FAST_BRANCH_SUMMARY`).
@@ -110,7 +111,8 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
 - `src/` — extension source (house layout: `index.ts` wiring + per-
   responsibility modules: `ledger.ts`, `sink.ts`, `normalizer.ts`,
   `compaction.ts`, `affinity.ts`, `session-pin.ts`, `autocompact.ts`,
-  `pressure.ts`, `fastcompact.ts`, `fast-switch.ts`, `feature-switch.ts`,
+  `pressure.ts`, `economics.ts`, `context-degradation.ts`,
+  `fastcompact.ts`, `fast-switch.ts`, `feature-switch.ts`,
   `user-settings.ts`, `settings.ts`, `stats.ts`, `temp-sweep.ts`,
   `constants.ts`)
 - `tests/` — zero-dependency validation + OOP/format lint suite

@@ -3,6 +3,21 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [Unreleased]
+
+### Changed
+
+- Rebuild compaction pressure around expected cost instead of context-window
+  occupancy. `CompactionPressure` now blends an expected-cost economics model
+  (write amortization, coldness, expected remaining requests) with a
+  context-degradation onset, combined by inclusion-exclusion; occupancy
+  cancels out of the cost ratio, so a warm low-horizon prefix no longer
+  pressures merely for being large. Costs come from `ctx.model.cost`.
+- Replace the `PI_CACHE_PRESSURE_START`/`_FULL`/`_CACHE_DISCOUNT`/
+  `_COLD_PREMIUM` tunables with `_CONTINUATION`, `_MAX_REQUESTS`,
+  `_KEEP_FRACTION`, `_SUMMARY_COST`, `_DEGRADE_START`, `_DEGRADE_FULL`, and
+  `_DEGRADE_GAMMA`.
+
 ## [0.1.3] - 2026-09-20
 
 ### Fixed
