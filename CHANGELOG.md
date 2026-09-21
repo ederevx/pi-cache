@@ -3,6 +3,27 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.3.0] - 2026-09-21
+
+### Added
+
+- Trigger auto-compaction before a turn and while idle, not only after a
+  turn settles. A cold prompt now defers until compaction finishes before
+  pi builds the turn, and a session-scoped TTL timer compacts when the
+  provider cache expires while pi is idle. New switches
+  `PI_CACHE_IDLE_TRIGGER` and `PI_CACHE_BEFORE_TURN` (both default on).
+- `CompactionGate` limits auto-compaction to one per idle window and never
+  two in flight; `WarmingObserver` measures cache age from the last turn
+  or a pi warm refresh so the idle timer does not compact a cache pi just
+  kept alive.
+
+### Changed
+
+- The coldness idle ramp now measures from the last cache touch (last turn
+  or warm refresh) instead of only the last turn.
+
+[0.3.0]: https://github.com/ederevx/pi-cache/releases/tag/v0.3.0
+
 ## [0.2.1] - 2026-09-20
 
 ### Fixed
