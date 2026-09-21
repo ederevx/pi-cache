@@ -32,6 +32,15 @@ export class CompactionAdvisor {
 
   constructor(private readonly opts: CompactionAdvisorOptions) {}
 
+  /** The live advisory switch (toggled from /cache-settings). */
+  get enabled(): boolean {
+    return this.opts.enabled;
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.opts.enabled = enabled;
+  }
+
   /**
    * One advisory string when a warm-cache session is about to re-write a
    * large prefix; undefined when there is nothing useful to say.

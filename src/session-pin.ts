@@ -19,6 +19,18 @@ export class SessionPinner {
   /** The proposed id for the in-flight request, consumed by apply(). */
   private pending: string | undefined;
 
+  constructor(private enabledOn: boolean = true) {}
+
+  /** The live session-pin switch (toggled from /cache-settings). */
+  get enabled(): boolean {
+    return this.enabledOn;
+  }
+
+  /** Turn stateless session-id pinning on or off in place. */
+  setEnabled(enabled: boolean): void {
+    this.enabledOn = enabled;
+  }
+
   /**
    * Called from before_provider_request with the full payload. Computes a
    * stable id from the serialized prefix head; clears it when the request
@@ -26,6 +38,7 @@ export class SessionPinner {
    */
   propose(payload: unknown): void {
     this.pending = undefined;
+    if (!this.enabledOn) return;
     if (!payload || typeof payload !== "object") return;
     const body = payload as Record<string, unknown>;
     const messages = (body.messages as Array<{ role: string; content: unknown }>) ?? [];
@@ -53,7 +66,7 @@ export class SessionPinner {
   apply(headers: Record<string, string>): void {
     const proposed = this.pending;
     this.pending = undefined;
-    if (!proposed || !headers || typeof headers !== "object") return;
+    if (!this.enabledOn || !proposed || !headers || typeof headers !== "object") return;
     const existing = Object.keys(headers).some((key) => /session/i.test(key));
     if (existing) return;
     headers["x-session-id"] = proposed;

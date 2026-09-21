@@ -10,7 +10,9 @@
  */
 
 export interface BeforeTurnTriggerOptions<Ctx, Event> {
-  enabled: boolean;
+  /** Whether the trigger may defer; read live so toggling auto-compaction
+   *  off in /cache-settings stops deferral immediately. */
+  isEnabled(): boolean;
   /** Whether this input starts an idle turn the trigger may defer. */
   eligible(event: Event): boolean;
   /** Pure decision from the shared compaction trigger. */
@@ -29,7 +31,7 @@ export class BeforeTurnTrigger<Ctx, Event> {
     // Any input means the user is active and the idle timer is stale, even
     // when this trigger is disabled or the input is not deferrable.
     this.opts.disarmIdle();
-    if (!this.opts.enabled) return;
+    if (!this.opts.isEnabled()) return;
     if (!this.opts.eligible(event)) return;
     if (!this.opts.shouldCompact(ctx)) return;
     try {

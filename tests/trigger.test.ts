@@ -113,7 +113,7 @@ test("idle-trigger: fires at TTL expiry when idle", () => {
   const timers = new FakeTimers();
   const fired: number[] = [];
   const trigger = new IdleTrigger<FakeCtx>({
-    enabled: true,
+    isEnabled: () => true,
     isIdle: (ctx) => ctx.idle === true,
     idleMs: () => 30_000,
     ttlMs: () => 300_000,
@@ -137,7 +137,7 @@ test("idle-trigger: skips a non-idle or already-expired session", () => {
   const timers = new FakeTimers();
   let fired = 0;
   const trigger = new IdleTrigger<FakeCtx>({
-    enabled: true,
+    isEnabled: () => true,
     isIdle: (ctx) => ctx.idle === true,
     idleMs: () => 30_000,
     ttlMs: () => 300_000,
@@ -158,7 +158,7 @@ test("idle-trigger: skips a non-idle or already-expired session", () => {
 test("idle-trigger: disarm clears the timer and disabled never arms", () => {
   const timers = new FakeTimers();
   const trigger = new IdleTrigger<FakeCtx>({
-    enabled: true,
+    isEnabled: () => true,
     isIdle: () => true,
     idleMs: () => 0,
     ttlMs: () => 10_000,
@@ -172,7 +172,7 @@ test("idle-trigger: disarm clears the timer and disabled never arms", () => {
   assertEq(trigger.armed, false);
   assertEq(timers.ids().length, 0, "timer cleared");
   const off = new IdleTrigger<FakeCtx>({
-    enabled: false,
+    isEnabled: () => false,
     isIdle: () => true,
     idleMs: () => 0,
     ttlMs: () => 10_000,
@@ -183,7 +183,7 @@ test("idle-trigger: disarm clears the timer and disabled never arms", () => {
   off.arm({ idle: true });
   assertEq(off.armed, false, "disabled trigger never arms");
   const noUsage = new IdleTrigger<FakeCtx>({
-    enabled: true,
+    isEnabled: () => true,
     isIdle: () => true,
     idleMs: () => Number.POSITIVE_INFINITY,
     ttlMs: () => 10_000,
@@ -203,7 +203,7 @@ test("before-turn-trigger: defers only an eligible cold idle prompt", async () =
     FakeCtx,
     { streamingBehavior?: string; source?: string }
   >({
-    enabled: true,
+    isEnabled: () => true,
     eligible: (event) => event.streamingBehavior === undefined && event.source !== "extension",
     shouldCompact: () => shouldCompact,
     compact: async () => {
@@ -229,7 +229,7 @@ test("before-turn-trigger: defers only an eligible cold idle prompt", async () =
 test("before-turn-trigger: disarm happens even when disabled", async () => {
   let disarms = 0;
   const trigger = new BeforeTurnTrigger<FakeCtx, { source?: string }>({
-    enabled: false,
+    isEnabled: () => false,
     eligible: () => true,
     shouldCompact: () => true,
     compact: async () => true,
@@ -241,7 +241,7 @@ test("before-turn-trigger: disarm happens even when disabled", async () => {
 
 test("before-turn-trigger: a failing compaction still lets the prompt through", async () => {
   const trigger = new BeforeTurnTrigger<FakeCtx, { source?: string }>({
-    enabled: true,
+    isEnabled: () => true,
     eligible: () => true,
     shouldCompact: () => true,
     compact: async () => {
