@@ -56,21 +56,19 @@ export class SettingsPresenter {
   ): Promise<string | undefined> {
     const rows = this.rows(opts, live);
     const lines = this.formatRows(rows);
-    const selected = await this.selectRow(ui, mode, lines);
-    if (selected !== undefined) {
+    if (mode === "tui" && ui && typeof ui.select === "function") {
+      const selected = await this.selectRow(ui, lines);
       return rows.find((r, i) => lines[i] === selected)?.id;
     }
     this.printRows(lines);
     return undefined;
   }
 
-  /** Present pi's selector in TUI mode; undefined when unavailable/dismissed. */
+  /** Present pi's selector; undefined when dismissed or on any failure. */
   private async selectRow(
-    ui: { select?: unknown } | undefined,
-    mode: string | undefined,
+    ui: { select?: unknown },
     lines: string[],
   ): Promise<string | undefined> {
-    if (mode !== "tui" || !ui || typeof ui.select !== "function") return undefined;
     try {
       const selected = await (ui.select as (t: string, o: string[], _opts?: unknown) => Promise<unknown>)(
         "pi-cache settings",

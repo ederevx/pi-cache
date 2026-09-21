@@ -28,6 +28,9 @@ interface BackupFile {
 }
 
 export class BackupStore {
+  /** Grace before a crash-left atomic-write temp is swept. */
+  private static readonly TEMP_STALE_MS = 60 * 60 * 1000;
+
   private seq = 0;
   private readonly now: () => number;
 
@@ -75,9 +78,28 @@ export class BackupStore {
 
   /** Bound the store by ring, TTL, and total size. */
   prune(): void {
+    this.sweepTemps();
     this.applyRing(this.list());
     this.applyTtl(this.list());
     this.applySize(this.list());
+  }
+
+  /** Remove an abandoned atomic-write temp left by a crash mid-capture. */
+  private sweepTemps(): void {
+    const cutoff = this.now() - BackupStore.TEMP_STALE_MS;
+    try {
+      for (const name of readdirSync(this.dir)) {
+        if (!name.endsWith(".tmp")) continue;
+        const path = join(this.dir, name);
+        try {
+          if (statSync(path).mtimeMs <= cutoff) rmSync(path, { force: true });
+        } catch {
+          /* retry on the next prune */
+        }
+      }
+    } catch {
+      /* the directory may not exist yet */
+    }
   }
 
   /** Keep only the newest `keep` backups. */
