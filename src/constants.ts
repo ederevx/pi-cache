@@ -45,6 +45,10 @@ export interface PiCacheOptions {
   backupMaxMb: number;
   /** Cache-aware automatic compaction (default on). */
   autoCompact: boolean;
+  /** Fire the TTL-expiry compaction while pi is idle (default on). */
+  idleTrigger: boolean;
+  /** Defer a cold prompt to compact before the turn starts (default on). */
+  beforeTurn: boolean;
   /** Minimum seconds between automatic compactions. */
   cooldownSeconds: number;
   /** Coldness at/below which a non-churned cache is warm (0..1). */
@@ -92,6 +96,8 @@ export class OptionsLoader {
       // Cache-favoring features are ON by default; set the env var to
       // 0/off/false to disable.
       autoCompact: this.envBool("PI_CACHE_AUTO_COMPACT", true),
+      idleTrigger: this.envBool("PI_CACHE_IDLE_TRIGGER", true),
+      beforeTurn: this.envBool("PI_CACHE_BEFORE_TURN", true),
       cooldownSeconds: this.envFloat("PI_CACHE_COOLDOWN_SECONDS", 600),
       pressureColdFloor: this.envFloat("PI_CACHE_PRESSURE_COLD_FLOOR", 0.2),
       cacheTtlSeconds: this.envFloat("PI_CACHE_TTL_SECONDS", 300),
