@@ -102,6 +102,7 @@ test("constants: default options", () => {
     assert(opts.pressureMaxRequests >= 1, "horizon cap default");
     assert(opts.pressureKeepFraction > 0 && opts.pressureKeepFraction < 1, "keep fraction default");
     assertEq(opts.pressureSummaryCost, 0, "fast compaction summary cost default");
+    assertEq(opts.pressureMinTokens, 50_000, "minimum context default");
   });
 });
 
@@ -183,6 +184,7 @@ test("constants: pressure env overrides resolve", () => {
       PI_CACHE_PRESSURE_MAX_REQUESTS: "3",
       PI_CACHE_PRESSURE_KEEP_FRACTION: "0.5",
       PI_CACHE_PRESSURE_SUMMARY_COST: "12",
+      PI_CACHE_PRESSURE_MIN_TOKENS: "30000",
       PI_CACHE_PRESSURE_DEGRADE_START: "0.3",
       PI_CACHE_PRESSURE_DEGRADE_FULL: "0.7",
       PI_CACHE_PRESSURE_DEGRADE_GAMMA: "1.5",
@@ -194,6 +196,7 @@ test("constants: pressure env overrides resolve", () => {
       assertEq(opts.pressureMaxRequests, 3);
       assertEq(opts.pressureKeepFraction, 0.5);
       assertEq(opts.pressureSummaryCost, 12);
+      assertEq(opts.pressureMinTokens, 30000);
       assertEq(opts.pressureDegradeStart, 0.3);
       assertEq(opts.pressureDegradeFull, 0.7);
       assertEq(opts.pressureDegradeGamma, 1.5);
