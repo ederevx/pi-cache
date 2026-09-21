@@ -121,6 +121,27 @@ test("autocompact: pressure draw fires at high tokens", () => {
   assert(verdict.probability === 1, "saturated pressure probability");
 });
 
+test("autocompact: pressure does not fire below the minimum context", () => {
+  const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
+  const pressure = new CompactionPressure({ random: () => 0 });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, minTokens: 50_000 });
+  c.noteTurn(0);
+  const tiny = c.decide({ tokens: 470, contextWindow: 1_048_576, percent: 0.045 }, signals({ costRates }));
+  assertEq(tiny.shouldCompact, false);
+  assertEq(tiny.reason, "context below minimum");
+  const grown = c.decide({ tokens: 200_000, contextWindow: 1_048_576, percent: 19 }, signals({ costRates }));
+  assertEq(grown.shouldCompact, true, "above the floor the cold pressure still fires");
+});
+
+test("autocompact: a non-positive minimum context disables the floor", () => {
+  const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
+  const pressure = new CompactionPressure({ random: () => 0 });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, minTokens: 0 });
+  c.noteTurn(0);
+  const verdict = c.decide({ tokens: 470, contextWindow: 1_048_576, percent: 0.045 }, signals({ costRates }));
+  assertEq(verdict.shouldCompact, true);
+});
+
 test("autocompact: pressure draw can decline below the ramp", () => {
   const pressure = new CompactionPressure({ random: () => 0.999999 });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure });

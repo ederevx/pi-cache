@@ -244,6 +244,43 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
   }
 });
 
+test("extension: async auto-compact failure is fail-open", async () => {
+  const root = join(scratchDir(), "e2e-failopen");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    const { ctx, compactCalls } = makeCtx();
+    await pi.emit(
+      "message_end",
+      {
+        message: {
+          role: "assistant",
+          usage: { input: 1000, output: 50, cacheRead: 5, cacheWrite: 950, totalTokens: 2000 },
+        },
+      },
+      { model: { id: "m1" } },
+    );
+    await pi.emit("turn_end", { turnIndex: 0 }, {});
+    await pi.emit("agent_settled", {}, ctx);
+    assertEq(compactCalls.length, 1, "cold context requests compaction");
+    // pi invokes onError asynchronously after the handler returns; appending
+    // to a stale extension ctx must not crash the process.
+    pi.appendEntry = () => {
+      throw new Error("extension ctx is stale");
+    };
+    const onError = compactCalls[0].onError as () => void;
+    onError();
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
 test("extension: warm-cache advisory is observational", async () => {
   const root = join(scratchDir(), "e2e-warm");
   mkdirSync(root, { recursive: true });
