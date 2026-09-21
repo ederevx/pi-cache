@@ -102,14 +102,24 @@ its cut point, so the trigger and the summarizer both matter. pi-cache
 drives the timing from a *compaction pressure* probability and, when fast
 compaction is on, makes the compaction itself prefix-stable:
 
-1. `CompactionPressure` (`src/pressure.ts`) samples the live context:
-   `utilization = tokens / (contextWindow - reserveTokens)` mapped through
-   a `start=0.5`/`full=0.85`/`gamma=2` ramp to a probability, scaled by a
-   cache `coldness` in [0,1] (0 warm, 1 cold): warm is discounted, cold
-   premium-loaded. With fast compaction on the factor is neutral (1), so a
-   warm cache cannot suppress the token ramp. Probability is monotonically nondecreasing in token
-   count, and the raw pressure can exceed utilization for a cold context
-   ("beyond the actual token cost"). The draw uses an injected RNG.
+1. `CompactionPressure` (`src/pressure.ts`) blends two independent
+   reasons into a `[0,1]` pressure:
+   - *Context degradation* (`src/context-degradation.ts`): the occupancy
+     at which long-context answer quality starts to fall (RULER/NoLiMa),
+     as a `start`/`full`/`gamma` onset (default 0.5/0.85/2). The true
+     onset is model- and task-dependent, so it is a tunable guard.
+   - *Expected cost* (`src/economics.ts`): continuing reads the prefix for
+     an expected horizon `1/(1-continuation)` capped at `maxRequests`,
+     while compacting pays one rewrite of the retained `keepFraction` plus
+     a summarizer cost. The pressure is the fraction of the continuing
+     cost compaction avoids. Occupancy cancels out of the ratio, so this
+     part is flat in token count: a warm prefix with few expected requests
+     stays at zero even when large, while a cold prefix rises.
+   The two combine by inclusion-exclusion (`1-(1-d)(1-e)`), then a
+   `start=0.1`/`full=0.6`/`gamma=2` ramp yields the Bernoulli probability;
+   the draw uses an injected RNG. Costs come from `ctx.model.cost`
+   per-million rates; absent rates leave economics at 0, so the
+   degradation onset gates alone.
 2. At `agent_settled` (guaranteed idle) the draw decides whether to
    `ctx.compact()`. A warm-cache coldness floor applies first (a model
    summarizer must not run mid-warm-cache); fast compaction relaxes that
@@ -125,9 +135,11 @@ compaction is on, makes the compaction itself prefix-stable:
    `FAST_BRANCH_STUB`. Any error returns nothing, leaving pi's summarizer
    as the fail-open fallback.
 
-**Expected effect.** Compaction probability tracks context growth while
-compaction cost stays near zero and the cached prefix head stops moving;
-the risky overflow-recovery tradeoff is that the stub carries no summary
+**Expected effect.** Compaction fires when it is the cheaper choice over
+the expected horizon or when the context has passed the degradation onset,
+not merely when the window fills; compaction cost stays near zero (fast
+compaction) and the cached prefix head stops moving. The risky
+overflow-recovery tradeoff is that the stub carries no summary
 text, so the switch exists to return to pi's normal summarizer. Feasibility
 confirmed by the 0.86.0 audit: `session_before_compact` returning
 `{compaction}` skips `_runDefaultCompaction` for all reasons.
@@ -143,7 +155,9 @@ work). Guards in code: `agent_settled` + `ctx.isIdle()` + cooldown
 opt-in `PI_CACHE_AUTO_COMPACT`.
 
 **Coldness model (implemented 2026-09-20).** `AutocompactController`
-computes `coldness` and feeds it to `CompactionPressure`:
+computes `coldness` and feeds it to `CompactionPressure`, where it sets
+the read rate the economics compares (cold pays the input rate, warm the
+cache-read rate):
 
 1. Churn/rotation sets coldness 1 (the prefix is definitively invalid).
 2. Otherwise the last request's cached share maps linearly from <=5%
@@ -200,8 +214,8 @@ provider (simulated cache) gives offline harness tests.
 
 > **Reintroduced 2026-09-20** under new names after the 2026-09-18 removal,
 > now as an *overall* override: `src/fastcompact.ts`
-> (`FastCompactionController`, `FAST_SUMMARY_STUB`), plus the token-driven
-> probabilistic `src/pressure.ts`. The retired compact store/legacy option
+> (`FastCompactionController`, `FAST_SUMMARY_STUB`), plus the
+> economics-and-degradation probabilistic `src/pressure.ts`. The retired compact store/legacy option
 > names stay banned by `tests/oop_lint.py`.
 
 **Definition.** Fast "soft" compaction whose ONLY purposes are better cache

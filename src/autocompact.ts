@@ -10,11 +10,12 @@
  * mid-warm-cache.
  *
  * Compaction pressure: the context gate is a probabilistic draw from an
- * injected `CompactionPressure`. Its probability rises with context
- * utilization and with cache `coldness` (0 warm .. 1 cold). Coldness is
+ * injected `CompactionPressure`, which blends context degradation with
+ * the expected cost of continuing versus rewriting the prefix. Coldness is
  * computed here from the last request's cached share, the prefix-head churn
- * / affinity-rotation signals, and a TTL-based idle-time ramp; the pressure
- * model owns the probability math and the draw.
+ * / affinity-rotation signals, and a TTL-based idle-time ramp; it feeds the
+ * economics read rate rather than a raw utilization ramp (the pressure
+ * model owns the probability math and the draw).
  *
  * `cacheNeutral` (fast compaction on) relaxes the warm-cache floor, because
  * the fast override makes the compaction itself prefix-stable.
@@ -25,6 +26,7 @@
  */
 
 import type { CompactionPressure, PressureVerdict } from "./pressure.ts";
+import type { CostRates } from "./economics.ts";
 
 export interface AutocompactSignal {
   /** Last completed turn's usage, if any. */
@@ -37,6 +39,8 @@ export interface AutocompactSignal {
   affinityRotated(): boolean;
   /** Provider cache lifetime in ms when known (model.promptCache tier). */
   cacheTtlMs?(): number | undefined;
+  /** Model cache cost rates; absent means economics is unavailable. */
+  costRates?(): CostRates | undefined;
 }
 
 /** The context-usage fields the controller reads (pi's `ContextUsage`). */
@@ -59,11 +63,12 @@ export interface AutocompactOptions {
   cooldownSeconds: number;
   /** Coldness at/below which a non-churned cache is warm (default 0.2). */
   coldFloor?: number;
-  /**
-   * Fast compaction is active, so a compaction is prefix-stable and a warm
-   * window costs nothing extra: relax the coldness floor.
-   */
+  /** Fast compaction is active, so a compaction is prefix-stable and a warm
+   *  window costs nothing extra: relax the coldness floor and charge no
+   *  summarizer cost. */
   cacheNeutral?: boolean;
+  /** Non-fast summarizer cost in per-million tokens (0 default). */
+  summaryCost?: number;
   /** Probabilistic pressure model; absent = fixed percent threshold. */
   pressure?: CompactionPressure;
 }
@@ -132,7 +137,7 @@ export class AutocompactController {
       return { shouldCompact: false, reason: "cache warm", coldness };
     }
 
-    const gate = this.contextGate(view, usage, coldness);
+    const gate = this.contextGate(view, usage, coldness, signals.costRates?.());
     if (!gate.allowed) {
       return {
         shouldCompact: false,
@@ -220,7 +225,7 @@ export class AutocompactController {
     if (!usage) return undefined;
     const churned = signals !== undefined && this.churned(signals);
     const coldness = this.coldness(usage, churned, signals);
-    return this.samplePressure(this.readContext(usageView), usage, coldness);
+    return this.samplePressure(this.readContext(usageView), usage, coldness, signals?.costRates?.());
   }
 
   /**
@@ -231,6 +236,7 @@ export class AutocompactController {
     view: AutocompactView,
     usage: { input: number; cacheRead: number; cacheWrite: number },
     coldness: number,
+    rates: CostRates | undefined,
   ): {
     allowed: boolean;
     reason?: string;
@@ -238,7 +244,7 @@ export class AutocompactController {
     probability?: number;
     fromPressure: boolean;
   } {
-    const verdict = this.samplePressure(view, usage, coldness);
+    const verdict = this.samplePressure(view, usage, coldness, rates);
     if (verdict) {
       return {
         allowed: verdict.fire,
@@ -262,6 +268,7 @@ export class AutocompactController {
     view: AutocompactView,
     usage: { input: number; cacheRead: number; cacheWrite: number },
     coldness: number,
+    rates: CostRates | undefined,
   ): PressureVerdict | undefined {
     if (
       !this.opts.pressure ||
@@ -273,12 +280,10 @@ export class AutocompactController {
     return this.opts.pressure.sample({
       tokens: view.tokens,
       contextWindow: view.contextWindow,
-      reserveTokens: 0,
       coldness,
-      // Fast compaction is prefix-stable, so a warm cache must not deflate
-      // the pressure below the token ramp (which otherwise never fires for
-      // a fully cached context).
-      neutral: this.cacheNeutral,
+      rates,
+      // Fast compaction replaces the summarizer, so its cost is zero.
+      summaryCost: this.cacheNeutral ? 0 : Math.max(0, this.opts.summaryCost ?? 0),
       cacheRead: usage.cacheRead,
       input: usage.input,
     });

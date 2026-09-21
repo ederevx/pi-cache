@@ -89,12 +89,17 @@ test("constants: default options", () => {
     assertEq(opts.backupTtlDays, 7, "default backup TTL");
     assertEq(opts.backupMaxMb, 32, "default backup size cap");
     assert(opts.backupDir.endsWith(join(".pi-cache", "backups")), "default backup dir");
-    // Pressure defaults form an ordered ramp.
-    assert(opts.pressureStart > 0 && opts.pressureStart < opts.pressureFull, "pressure ramp order");
-    assertEq(opts.pressureFull, 0.85);
-    assertEq(opts.pressureGamma, 2);
-    assert(opts.pressureCacheDiscount > 0, "cache discount default");
-    assert(opts.pressureColdPremium > 0, "cold premium default");
+    // Pressure defaults: an ordered degradation onset and a sane cost horizon.
+    assert(
+      opts.pressureDegradeStart > 0 && opts.pressureDegradeStart < opts.pressureDegradeFull,
+      "degradation onset order",
+    );
+    assertEq(opts.pressureDegradeFull, 0.85);
+    assertEq(opts.pressureDegradeGamma, 2);
+    assert(opts.pressureContinuation > 0 && opts.pressureContinuation < 1, "continuation default");
+    assert(opts.pressureMaxRequests >= 1, "horizon cap default");
+    assert(opts.pressureKeepFraction > 0 && opts.pressureKeepFraction < 1, "keep fraction default");
+    assertEq(opts.pressureSummaryCost, 0, "fast compaction summary cost default");
   });
 });
 
@@ -156,14 +161,14 @@ test("constants: numeric parsing falls back on garbage", () => {
     {
       PI_CACHE_COOLDOWN_SECONDS: "12.5",
       PI_CACHE_TTL_SECONDS: "abc",
-      PI_CACHE_PRESSURE_FULL: "nope",
+      PI_CACHE_PRESSURE_DEGRADE_FULL: "nope",
       PI_CACHE_SETTINGS: settingsPath("numeric"),
     },
     () => {
       const opts = loadOptions();
       assertEq(opts.cooldownSeconds, 12.5);
       assertEq(opts.cacheTtlSeconds, 300, "TTL fallback");
-      assertEq(opts.pressureFull, 0.85, "pressure fallback");
+      assertEq(opts.pressureDegradeFull, 0.85, "pressure fallback");
     },
   );
 });
