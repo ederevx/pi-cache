@@ -107,6 +107,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     coldFloor: opts.pressureColdFloor,
     cacheNeutral: opts.fastCompact,
     summaryCost: opts.pressureSummaryCost,
+    minTokens: opts.pressureMinTokens,
     pressure,
   });
   const settingsStore = new UserSettingsStore(opts.settingsPath);
@@ -220,8 +221,13 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const verdict = autocompact.decide(usage, autocompactSignals(ctx));
       if (verdict.shouldCompact) {
         ctx.compact?.({
-          onError: () =>
-            pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" }),
+          onError: () => {
+            try {
+              pi.appendEntry("pi-cache-advisory", { message: "auto-compact failed" });
+            } catch {
+              /* an async compact callback must never break the process */
+            }
+          },
         });
       }
     } catch {
