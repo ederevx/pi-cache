@@ -82,11 +82,11 @@ export class OptionsLoader {
   load(): PiCacheOptions {
     const stored: UserSettings = new UserSettingsStore(this.userSettingsPath()).load();
     return {
-      telemetry: this.envBool("PI_CACHE_TELEMETRY", true),
-      sortTools: this.envBool("PI_CACHE_SORT_TOOLS", true),
-      dedupTools: this.envBool("PI_CACHE_DEDUP_TOOLS", true),
-      pinSession: this.envBool("PI_CACHE_PIN_SESSION", true),
-      advisory: this.envBool("PI_CACHE_ADVISORY", true),
+      telemetry: this.envBool("PI_CACHE_TELEMETRY", stored.telemetry ?? true),
+      sortTools: this.envBool("PI_CACHE_SORT_TOOLS", stored.sortTools ?? true),
+      dedupTools: this.envBool("PI_CACHE_DEDUP_TOOLS", stored.dedupTools ?? true),
+      pinSession: this.envBool("PI_CACHE_PIN_SESSION", stored.pinSession ?? true),
+      advisory: this.envBool("PI_CACHE_ADVISORY", stored.advisory ?? true),
       ledgerPath: this.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT,
       ledgerMaxRows: this.envInt("PI_CACHE_LEDGER_MAX_ROWS", 20000),
       backupDir: this.env["PI_CACHE_BACKUP_DIR"] || BACKUP_DEFAULT,
@@ -95,7 +95,7 @@ export class OptionsLoader {
       backupMaxMb: this.envInt("PI_CACHE_LEDGER_BACKUP_MAX_MB", 32),
       // Cache-favoring features are ON by default; set the env var to
       // 0/off/false to disable.
-      autoCompact: this.envBool("PI_CACHE_AUTO_COMPACT", true),
+      autoCompact: this.envBool("PI_CACHE_AUTO_COMPACT", stored.autoCompact ?? true),
       idleTrigger: this.envBool("PI_CACHE_IDLE_TRIGGER", true),
       beforeTurn: this.envBool("PI_CACHE_BEFORE_TURN", true),
       cooldownSeconds: this.envFloat("PI_CACHE_COOLDOWN_SECONDS", 600),
