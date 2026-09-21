@@ -26,6 +26,24 @@ export class PrefixNormalizer {
 
   constructor(private readonly opts: PrefixNormalizerOptions) {}
 
+  /** The live deterministic-sort switch (toggled from /cache-settings). */
+  get sortTools(): boolean {
+    return this.opts.sortTools;
+  }
+
+  /** The live duplicate-schema drop switch (toggled from /cache-settings). */
+  get dedupTools(): boolean {
+    return this.opts.dedupTools;
+  }
+
+  setSortTools(enabled: boolean): void {
+    this.opts.sortTools = enabled;
+  }
+
+  setDedupTools(enabled: boolean): void {
+    this.opts.dedupTools = enabled;
+  }
+
   /**
    * Apply opt-in tools transforms to a provider payload, returning the
    * original object when unchanged (so pi keeps its own reference — the

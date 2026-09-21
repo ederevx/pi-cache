@@ -54,7 +54,7 @@ import { CompactionPressure } from "./pressure.ts";
 import { CacheEconomics } from "./economics.ts";
 import { ContextDegradation } from "./context-degradation.ts";
 import { FastCompactionController } from "./fastcompact.ts";
-import { FastSwitchBoard } from "./fast-switch.ts";
+import { SettingsSwitchBoard } from "./settings-switch.ts";
 import { SessionSignals, type SessionContextView } from "./signals.ts";
 import { CompactionGate } from "./compaction-gate.ts";
 import { CompactionRequest } from "./compaction-request.ts";
@@ -90,7 +90,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
   const advisor = new CompactionAdvisor({ enabled: opts.advisory });
   const affinity = new AffinityObserver();
-  const sessionPinner = opts.pinSession ? new SessionPinner() : null;
+  const sessionPinner = new SessionPinner(opts.pinSession);
   const economics = new CacheEconomics({
     continuationProbability: opts.pressureContinuation,
     maxRequests: opts.pressureMaxRequests,
@@ -120,7 +120,15 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const settingsStore = new UserSettingsStore(opts.settingsPath);
   const settingsPresenter = new SettingsPresenter();
   const statsPresenter = new CacheStatsPresenter();
-  const switchBoard = new FastSwitchBoard(fastcompact, autocompact, settingsStore);
+  const switchBoard = new SettingsSwitchBoard(
+    ledger,
+    normalizer,
+    sessionPinner,
+    advisor,
+    autocompact,
+    fastcompact,
+    settingsStore,
+  );
 
   const warming = new WarmingObserver();
 
@@ -161,7 +169,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     request: compactionRequest,
   });
   const idleTrigger = new IdleTrigger<ExtensionContext>({
-    enabled: opts.autoCompact && opts.idleTrigger,
+    isEnabled: () => autocompact.enabled && opts.idleTrigger,
     isIdle: (ctx) => ctx.isIdle?.() === true,
     idleMs: () => signals.msSinceCacheTouch(),
     ttlMs: (ctx) => signals.cacheTtlMs(ctx as unknown as SessionContextView),
@@ -171,7 +179,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     ExtensionContext,
     { streamingBehavior?: string; source?: string }
   >({
-    enabled: opts.autoCompact && opts.beforeTurn,
+    isEnabled: () => autocompact.enabled && opts.beforeTurn,
     eligible: (event) => event?.streamingBehavior === undefined && event?.source !== "extension",
     shouldCompact: (ctx) => compactionTrigger.shouldCompact(ctx),
     compact: (ctx) => compactionTrigger.tryCompact(ctx),
@@ -204,7 +212,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.on("before_provider_request", async (event) => {
     try {
-      sessionPinner?.propose(event.payload);
+      sessionPinner.propose(event.payload);
       return normalizer.normalize(event.payload);
     } catch {
       return event.payload;
@@ -213,7 +221,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.on("before_provider_headers", async (event) => {
     try {
-      sessionPinner?.apply(event.headers ?? {});
+      sessionPinner.apply(event.headers ?? {});
       affinity.note(event.headers ?? {});
     } catch {
       /* observational only */
@@ -270,7 +278,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     // expires.
     try {
       warming.reconcile(ctx);
-      if (!opts.autoCompact) return;
+      if (!autocompact.enabled) return;
       void compactionTrigger.tryCompact(ctx);
       idleTrigger.arm(ctx);
     } catch {
@@ -376,15 +384,11 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("cache-settings", {
-    description: "Edit fast compaction and list pi-cache options",
+    description: "Edit every pi-cache option in place",
     handler: async (_args, ctx) => {
       try {
         await settingsPresenter.present(
-          opts,
-          {
-            fastCompaction: fastcompact.enabled,
-            fastBranchSummary: fastcompact.branchEnabled,
-          },
+          switchBoard.snapshot(),
           ctx.ui,
           ctx.mode,
           (id, value) => {
