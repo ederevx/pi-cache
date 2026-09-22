@@ -3,6 +3,29 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.8.0] - 2026-09-22
+
+### Removed
+
+- Observation-only telemetry that never changed a wire byte: the
+  header AffinityObserver (pi 0.87 providers key affinity on content,
+  so the observed headers were inert), the MissClassifier diagnosis
+  and its /cache-stats miss line and compaction advisory, and the
+  ProviderTtlResolver/TtlLearner pair (the learned knee never beat the
+  documented per-provider profile; the static PI_CACHE_TTL_SECONDS
+  fallback stands). The affinity-rotation autocompact signal goes with
+  the observer; head-churn keeps the churn-to-cold path.
+- The tools sort transform and PI_CACHE_SORT_TOOLS: pi builds the
+  tools array in a fixed per-session order, so sorting only
+  re-canonicalized away from pi's own order and moved the pinned
+  cache_control marker. Tool dedup stays, with the trailing-marker
+  re-pin.
+
+# Changelog
+
+All notable changes to pi-cache are documented here. Each section maps to a
+git tag, and the `version` in `package.json` matches the newest tag.
+
 ## [0.7.0] - 2026-09-22
 
 ### Added
