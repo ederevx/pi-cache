@@ -10,6 +10,7 @@
  */
 
 import { CacheSettingsView } from "./settings-view.ts";
+import { FeatureSwitch } from "./feature-switch.ts";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 
 export interface SettingRow {
@@ -36,6 +37,7 @@ export interface LiveSettings {
   autoCompact: boolean;
   fastCompaction: boolean;
   fastBranchSummary: boolean;
+  missDiagnosis: boolean;
 }
 
 /** Reports an in-place value change ("on"/"off") for an editable row. */
@@ -47,6 +49,19 @@ export interface ViewTheme {
 }
 
 export class SettingsPresenter {
+  /** The /cache-stats miss-taxonomy switch (live via /cache-settings). */
+  private readonly missDiagnosis = new FeatureSwitch(true);
+
+  /** The live miss-diagnosis switch (toggled from /cache-settings). */
+  get missDiagnosisEnabled(): boolean {
+    return this.missDiagnosis.enabled;
+  }
+
+  /** Turn the miss-taxonomy line on or off in place. */
+  setMissDiagnosisEnabled(enabled: boolean): void {
+    this.missDiagnosis.set(enabled);
+  }
+
   /** The option rows, in settings-pane order, from the live snapshot.
    *  Rows whose PI_CACHE_* env var is pinned carry a marker so the user
    *  sees why a toggle would not stick across restarts. */
@@ -65,7 +80,8 @@ export class SettingsPresenter {
       row("retentionOverride", "Long retention override", "Rewrite cache markers to the 1h/24h tier per request", on(live.retentionOverride)),
       row("canonicalize", "Canonicalize listings", "Sort skill and AGENTS.md listings in the system prompt", on(live.canonicalize)),
       row("sharedKey", "Shared cache key", "Derive OpenAI prompt_cache_key from the prefix head so siblings share a bucket", on(live.sharedKey)),
-      row("forceWarm", "Force warming", "Answer every cache-warming decision with warm regardless of expected savings", on(live.forceWarm)),
+      row("forceWarm", "Force warming", "Answer every cache-warming decision with warm when pi's own economics still justify it", on(live.forceWarm)),
+      row("missDiagnosis", "Miss diagnosis", "Show the miss taxonomy (cold-start, idle-expiry, replica-flap, partial) in /cache-stats", on(live.missDiagnosis)),
       row("advisory", "Compaction advisory", "Note warm-cache compactions that re-write the prefix", on(live.advisory)),
       row("autoCompact", "Auto-compaction", "Compact in cold-window turns (cache already lost) at idle", on(live.autoCompact)),
       row("fastCompaction", "Fast compaction", "Override pi's summarizer with a byte-stable fast cache-aware compaction", on(live.fastCompaction)),

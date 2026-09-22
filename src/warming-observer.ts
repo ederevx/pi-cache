@@ -68,6 +68,12 @@ export class WarmingObserver {
     return last === undefined ? undefined : Math.max(0, this.now() - last);
   }
 
+  /** Milliseconds since the newest warm decision intent, or undefined
+   *  when none was observed yet (confirmation-only observers). */
+  msSinceDecision(): number | undefined {
+    return this.decisionAt === undefined ? undefined : Math.max(0, this.now() - this.decisionAt);
+  }
+
   /** The most recent intent-or-confirmed cache touch, if any. */
   private latestTouch(): number | undefined {
     if (this.confirmedAt === undefined) return this.decisionAt;
