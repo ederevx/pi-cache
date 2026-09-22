@@ -82,7 +82,11 @@ const PI_CACHE_KEYS = [
   "PI_CACHE_TELEMETRY",
   "PI_CACHE_SORT_TOOLS",
   "PI_CACHE_DEDUP_TOOLS",
-  "PI_CACHE_PIN_SESSION",
+  "PI_CACHE_ANCHOR",
+  "PI_CACHE_RETENTION_OVERRIDE",
+  "PI_CACHE_CANONICALIZE",
+  "PI_CACHE_SHARED_KEY",
+  "PI_CACHE_FORCE_WARM",
   "PI_CACHE_ADVISORY",
   "PI_CACHE_AUTO_COMPACT",
   "PI_CACHE_IDLE_TRIGGER",
@@ -107,6 +111,9 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
     PI_CACHE_SETTINGS: join(root, "settings.json"),
     PI_CACHE_FAST_COMPACT: "1",
+    // The lifecycle payload includes duplicates; exercise the whole
+    // tools pipeline with the (opt-in) sort transform enabled.
+    PI_CACHE_SORT_TOOLS: "1",
   });
   try {
     const { default: factory } = await import("../src/index.ts");
@@ -144,10 +151,11 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     assertEq(normalizedA, payloadA, "same object reference returned");
     assertToolNames((normalizedA as { tools: Array<{ name: string }> }).tools, ["a", "z"]);
 
-    // Session pin: no provider session header -> stable id injected.
+    // No session-affinity header injection: the extension is observational
+    // on headers (provider affinity is pi-ai's own behavior).
     const headers: Record<string, string> = {};
     await pi.emit("before_provider_headers", { headers }, {});
-    assertMatches(headers["x-session-id"] ?? "", /^pi-cache-[0-9a-f]{24}$/);
+    assertEq(headers["x-session-id"], undefined, "no header injection");
 
     await pi.emit("before_provider_request", { payload: { ...payloadA, model: "model-b" } }, {});
 
@@ -508,7 +516,7 @@ test("extension: disabled features short-circuit", async () => {
     assertEq(compactCalls.length, 0, "auto-compact disabled never compacts");
     const headers: Record<string, string> = {};
     await pi.emit("before_provider_headers", { headers }, {});
-    assertEq(headers["x-session-id"], undefined, "pinning disabled injects nothing");
+    assertEq(headers["x-session-id"], undefined, "no header injection when disabled");
     let notified = "";
     const statsCtx = { ui: { notify: (text: string) => { notified = text; } } };
     await pi.commands.get("cache-stats")!.handler([], statsCtx as never);

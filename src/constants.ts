@@ -22,13 +22,22 @@ const BACKUP_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "backups");
 export interface PiCacheOptions {
   /** Whether telemetry is recorded at all. */
   telemetry: boolean;
-  /** Opt-in tool transforms now default ON; the env var disables them. */
+  /** Opt-in tool transforms; sorting now defaults OFF (pi builds tools
+   *  deterministically per session, so sorting only re-canonicalizes away
+   *  from pi's own order), dedup stays ON. */
   sortTools: boolean;
   /** Exact-schema tool dedup (opt-in, default on). */
   dedupTools: boolean;
-  /** Stable provider session-id pinning for stateless (--no-session)
-   *  requests (cross-spawn cache reuse). */
-  pinSession: boolean;
+  /** Pin a fourth Anthropic breakpoint on stable mid-history (default on). */
+  anchor: boolean;
+  /** Rewrite cache markers to the long retention tier per request. */
+  retentionOverride: boolean;
+  /** Canonicalize skill/project listings in the system prompt (default on). */
+  canonicalize: boolean;
+  /** Derive OpenAI prompt_cache_key from the prefix head (default off). */
+  sharedKey: boolean;
+  /** Force pi's cache-warming decision to "warm" (default off). */
+  forceWarm: boolean;
   /** Log compaction advisories (observational only). */
   advisory: boolean;
   /** Absolute path of the append-only usage ledger. */
@@ -83,9 +92,19 @@ export class OptionsLoader {
     const stored: UserSettings = new UserSettingsStore(this.userSettingsPath()).load();
     return {
       telemetry: this.envBool("PI_CACHE_TELEMETRY", stored.telemetry ?? true),
-      sortTools: this.envBool("PI_CACHE_SORT_TOOLS", stored.sortTools ?? true),
+      // Sorting is demoted to opt-in: pi 0.87 already serializes tools in a
+      // fixed per-session order, so sorting only re-canonicalizes away from
+      // pi's own order.
+      sortTools: this.envBool("PI_CACHE_SORT_TOOLS", stored.sortTools ?? false),
       dedupTools: this.envBool("PI_CACHE_DEDUP_TOOLS", stored.dedupTools ?? true),
-      pinSession: this.envBool("PI_CACHE_PIN_SESSION", stored.pinSession ?? true),
+      anchor: this.envBool("PI_CACHE_ANCHOR", stored.anchor ?? true),
+      retentionOverride: this.envBool(
+        "PI_CACHE_RETENTION_OVERRIDE",
+        stored.retentionOverride ?? false,
+      ),
+      canonicalize: this.envBool("PI_CACHE_CANONICALIZE", stored.canonicalize ?? true),
+      sharedKey: this.envBool("PI_CACHE_SHARED_KEY", stored.sharedKey ?? false),
+      forceWarm: this.envBool("PI_CACHE_FORCE_WARM", stored.forceWarm ?? false),
       advisory: this.envBool("PI_CACHE_ADVISORY", stored.advisory ?? true),
       ledgerPath: this.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT,
       ledgerMaxRows: this.envInt("PI_CACHE_LEDGER_MAX_ROWS", 20000),
@@ -130,6 +149,29 @@ export class OptionsLoader {
   /** The owned settings file path (env override exists for hermetic tests). */
   private userSettingsPath(): string {
     return this.env["PI_CACHE_SETTINGS"] || SETTINGS_DEFAULT;
+  }
+
+  /**
+   * Row ids whose PI_CACHE_* env var is present: env beats the stored
+   * settings on every restart, so the /cache-settings surface marks those
+   * rows pinned instead of letting a toggle silently lose.
+   */
+  envPinnedIds(): string[] {
+    const pins: Array<[string, string]> = [
+      ["telemetry", "PI_CACHE_TELEMETRY"],
+      ["sortTools", "PI_CACHE_SORT_TOOLS"],
+      ["dedupTools", "PI_CACHE_DEDUP_TOOLS"],
+      ["anchor", "PI_CACHE_ANCHOR"],
+      ["retentionOverride", "PI_CACHE_RETENTION_OVERRIDE"],
+      ["canonicalize", "PI_CACHE_CANONICALIZE"],
+      ["sharedKey", "PI_CACHE_SHARED_KEY"],
+      ["forceWarm", "PI_CACHE_FORCE_WARM"],
+      ["advisory", "PI_CACHE_ADVISORY"],
+      ["autoCompact", "PI_CACHE_AUTO_COMPACT"],
+      ["fastCompaction", "PI_CACHE_FAST_COMPACT"],
+      ["fastBranchSummary", "PI_CACHE_FAST_BRANCH_SUMMARY"],
+    ];
+    return pins.filter(([id, name]) => this.env[name] !== undefined).map(([id]) => id);
   }
 
   private envBool(name: string, fallback: boolean): boolean {

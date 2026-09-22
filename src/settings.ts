@@ -28,7 +28,11 @@ export interface LiveSettings {
   telemetry: boolean;
   sortTools: boolean;
   dedupTools: boolean;
-  pinSession: boolean;
+  anchor: boolean;
+  retentionOverride: boolean;
+  canonicalize: boolean;
+  sharedKey: boolean;
+  forceWarm: boolean;
   advisory: boolean;
   autoCompact: boolean;
   fastCompaction: boolean;
@@ -44,18 +48,30 @@ export interface ViewTheme {
 }
 
 export class SettingsPresenter {
-  /** The option rows, in settings-pane order, from the live snapshot. */
-  rows(live: LiveSettings): SettingRow[] {
+  /** The option rows, in settings-pane order, from the live snapshot.
+   *  Rows whose PI_CACHE_* env var is pinned carry a marker so the user
+   *  sees why a toggle would not stick across restarts. */
+  rows(live: LiveSettings, pinned: ReadonlySet<string> = new Set()): SettingRow[] {
     const on = (b: boolean): string => (b ? "on" : "off");
+    const row = (id: string, title: string, description: string, value: string): SettingRow => ({
+      id,
+      title: pinned.has(id) ? `${title} (env-pinned)` : title,
+      description,
+      value,
+    });
     return [
-      { id: "telemetry", title: "Telemetry", description: "Record per-request cache usage to the ledger", value: on(live.telemetry) },
-      { id: "sortTools", title: "Sort tools", description: "Deterministic tool order for byte-stable prefixes", value: on(live.sortTools) },
-      { id: "dedupTools", title: "Dedup tools", description: "Drop exact-duplicate tool schemas from the payload", value: on(live.dedupTools) },
-      { id: "pinSession", title: "Session pin", description: "Inject a stable provider session id for stateless requests so sibling processes share the provider cache bucket", value: on(live.pinSession) },
-      { id: "advisory", title: "Compaction advisory", description: "Note warm-cache compactions that re-write the prefix", value: on(live.advisory) },
-      { id: "autoCompact", title: "Auto-compaction", description: "Compact in cold-window turns (cache already lost) at idle", value: on(live.autoCompact) },
-      { id: "fastCompaction", title: "Fast compaction", description: "Override pi's summarizer with a byte-stable fast cache-aware compaction", value: on(live.fastCompaction) },
-      { id: "fastBranchSummary", title: "Fast branch summary", description: "Override /tree branch summarization with a byte-stable stub (lossier than compaction)", value: on(live.fastBranchSummary) },
+      row("telemetry", "Telemetry", "Record per-request cache usage to the ledger", on(live.telemetry)),
+      row("sortTools", "Sort tools", "Deterministic tool order for byte-stable prefixes", on(live.sortTools)),
+      row("dedupTools", "Dedup tools", "Drop exact-duplicate tool schemas from the payload", on(live.dedupTools)),
+      row("anchor", "Breakpoint anchor", "Pin a fourth Anthropic breakpoint on stable mid-history", on(live.anchor)),
+      row("retentionOverride", "Long retention override", "Rewrite cache markers to the 1h/24h tier per request", on(live.retentionOverride)),
+      row("canonicalize", "Canonicalize listings", "Sort skill and AGENTS.md listings in the system prompt", on(live.canonicalize)),
+      row("sharedKey", "Shared cache key", "Derive OpenAI prompt_cache_key from the prefix head so siblings share a bucket", on(live.sharedKey)),
+      row("forceWarm", "Force warming", "Answer every cache-warming decision with warm regardless of expected savings", on(live.forceWarm)),
+      row("advisory", "Compaction advisory", "Note warm-cache compactions that re-write the prefix", on(live.advisory)),
+      row("autoCompact", "Auto-compaction", "Compact in cold-window turns (cache already lost) at idle", on(live.autoCompact)),
+      row("fastCompaction", "Fast compaction", "Override pi's summarizer with a byte-stable fast cache-aware compaction", on(live.fastCompaction)),
+      row("fastBranchSummary", "Fast branch summary", "Override /tree branch summarization with a byte-stable stub (lossier than compaction)", on(live.fastBranchSummary)),
     ];
   }
 
@@ -70,8 +86,9 @@ export class SettingsPresenter {
     ui: ExtensionUIContext | undefined,
     mode: string | undefined,
     onChange: SettingsChange,
+    pinned: ReadonlySet<string> = new Set(),
   ): Promise<void> {
-    const rows = this.rows(live);
+    const rows = this.rows(live, pinned);
     if (mode === "tui" && typeof ui?.custom === "function") {
       try {
         await ui.custom((_tui, theme, _keybindings, done) =>
