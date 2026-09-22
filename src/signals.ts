@@ -36,6 +36,10 @@ export interface SessionSignalsOptions {
    *  `fallbackTtlSeconds` (provider-aware TTLs); returning undefined keeps
    *  the old static fallback, so callers without a resolver are unchanged. */
   fallbackTtlSecondsOf?: (ctx: SessionContextView | undefined) => number | undefined;
+  /** Whether the last applied request ran on the long retention tier;
+   *  consulted before the static env-mirror flag so TTL-tier selection
+   *  follows the wire when a per-request override is active. */
+  retentionLongOf?: () => boolean | undefined;
 }
 
 /** The collaborator state the signals read, owned by their own classes. */
@@ -58,7 +62,9 @@ export class SessionSignals {
    *  the resolved fallback (provider-aware resolver, then the static
    *  fallback) when the model declares none. */
   cacheTtlMs(ctx: SessionContextView | undefined): number {
-    const retention = this.opts.cacheRetentionLong ? "long" : "short";
+    // Per-request retention override wins, then the env-mirror flag.
+    const effective = this.opts.retentionLongOf?.() ?? this.opts.cacheRetentionLong;
+    const retention = effective ? "long" : "short";
     const seconds = ctx?.model?.promptCache?.[retention];
     if (typeof seconds === "number" && seconds > 0) return seconds * 1000;
     const resolved = this.opts.fallbackTtlSecondsOf?.(ctx);
