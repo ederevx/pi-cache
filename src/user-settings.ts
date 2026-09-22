@@ -28,6 +28,8 @@ export interface UserSettings {
   sharedKey?: boolean;
   /** Force pi's cache-warming decision to "warm". */
   forceWarm?: boolean;
+  /** Render the miss taxonomy in /cache-stats. */
+  missDiagnosis?: boolean;
   /** Log compaction advisories. */
   advisory?: boolean;
   /** Cache-aware automatic compaction. */
