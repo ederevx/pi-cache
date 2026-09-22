@@ -15,6 +15,7 @@ import type { AutocompactSignal } from "./autocompact.ts";
 /** The model fields pi exposes on the handler context. */
 export interface ModelView {
   id?: string;
+  provider?: string;
   cost?: { input?: number; cacheRead?: number; cacheWrite?: number };
   promptCache?: { short?: number; long?: number };
 }
@@ -31,6 +32,10 @@ export interface SessionSignalsOptions {
   cacheRetentionLong: boolean;
   /** Fallback provider cache lifetime (s) when the model declares none. */
   fallbackTtlSeconds: number;
+  /** Optional resolver-backed fallback consulted before the static
+   *  `fallbackTtlSeconds` (provider-aware TTLs); returning undefined keeps
+   *  the old static fallback, so callers without a resolver are unchanged. */
+  fallbackTtlSecondsOf?: (ctx: SessionContextView | undefined) => number | undefined;
 }
 
 /** The collaborator state the signals read, owned by their own classes. */
@@ -49,13 +54,15 @@ export class SessionSignals {
     private readonly sources: SignalSources,
   ) {}
 
-  /** Provider cache lifetime (ms) from the model's promptCache tier. */
+  /** Provider cache lifetime (ms) from the model's promptCache tier, or
+   *  the resolved fallback (provider-aware resolver, then the static
+   *  fallback) when the model declares none. */
   cacheTtlMs(ctx: SessionContextView | undefined): number {
     const retention = this.opts.cacheRetentionLong ? "long" : "short";
     const seconds = ctx?.model?.promptCache?.[retention];
-    return typeof seconds === "number" && seconds > 0
-      ? seconds * 1000
-      : this.opts.fallbackTtlSeconds * 1000;
+    if (typeof seconds === "number" && seconds > 0) return seconds * 1000;
+    const resolved = this.opts.fallbackTtlSecondsOf?.(ctx);
+    return (resolved ?? this.opts.fallbackTtlSeconds) * 1000;
   }
 
   /** Model cache cost rates (per million tokens), when the model declares them. */
