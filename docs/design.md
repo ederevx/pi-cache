@@ -182,7 +182,9 @@ cache-read rate):
    `cache_warm` usage entry, whichever is newer) approaches the provider
    cache lifetime from `ctx.model.promptCache` (fallback
    `PI_CACHE_TTL_SECONDS`), combined by their maximum. The warm observer
-   keeps the idle trigger from compacting a cache pi just rewarmed.
+   keeps the idle trigger from compacting a cache pi just rewarmed, and
+   the idle fire defers past an unelapsed warm refresh margin so a
+   just-decided warm lands first (the warm-vs-compact race).
 4. A warm-cache floor (`PI_CACHE_PRESSURE_COLD_FLOOR`, default 0.2) still
    blocks a non-churned, non-cache-neutral warm cache; the old min-gap
    gate is gone because it measured about zero at `agent_settled`.
@@ -193,6 +195,30 @@ a lower bound; pi-cache compaction cancels pi's warming, so when pi would
 decide "warm" the cache is valuable and compaction pressure should be
 suppressed. Evidence:
 `docs/research/internet-prompt-caching-2026-09-18.md#cache-coldness-2026-09-20`.
+
+TTL views: pi-cache keeps two deliberately different reads of the
+provider cache lifetime. `SessionSignals.piTtlMs` is pi's own
+view — the model's promptCache tier for the effective retention, or
+undefined exactly when pi's warmer schedules nothing — and it is the
+authority for anything that must match pi's warming behavior
+(`WarmingSchedule.refreshMarginMs`). `SessionSignals.cacheTtlMs` is
+pi-cache's coldness-ramp input: when the model declares no tier it
+falls back to the resolver and then `PI_CACHE_TTL_SECONDS`, so the
+idle ramp still fires for providers pi has no tier for. The miss
+taxonomy (`src/miss-classifier.ts`) binds the unified `cacheTtlMs`
+view and feeds the /cache-stats miss line
+(`PI_CACHE_MISS_DIAGNOSIS`, default on).
+
+Warming: pi decides warm/stop from expected savings
+(`continuationProbability * missCost - warmCost`) with a $0.05 floor,
+computed from a request-scoped retention tier pi-cache's per-request
+rewrite can change after the fact. When `PI_CACHE_FORCE_WARM` is on,
+the policy keeps the refresh only where pi's own numbers clear its
+floor (or are unavailable — sub-minimum warm costs hide the fields);
+otherwise pi's decision stands. `WarmingSchedule` mirrors pi's
+refresh margin (90% of the effective tier's lifetime less a 10s
+margin) from the tier the rewrite actually put on the wire, so the
+guard and the idle race window follow the wire, not pi's env tier.
 
 ### 6. Removed: affinity observation
 
@@ -213,7 +239,8 @@ variables (the env-var idiom common to pi extensions):
   (default true), `PI_CACHE_RETENTION_OVERRIDE` (default off),
   `PI_CACHE_CANONICALIZE` (default true), `PI_CACHE_SHARED_KEY`
   (default off), `PI_CACHE_FORCE_WARM` (default off),
-  `PI_CACHE_ADVISORY` (default true)
+  `PI_CACHE_MISS_DIAGNOSIS` (default true), `PI_CACHE_ADVISORY`
+  (default true)
 - Removed: `PI_CACHE_PIN_SESSION` — pi 0.87 providers key affinity on
   content (prompt_cache_key / sticky-routing headers pi-ai already
   sends), so header injection was inert; OpenAI bucket sharing is the
