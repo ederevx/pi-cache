@@ -44,6 +44,11 @@ const CLEAN = {
   PI_CACHE_TELEMETRY: undefined,
   PI_CACHE_SORT_TOOLS: undefined,
   PI_CACHE_DEDUP_TOOLS: undefined,
+  PI_CACHE_ANCHOR: undefined,
+  PI_CACHE_RETENTION_OVERRIDE: undefined,
+  PI_CACHE_CANONICALIZE: undefined,
+  PI_CACHE_SHARED_KEY: undefined,
+  PI_CACHE_FORCE_WARM: undefined,
   PI_CACHE_PIN_SESSION: undefined,
   PI_CACHE_ADVISORY: undefined,
   PI_CACHE_AUTO_COMPACT: undefined,
@@ -69,9 +74,13 @@ test("constants: default options", () => {
   withEnv({ ...CLEAN, PI_CACHE_SETTINGS: settingsPath("default") }, () => {
     const opts = loadOptions();
     assertEq(opts.telemetry, true);
-    assertEq(opts.sortTools, true);
+    assertEq(opts.sortTools, false, "sorting demoted to opt-in");
     assertEq(opts.dedupTools, true);
-    assertEq(opts.pinSession, true);
+    assertEq(opts.anchor, true);
+    assertEq(opts.retentionOverride, false);
+    assertEq(opts.canonicalize, true);
+    assertEq(opts.sharedKey, false);
+    assertEq(opts.forceWarm, false);
     assertEq(opts.advisory, true);
     // Cold-window auto-compaction is the default path.
     assertEq(opts.autoCompact, true);
@@ -112,7 +121,11 @@ test("constants: boolean env parsing", () => {
       PI_CACHE_TELEMETRY: "1",
       PI_CACHE_SORT_TOOLS: "true",
       PI_CACHE_DEDUP_TOOLS: "yes",
-      PI_CACHE_PIN_SESSION: "0",
+      PI_CACHE_ANCHOR: "0",
+      PI_CACHE_RETENTION_OVERRIDE: "1",
+      PI_CACHE_CANONICALIZE: "0",
+      PI_CACHE_SHARED_KEY: "1",
+      PI_CACHE_FORCE_WARM: "yes",
       PI_CACHE_ADVISORY: "false",
       PI_CACHE_AUTO_COMPACT: "no",
       PI_CACHE_FAST_COMPACT: "off",
@@ -124,7 +137,11 @@ test("constants: boolean env parsing", () => {
       assertEq(opts.telemetry, true);
       assertEq(opts.sortTools, true);
       assertEq(opts.dedupTools, true);
-      assertEq(opts.pinSession, false);
+      assertEq(opts.anchor, false);
+      assertEq(opts.retentionOverride, true);
+      assertEq(opts.canonicalize, false);
+      assertEq(opts.sharedKey, true);
+      assertEq(opts.forceWarm, true);
       assertEq(opts.advisory, false);
       assertEq(opts.autoCompact, false);
       assertEq(opts.fastCompact, false);
@@ -161,7 +178,11 @@ test("constants: owned settings drive every option", () => {
       telemetry: false,
       sortTools: false,
       dedupTools: false,
-      pinSession: false,
+      anchor: false,
+      retentionOverride: false,
+      canonicalize: false,
+      sharedKey: false,
+      forceWarm: false,
       advisory: false,
       autoCompact: false,
     }),
@@ -171,7 +192,11 @@ test("constants: owned settings drive every option", () => {
     assertEq(opts.telemetry, false);
     assertEq(opts.sortTools, false);
     assertEq(opts.dedupTools, false);
-    assertEq(opts.pinSession, false);
+    assertEq(opts.anchor, false);
+    assertEq(opts.retentionOverride, false);
+    assertEq(opts.canonicalize, false);
+    assertEq(opts.sharedKey, false);
+    assertEq(opts.forceWarm, false);
     assertEq(opts.advisory, false);
     assertEq(opts.autoCompact, false);
   });
@@ -256,4 +281,17 @@ test("constants: removed env vars are ignored harmlessly", () => {
       assertEq(opts.ledgerPath.endsWith("ledger.jsonl"), true);
     },
   );
+});
+
+test("constants: envPinnedIds lists rows whose env var is present", () => {
+  const loader = new OptionsLoader({
+    ...CLEAN,
+    PI_CACHE_SETTINGS: settingsPath("pinned"),
+    PI_CACHE_ANCHOR: "0",
+    PI_CACHE_FORCE_WARM: "1",
+  } as NodeJS.ProcessEnv);
+  const pinned = loader.envPinnedIds();
+  assert(pinned.includes("anchor") && pinned.includes("forceWarm"), "present vars pinned");
+  assert(!pinned.includes("telemetry"), "absent vars not pinned");
+  assertEq(pinned.length, 2);
 });

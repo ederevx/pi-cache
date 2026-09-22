@@ -16,7 +16,11 @@ const LIVE: LiveSettings = {
   telemetry: true,
   sortTools: false,
   dedupTools: true,
-  pinSession: true,
+  anchor: true,
+  retentionOverride: false,
+  canonicalize: true,
+  sharedKey: false,
+  forceWarm: false,
   advisory: false,
   autoCompact: true,
   fastCompaction: true,
@@ -25,14 +29,14 @@ const LIVE: LiveSettings = {
 
 test("settings: rows keep the option order and every row carries a value", () => {
   const rows = new SettingsPresenter().rows(LIVE);
-  assertEq(rows.length, 8, "row count");
+  assertEq(rows.length, 12, "row count");
   assertEq(
     rows.map((r) => r.id).join(","),
-    "telemetry,sortTools,dedupTools,pinSession,advisory,autoCompact,fastCompaction,fastBranchSummary",
+    "telemetry,sortTools,dedupTools,anchor,retentionOverride,canonicalize,sharedKey,forceWarm,advisory,autoCompact,fastCompaction,fastBranchSummary",
   );
   assertEq(rows[1].value, "off", "stored option reflected");
-  assertEq(rows[6].value, "on", "live compaction switch reflected");
-  assertEq(rows[7].value, "off", "live branch switch reflected");
+  assertEq(rows[10].value, "on", "live compaction switch reflected");
+  assertEq(rows[11].value, "off", "live branch switch reflected");
 });
 
 test("settings: non-tui modes print the listing and never open the view", async () => {
