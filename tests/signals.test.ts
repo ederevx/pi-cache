@@ -65,11 +65,29 @@ test("signals: the signal set reads the injected collaborator seam", () => {
   assertEq(signal.cacheTtlMs?.(), 10_000);
   assert(signal.costRates?.() === undefined, "no cost declared");
 });
-
 test("signals: the cache touch uses the most recent warm", () => {
   const warmed = new SessionSignals(opts, sources({ msSinceLastWarm: () => 1000 }));
   assertEq(warmed.msSinceCacheTouch(), 1000, "a warm refresh is more recent than the turn");
   assertEq(warmed.for(undefined).msSinceCacheTouch?.(), 1000, "exposed on the signal set");
   const unwarmed = new SessionSignals(opts, sources());
   assertEq(unwarmed.msSinceCacheTouch(), 1234, "falls back to the last turn");
+});
+
+test("signals: the resolver-backed fallback precedes the static fallback", () => {
+  const resolved = new SessionSignals(
+    {
+      cacheRetentionLong: false,
+      fallbackTtlSeconds: 300,
+      fallbackTtlSecondsOf: (ctx) =>
+        ctx?.model?.provider === "z-ai" ? 120 : undefined,
+    },
+    sources(),
+  );
+  assertEq(resolved.cacheTtlMs({ model: { provider: "z-ai" } }), 120_000);
+  assertEq(resolved.cacheTtlMs({ model: {} }), 300_000, "no resolution keeps the fallback");
+  // The model tier still wins over the resolver.
+  assertEq(
+    resolved.cacheTtlMs({ model: { provider: "z-ai", promptCache: { short: 60 } } }),
+    60_000,
+  );
 });

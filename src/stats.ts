@@ -32,6 +32,17 @@ export interface CacheStatsInput {
   branchEnabled: boolean;
   /** Present only when the session had a usable context sample. */
   pressure?: CacheStatsPressure;
+  /** Miss-type diagnosis for the session, when any miss was observed. */
+  misses?: CacheStatsMisses;
+}
+
+/** Miss-type counts from the miss classifier (named categories only; the
+ *  residual full-miss bucket is reported by the advisory path). */
+export interface CacheStatsMisses {
+  coldStart: number;
+  idleExpiry: number;
+  replicaFlap: number;
+  partialMiss: number;
 }
 
 export class CacheStatsPresenter {
@@ -65,11 +76,23 @@ export class CacheStatsPresenter {
     }
     if (input.churn > 0) signals.push(`head churn ${input.churn}`);
     signals.push(input.affinity);
+    const misses = input.misses ? this.missSignal(input.misses) : undefined;
+    if (misses) signals.push(misses);
     signals.push(
       `compactions ${input.compactions} ` +
         `(fast ${input.fastCompactions}, compaction ${input.fastEnabled ? "on" : "off"}, ` +
         `branch ${input.branchEnabled ? "on" : "off"})`,
     );
     return ", " + signals.join(", ");
+  }
+
+  /** One miss-type signal, naming only the observed categories. */
+  private missSignal(m: CacheStatsMisses): string | undefined {
+    const parts: string[] = [];
+    if (m.coldStart > 0) parts.push(`cold-start ${m.coldStart}`);
+    if (m.idleExpiry > 0) parts.push(`idle-expiry ${m.idleExpiry}`);
+    if (m.replicaFlap > 0) parts.push(`replica-flap ${m.replicaFlap}`);
+    if (m.partialMiss > 0) parts.push(`partial ${m.partialMiss}`);
+    return parts.length > 0 ? `misses ${parts.join(", ")}` : undefined;
   }
 }

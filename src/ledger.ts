@@ -87,15 +87,22 @@ export class CacheLedger {
     this.enabledOn = enabled;
   }
 
-  /** Record one assistant message's usage, if present. */
-  record(usage: Usage | undefined, model: string, session: string = this.sessionId ?? "session"): void {
-    if (!usage || !this.enabledOn) return;
+  /** Record one assistant message's usage, if present. Returns the
+   *  recorded row so collaborators (TTL learner, miss classifier) can feed
+   *  on it without re-reading the ledger; undefined when nothing recorded. */
+  record(
+    usage: Usage | undefined,
+    model: string,
+    session: string = this.sessionId ?? "session",
+  ): UsageRow | undefined {
+    if (!usage || !this.enabledOn) return undefined;
     const row = this.buildRow(usage, model, session);
     this.rows.push(row);
     this.noteSessionRow(row);
     this.sink.append(row);
     this.trim();
     this.maybeCompactFile();
+    return row;
   }
 
   /** Aggregated counters over the retained ledger window (all processes). */
