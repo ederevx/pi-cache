@@ -16,12 +16,20 @@ import { dirname } from "node:path";
 export interface UserSettings {
   /** Record per-request cache usage to the ledger. */
   telemetry?: boolean;
-  /** Deterministic tool order for byte-stable prefixes. */
+  /** Deterministic tool order for byte-stable prefixes (opt-in). */
   sortTools?: boolean;
   /** Drop exact-duplicate tool schemas from the payload. */
   dedupTools?: boolean;
-  /** Stable provider session-id pinning for stateless requests. */
-  pinSession?: boolean;
+  /** Pin a fourth Anthropic breakpoint on stable mid-history. */
+  anchor?: boolean;
+  /** Rewrite cache markers to the long retention tier per request. */
+  retentionOverride?: boolean;
+  /** Canonicalize skill/project listings in the system prompt. */
+  canonicalize?: boolean;
+  /** Derive OpenAI prompt_cache_key from the prefix head. */
+  sharedKey?: boolean;
+  /** Force pi's cache-warming decision to "warm". */
+  forceWarm?: boolean;
   /** Log compaction advisories. */
   advisory?: boolean;
   /** Cache-aware automatic compaction. */
@@ -63,7 +71,11 @@ export class UserSettingsStore {
     "telemetry",
     "sortTools",
     "dedupTools",
-    "pinSession",
+    "anchor",
+    "retentionOverride",
+    "canonicalize",
+    "sharedKey",
+    "forceWarm",
     "advisory",
     "autoCompact",
     "fastCompaction",

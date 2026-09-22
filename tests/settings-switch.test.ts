@@ -10,13 +10,17 @@ import { test, assert, assertEq, scratchDir } from "./harness.ts";
 import { SettingsSwitchBoard } from "../src/settings-switch.ts";
 import { CacheLedger, type RecordSink, type UsageRow } from "../src/ledger.ts";
 import { PrefixNormalizer } from "../src/normalizer.ts";
-import { SessionPinner } from "../src/session-pin.ts";
+import { BreakpointAnchor } from "../src/breakpoint-anchor.ts";
+import { RetentionRewriter } from "../src/retention.ts";
+import { SystemCanonicalizer } from "../src/canonicalizer.ts";
+import { CacheKeySharer } from "../src/cache-key.ts";
+import { WarmingPolicy } from "../src/warming-policy.ts";
 import { CompactionAdvisor } from "../src/compaction.ts";
 import { AutocompactController } from "../src/autocompact.ts";
 import { FastCompactionController } from "../src/fastcompact.ts";
 import { UserSettingsStore } from "../src/user-settings.ts";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 /** In-memory sink so the ledger needs no files. */
 class MemorySink implements RecordSink {
@@ -36,20 +40,41 @@ class MemorySink implements RecordSink {
 
 let seq = 0;
 
-function board() {
+function board(pinned: string[] = []) {
   const file = join(scratchDir(), `settings-switch-${seq++}.json`);
   const ledger = new CacheLedger(new MemorySink(), true, 100);
   const normalizer = new PrefixNormalizer({ sortTools: true, dedupTools: true });
-  const pinner = new SessionPinner(true);
+  const anchor = new BreakpointAnchor();
+  const retention = new RetentionRewriter(false);
+  const canonicalizer = new SystemCanonicalizer(true);
+  const cacheKey = new CacheKeySharer(false);
+  const warmingPolicy = new WarmingPolicy(false);
   const advisor = new CompactionAdvisor({ enabled: true });
   const autocompact = new AutocompactController({ enabled: true, cooldownSeconds: 0 });
   const fast = new FastCompactionController({ enabled: true, branchEnabled: true });
   const store = new UserSettingsStore(file);
   return {
-    board: new SettingsSwitchBoard(ledger, normalizer, pinner, advisor, autocompact, fast, store),
+    board: new SettingsSwitchBoard(
+      ledger,
+      normalizer,
+      anchor,
+      retention,
+      canonicalizer,
+      cacheKey,
+      warmingPolicy,
+      advisor,
+      autocompact,
+      fast,
+      store,
+      new Set(pinned),
+    ),
     ledger,
     normalizer,
-    pinner,
+    anchor,
+    retention,
+    canonicalizer,
+    cacheKey,
+    warmingPolicy,
     advisor,
     autocompact,
     fast,
@@ -80,14 +105,38 @@ test("settings-switch: sort and dedup flip the normalizer independently", () => 
   assertEq(stored(file).dedupTools, false);
 });
 
-test("settings-switch: session pin and advisory switch independently", () => {
-  const { board: b, pinner, advisor, file } = board();
-  b.set("pinSession", "off");
-  assertEq(pinner.enabled, false);
+test("settings-switch: the five request transforms switch independently", () => {
+  const { board: b, anchor, retention, canonicalizer, cacheKey, warmingPolicy, advisor, file } = board();
+  b.set("anchor", "off");
+  b.set("retentionOverride", "on");
+  b.set("canonicalize", "off");
+  b.set("sharedKey", "on");
+  b.set("forceWarm", "on");
+  assertEq(anchor.enabled, false);
+  assertEq(retention.enabled, true);
+  assertEq(canonicalizer.enabled, false);
+  assertEq(cacheKey.enabled, true);
+  assertEq(warmingPolicy.enabled, true);
   assertEq(advisor.enabled, true, "advisory untouched");
+  assertEq(stored(file).anchor, false);
+  assertEq(stored(file).retentionOverride, true);
+  assertEq(stored(file).canonicalize, false);
+  assertEq(stored(file).sharedKey, true);
+  assertEq(stored(file).forceWarm, true);
+});
+
+test("settings-switch: an env-pinned row is refused and not persisted", () => {
+  const { board: b, anchor, file } = board(["anchor"]);
+  const message = b.set("anchor", "off");
+  assert(message !== undefined && message.includes("pinned"), "pin refusal message");
+  assertEq(anchor.enabled, true, "controller untouched");
+  assert(!existsSync(file), "nothing persisted for a pinned row");
+});
+
+test("settings-switch: advisory switches independently", () => {
+  const { board: b, advisor, file } = board();
   b.set("advisory", "off");
   assertEq(advisor.enabled, false);
-  assertEq(stored(file).pinSession, false);
   assertEq(stored(file).advisory, false);
 });
 

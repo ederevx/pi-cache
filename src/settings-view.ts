@@ -25,7 +25,7 @@ export class CacheSettingsView extends Container {
     const border = (text: string): string => theme.fg("border", text);
     this.list = new SettingsList(
       rows.map((row) => CacheSettingsView.toItem(row)),
-      10,
+      rows.length, // every option stays visible; 12 rows fits a terminal pane.
       CacheSettingsView.themeFor(theme),
       (id, value) => onChange(id, value),
       onCancel,

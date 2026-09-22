@@ -53,12 +53,14 @@ As a flat extension copy:
 
 Re-run to refresh owned copies in place (idempotent; the manifest at
 `~/.pi/agent/.pi-cache/manifest.json` records exactly what it owns).
-Then run `/reload` in pi (or restart). No config file needed. All
-cache-favoring features are ON by default (tools sort/dedup, session
-pin, compaction pressure, fast compaction, advisories, telemetry);
-disable any with its `PI_CACHE_*` env var (see `src/constants.ts`) or
+Then run `/reload` in pi (or restart). No config file needed. The cache-favoring request transforms are ON by
+default (tool dedup, mid-history breakpoint anchor, system-listing
+canonicalization, compaction pressure, fast compaction, advisories,
+telemetry); the per-request long-retention override, shared OpenAI
+cache key, forced warming, and tools sorting are opt-in. Disable any
+feature with its `PI_CACHE_*` env var (see `src/constants.ts`) or
 with the `/cache-settings` switch (which persists to pi-cache's owned
-`~/.pi/agent/.pi-cache/settings.json`). Auto-compaction fires at three
+`~/.pi/agent/.pi-cache/settings.json`; a set env var pins its row). Auto-compaction fires at three
 idle points when the pressure draw passes: after a turn settles
 (`agent_settled`), on a session-scoped timer when the provider cache TTL
 expires while pi sits idle (`PI_CACHE_IDLE_TRIGGER`), and when a cold
@@ -97,7 +99,8 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
    system block into stable (provider prompt + global rules) and dynamic
    (cwd, date, run metadata) regions, mirroring opencode's measured
    0% -> 97.6% cross-repo hit fix.
-3. **Tool-schema hygiene** — deterministic tool ordering, dedup, and removal
+3. **Tool-schema hygiene** — deterministic tool ordering (opt-in), dedup,
+   and removal
    of volatile fields (cwd, absolute paths) from tool definitions.
 4. **Cache-aware compaction** — the trigger is an expected-cost
    probabilistic pressure (coldness and prefix amortization drive it,
@@ -107,8 +110,13 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
    prefix head never moves. Fast compaction replaces pi's summarizer for
    all reasons; with it off, pi's own normal summarizer runs unchanged in
    cold/churned windows.
-5. **Affinity guardrails** — keep OpenRouter sticky routing warm: one
-   `session_id` per thread, never per turn; detect prefix-identity churn.
+5. **Prefix continuance** — a fourth Anthropic cache_control marker is
+   pinned on stable mid-history at a quantum position (bounds tail-churn
+   loss and the >20-block walk-back gap), an opt-in per-request rewrite
+   upgrades every marker to the 1h tier (`PI_CACHE_RETENTION_OVERRIDE`),
+   the OpenAI `prompt_cache_key` can be derived from the prefix head so
+   sibling sessions share a warm bucket (`PI_CACHE_SHARED_KEY`), and
+   pi's warming decision can be forced warm (`PI_CACHE_FORCE_WARM`).
 6. **Compaction pressure + fast override** — the auto-compaction trigger
    is `CompactionPressure`, combining the expected-cost economics model
    (`src/economics.ts`) with the context-degradation onset
@@ -127,7 +135,9 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
 
 - `src/` — extension source (house layout: `index.ts` wiring + per-
   responsibility modules: `ledger.ts`, `sink.ts`, `normalizer.ts`,
-  `compaction.ts`, `affinity.ts`, `session-pin.ts`, `autocompact.ts`,
+  `compaction.ts`, `affinity.ts`, `markers.ts`, `breakpoint-anchor.ts`,
+  `retention.ts`, `canonicalizer.ts`, `cache-key.ts`, `warming-policy.ts`,
+  `autocompact.ts`,
   `pressure.ts`, `economics.ts`, `context-degradation.ts`,
   `provider-ttl.ts`, `ttl-learner.ts`, `miss-classifier.ts`,
   `fastcompact.ts`, `fast-switch.ts`, `feature-switch.ts`,
