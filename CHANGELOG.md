@@ -3,6 +3,14 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.5.1] - 2026-09-21
+
+### Fixed
+
+- Validate the parsed settings object shape before trusting it, sweep
+  stray temps in the settings directory, and remove the local
+  shadowing of the pressure model.
+
 ## [0.5.0] - 2026-09-21
 
 ### Fixed
