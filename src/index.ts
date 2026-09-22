@@ -71,7 +71,12 @@ import { dirname } from "node:path";
 export default function piCacheExtension(pi: ExtensionAPI): void {
   const opts = new OptionsLoader().load();
   // Sweep stale atomic-write temp files before the ledger/settings are read.
-  new TempSweeper().sweep(dirname(opts.ledgerPath));
+  // The settings file may live outside the ledger dir (PI_CACHE_SETTINGS),
+  // so both directories are swept; sweeping one dir twice is a harmless
+  // no-op for the second call.
+  const sweeper = new TempSweeper();
+  sweeper.sweep(dirname(opts.ledgerPath));
+  sweeper.sweep(dirname(opts.settingsPath));
   // Pre-retention backups, bounded by their own ring/TTL/size GC.
   const backups = new BackupStore(opts.backupDir, {
     keep: opts.backupKeep,
@@ -407,7 +412,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => {
       const usage = ctx.getContextUsage?.();
       const liveSignals = signals.for(ctx as SessionContextView | undefined);
-      const pressure = autocompact.currentPressure(usage, ledger.lastUsage(), liveSignals);
+      const livePressure = autocompact.currentPressure(usage, ledger.lastUsage(), liveSignals);
       const text = statsPresenter.render({
         global: ledger.totals(),
         session: ledger.sessionTotals(),
@@ -417,8 +422,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         fastCompactions: fastcompact.stats().compactions,
         fastEnabled: fastcompact.enabled,
         branchEnabled: fastcompact.branchEnabled,
-        pressure: pressure
-          ? { pressure: pressure.pressure, probability: pressure.probability }
+        pressure: livePressure
+          ? { pressure: livePressure.pressure, probability: livePressure.probability }
           : undefined,
       });
       // Command output is emitted through ctx (handler return values are
