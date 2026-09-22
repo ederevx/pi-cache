@@ -34,6 +34,8 @@ export interface PiCacheOptions {
   sharedKey: boolean;
   /** Force pi's cache-warming decision to "warm" (default off). */
   forceWarm: boolean;
+  /** Render the miss taxonomy in /cache-stats (default on). */
+  missDiagnosis: boolean;
   /** Log compaction advisories (observational only). */
   advisory: boolean;
   /** Absolute path of the append-only usage ledger. */
@@ -97,6 +99,7 @@ export class OptionsLoader {
       canonicalize: this.envBool("PI_CACHE_CANONICALIZE", stored.canonicalize ?? true),
       sharedKey: this.envBool("PI_CACHE_SHARED_KEY", stored.sharedKey ?? false),
       forceWarm: this.envBool("PI_CACHE_FORCE_WARM", stored.forceWarm ?? false),
+      missDiagnosis: this.envBool("PI_CACHE_MISS_DIAGNOSIS", stored.missDiagnosis ?? true),
       advisory: this.envBool("PI_CACHE_ADVISORY", stored.advisory ?? true),
       ledgerPath: this.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT,
       ledgerMaxRows: this.envInt("PI_CACHE_LEDGER_MAX_ROWS", 20000),
@@ -157,6 +160,7 @@ export class OptionsLoader {
       ["canonicalize", "PI_CACHE_CANONICALIZE"],
       ["sharedKey", "PI_CACHE_SHARED_KEY"],
       ["forceWarm", "PI_CACHE_FORCE_WARM"],
+      ["missDiagnosis", "PI_CACHE_MISS_DIAGNOSIS"],
       ["advisory", "PI_CACHE_ADVISORY"],
       ["autoCompact", "PI_CACHE_AUTO_COMPACT"],
       ["fastCompaction", "PI_CACHE_FAST_COMPACT"],

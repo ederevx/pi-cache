@@ -55,6 +55,8 @@ import { RetentionRewriter } from "./retention.ts";
 import { SystemCanonicalizer } from "./canonicalizer.ts";
 import { CacheKeySharer } from "./cache-key.ts";
 import { WarmingPolicy } from "./warming-policy.ts";
+import { WarmingSchedule } from "./warming-schedule.ts";
+import { MissClassifier } from "./miss-classifier.ts";
 import { AutocompactController } from "./autocompact.ts";
 import { CompactionPressure } from "./pressure.ts";
 import { CacheEconomics } from "./economics.ts";
@@ -146,6 +148,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     advisor,
     autocompact,
     fastcompact,
+    statsPresenter,
     settingsStore,
     envPinned,
   );
@@ -167,6 +170,17 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       headChurn: () => normalizer.churn(),
     },
   );
+
+  // Warming schedule: mirrors pi's refresh margin from the effective tier
+  // the last request actually ran on (per-request override aware).
+  const warmingSchedule = new WarmingSchedule(signals, retention);
+
+  // Miss taxonomy: /cache-stats diagnosis fed from the ledger's rows; the
+  // TTL comes from the same unified signals view the idle ramp uses.
+  const missClassifier = new MissClassifier({
+    ttlMsOf: (model: string) =>
+      signals.cacheTtlMs({ model: { id: model } } as SessionContextView),
+  });
 
   // Compaction is triggered from three points through one coordinator: the
   // settled run end, the TTL idle timer, and a cold before-turn prompt. The
@@ -195,6 +209,11 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     isIdle: (ctx) => ctx.isIdle?.() === true,
     idleMs: () => signals.msSinceCacheTouch(),
     ttlMs: (ctx) => signals.cacheTtlMs(ctx as unknown as SessionContextView),
+    // Warm-vs-compact race: defer a fire while a warm decision is younger
+    // than its refresh margin, so the refresh lands and resets the clock.
+    msSinceWarmDecision: () => warming.msSinceDecision(),
+    warmMarginMs: (ctx) =>
+      warmingSchedule.refreshMarginMs(ctx as unknown as SessionContextView),
     compact: (ctx) => compactionTrigger.tryCompact(ctx),
   });
   const beforeTurn = new BeforeTurnTrigger<
@@ -214,6 +233,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       idleTrigger.disarm();
       warming.reconcile(ctx);
       ledger.useSession(signals.sessionIdOf(ctx));
+      missClassifier.useSession(signals.sessionIdOf(ctx));
       idleTrigger.arm(ctx);
     } catch {
       /* telemetry only */
@@ -225,7 +245,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const message = event.message;
       if (message?.role === "assistant") {
         const model = (ctx as SessionContextView | undefined)?.model?.id ?? "session";
-        ledger.record(message.usage, model, signals.sessionIdOf(ctx));
+        const row = ledger.record(message.usage, model, signals.sessionIdOf(ctx));
+        if (row) missClassifier.feed(row);
       }
     } catch {
       /* never break the turn */
@@ -463,6 +484,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         pressure: livePressure
           ? { pressure: livePressure.pressure, probability: livePressure.probability }
           : undefined,
+        misses: missClassifier.stats(),
       });
       // Command output is emitted through ctx (handler return values are
       // discarded by pi); toast in UI mode, fall back to stderr otherwise.

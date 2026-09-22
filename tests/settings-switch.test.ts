@@ -8,6 +8,7 @@
 
 import { test, assert, assertEq, scratchDir } from "./harness.ts";
 import { SettingsSwitchBoard } from "../src/settings-switch.ts";
+import { SettingsPresenter } from "../src/settings.ts";
 import { CacheLedger, type RecordSink, type UsageRow } from "../src/ledger.ts";
 import { PrefixNormalizer } from "../src/normalizer.ts";
 import { BreakpointAnchor } from "../src/breakpoint-anchor.ts";
@@ -52,6 +53,7 @@ function board(pinned: string[] = []) {
   const advisor = new CompactionAdvisor({ enabled: true });
   const autocompact = new AutocompactController({ enabled: true, cooldownSeconds: 0 });
   const fast = new FastCompactionController({ enabled: true, branchEnabled: true });
+  const stats = new SettingsPresenter();
   const store = new UserSettingsStore(file);
   return {
     board: new SettingsSwitchBoard(
@@ -65,6 +67,7 @@ function board(pinned: string[] = []) {
       advisor,
       autocompact,
       fast,
+      stats,
       store,
       new Set(pinned),
     ),
@@ -78,6 +81,7 @@ function board(pinned: string[] = []) {
     advisor,
     autocompact,
     fast,
+    stats,
     file,
   };
 }
@@ -119,6 +123,16 @@ test("settings-switch: the five request transforms switch independently", () => 
   assertEq(stored(file).canonicalize, false);
   assertEq(stored(file).sharedKey, true);
   assertEq(stored(file).forceWarm, true);
+});
+
+test("settings-switch: miss diagnosis flips the presenter and persists", () => {
+  const { board: b, stats, file } = board();
+  b.set("missDiagnosis", "off");
+  assertEq(stats.missDiagnosisEnabled, false);
+  assertEq(stored(file).missDiagnosis, false);
+  b.set("missDiagnosis", "on");
+  assertEq(stats.missDiagnosisEnabled, true);
+  assertEq(stored(file).missDiagnosis, true);
 });
 
 test("settings-switch: an env-pinned row is refused and not persisted", () => {

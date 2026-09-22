@@ -1,15 +1,18 @@
 /**
  * pi-cache — cache-warming decision policy.
  *
- * One responsibility: override pi's cache-warming economics when the user
- * asks for it. pi decides warm/stop from an expected-savings model with a
- * $0.05 floor and provider TTLs declared by the model; providers whose
- * real TTL is shorter than the declared tier (or users who simply always
- * want the warm refresh) are underserved by that default. When enabled the
- * policy answers every decision with "warm"; when disabled it stays
- * observational and pi's decision stands. The observer keeps reconciling
- * confirmed refreshes either way, so the idle trigger never compacts a
- * cache a forced warm kept alive.
+ * One responsibility: override pi's cache-warming decision where pi-cache
+ * knows better, and defer everywhere else. pi decides warm/stop from an
+ * expected-savings model (`continuationProbability * missCost - warmCost`)
+ * with a $0.05 floor, computed from a request-scoped retention tier that
+ * pi-cache's per-request rewrite can change after the fact — so when the
+ * override lengthened the effective tier, pi's scheduler wakes too early.
+ * The policy therefore answers "warm" only when pi's own numbers still
+ * clear its floor (keep the refresh, cheap insurance) or when pi's numbers
+ * are unavailable (sub-minimum warm costs); it defers otherwise so pi's
+ * economics stand. When the policy is disabled it is fully observational.
+ * The observer keeps reconciling confirmed refreshes either way, so the
+ * idle trigger never compacts a cache a kept-alive warm refreshed.
  */
 
 import type { WarmingAction } from "./warming-observer.ts";
@@ -23,6 +26,10 @@ export interface WarmingDecisionView {
 }
 
 export class WarmingPolicy {
+  /** pi's own expected-savings floor ($): matches CacheWarmer so an
+   *  override fires only when pi's economics also justified the warm. */
+  private static readonly SAVINGS_FLOOR_DOLLARS = 0.05;
+
   constructor(private enabledOn: boolean = false) {}
 
   /** The live force-warm switch (toggled from /cache-settings). */
@@ -36,7 +43,29 @@ export class WarmingPolicy {
   }
 
   /** The action this policy returns to pi, or undefined to defer. */
-  decide(_event: WarmingDecisionView | undefined): WarmingAction | undefined {
-    return this.enabledOn ? "warm" : undefined;
+  decide(event: WarmingDecisionView | undefined): WarmingAction | undefined {
+    if (!this.enabledOn) return undefined;
+    const savings = this.expectedSavings(event);
+    // pi's economics are absent or incomputable (sub-minimum warm costs
+    // hide the fields): keep the refresh — the cheap, conservative warm.
+    if (savings === undefined) return "warm";
+    return savings >= WarmingPolicy.SAVINGS_FLOOR_DOLLARS ? "warm" : undefined;
+  }
+
+  /** pi's expected savings from the decision event, or undefined when its
+   *  economics are unavailable (fields absent or not numeric). */
+  private expectedSavings(event: WarmingDecisionView | undefined): number | undefined {
+    const warm = this.asNumber(event?.warmCost);
+    const miss = this.asNumber(event?.missCost);
+    const continuation = this.asNumber(event?.continuationProbability);
+    if (warm === undefined || miss === undefined || continuation === undefined) {
+      return undefined;
+    }
+    return continuation * miss - warm;
+  }
+
+  /** A decision field as a finite number, or undefined. */
+  private asNumber(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
   }
 }
