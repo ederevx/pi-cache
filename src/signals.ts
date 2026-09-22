@@ -7,6 +7,14 @@
  * reads. It owns only option values; each collaborator's state is read
  * through the injected `SignalSources` seam, so no cross-owner state is
  * reached directly.
+ *
+ * TTL semantics: `cacheTtlMs` is pi-cache's OWN coldness-ramp input and
+ * deliberately diverges from pi's warmer view — an unknown lifetime falls
+ * back through the resolver to the static default (so the idle ramp still
+ * fires) instead of pi's undefined (no warming). `piTtlMs` reports the
+ * pi-native tier-or-undefined value, the authority for anything that must
+ * match pi's warmer or answer its warming decisions; use it there, never
+ * mix the two.
  */
 
 import type { CostRates } from "./economics.ts";
@@ -57,17 +65,34 @@ export class SessionSignals {
     private readonly sources: SignalSources,
   ) {}
 
-  /** Provider cache lifetime (ms) from the model's promptCache tier, or
-   *  the resolved fallback (provider-aware resolver, then the static
-   *  fallback) when the model declares none. */
+  /**
+   * pi's own view of the provider cache lifetime (ms): the model's
+   * promptCache tier for the effective retention, or undefined exactly
+   * when pi's warmer treats it as unknown and does not schedule. The
+   * single source for warming decisions; never feed the fallback here.
+   */
+  piTtlMs(ctx: SessionContextView | undefined): number | undefined {
+    const seconds = this.tierSeconds(ctx);
+    return typeof seconds === "number" && seconds > 0 ? seconds * 1000 : undefined;
+  }
+
+  /**
+   * pi-cache's coldness-ramp input: the pi tier when declared, else the
+   * resolved fallback (provider-aware resolver, then the static default)
+   * so the idle ramp still fires for providers pi has no tier for.
+   */
   cacheTtlMs(ctx: SessionContextView | undefined): number {
-    // Per-request retention override wins, then the env-mirror flag.
-    const effective = this.opts.retentionLongOf?.() ?? this.opts.cacheRetentionLong;
-    const retention = effective ? "long" : "short";
-    const seconds = ctx?.model?.promptCache?.[retention];
+    const seconds = this.tierSeconds(ctx);
     if (typeof seconds === "number" && seconds > 0) return seconds * 1000;
     const resolved = this.opts.fallbackTtlSecondsOf?.(ctx);
     return (resolved ?? this.opts.fallbackTtlSeconds) * 1000;
+  }
+
+  /** The model's tier seconds for the effective retention (long wins when
+   *  the per-request override ran, else the env-mirror flag). */
+  private tierSeconds(ctx: SessionContextView | undefined): number | undefined {
+    const effective = this.opts.retentionLongOf?.() ?? this.opts.cacheRetentionLong;
+    return ctx?.model?.promptCache?.[effective ? "long" : "short"];
   }
 
   /** Model cache cost rates (per million tokens), when the model declares them. */

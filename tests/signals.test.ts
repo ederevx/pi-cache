@@ -71,6 +71,26 @@ test("signals: the cache touch uses the most recent warm", () => {
   assertEq(unwarmed.msSinceCacheTouch(), 1234, "falls back to the last turn");
 });
 
+test("signals: piTtlMs stays undefined where pi's warmer schedules nothing", () => {
+  const s = new SessionSignals(opts, sources());
+  assertEq(s.piTtlMs({ model: { promptCache: { short: 60, long: 3600 } } }), 60_000);
+  const long = new SessionSignals({ ...opts, cacheRetentionLong: true }, sources());
+  assertEq(long.piTtlMs({ model: { promptCache: { short: 60, long: 3600 } } }), 3_600_000);
+  // No model tier: pi treats the lifetime as unknown (no warming), so the
+  // pi-native view is undefined even though the coldness ramp falls back.
+  assertEq(s.piTtlMs(undefined), undefined, "no tier, no pi schedule");
+  assertEq(s.piTtlMs({ model: {} }), undefined, "empty model, no pi schedule");
+  const override = new SessionSignals(
+    { ...opts, retentionLongOf: () => true },
+    sources(),
+  );
+  assertEq(
+    override.piTtlMs({ model: { promptCache: { short: 60, long: 3600 } } }),
+    3_600_000,
+    "the per-request tier rewrite moves the pi view too",
+  );
+});
+
 test("signals: the resolver-backed fallback precedes the static fallback", () => {
   const resolved = new SessionSignals(
     {

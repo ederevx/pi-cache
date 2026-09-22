@@ -107,7 +107,10 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
    upgrades every marker to the 1h tier (`PI_CACHE_RETENTION_OVERRIDE`),
    the OpenAI `prompt_cache_key` can be derived from the prefix head so
    sibling sessions share a warm bucket (`PI_CACHE_SHARED_KEY`), and
-   pi's warming decision can be forced warm (`PI_CACHE_FORCE_WARM`).
+   pi's warming decision is kept warm when its own economics justify it
+   (`PI_CACHE_FORCE_WARM`) — pi schedules refreshes from its
+   request-scoped retention tier, so the warming schedule follows the
+   tier the per-request rewrite actually put on the wire.
 6. **Compaction pressure + fast override** — the auto-compaction trigger
    is `CompactionPressure`, combining the expected-cost economics model
    (`src/economics.ts`) with the context-degradation onset
