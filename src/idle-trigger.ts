@@ -7,6 +7,16 @@
  * and dedup live in `CompactionTrigger`. The timer is unref'd so it never
  * keeps a print-mode process alive, and index disarms it on session
  * boundaries.
+ *
+ * Warm-vs-compact race: a warm refresh's `cache_warm` usage entry lands
+ * only after its provider round-trip, so between the decision intent and
+ * the confirmation the idle timer can read a stale cache touch and fire a
+ * compaction into a cache pi is about to refresh. `arm` therefore guards
+ * on the injected `warmingMarginMs`: while a warm decision is younger than
+ * its refresh margin, the fire is deferred until the margin elapses (the
+ * refresh will have landed and reset the idle clock by then). The guard
+ * is observational when no margin is injected, preserving the pre-guard
+ * behavior for tests and callers that do not wire it.
  */
 
 type TimerHandle = ReturnType<typeof setTimeout>;
@@ -23,6 +33,11 @@ export interface IdleTriggerOptions<Ctx> {
   ttlMs(ctx: Ctx): number;
   /** Fired at TTL expiry; the trigger awaits nothing. */
   compact(ctx: Ctx): Promise<boolean>;
+  /** Milliseconds since pi's warm decision intent, when observed; a
+   *  decision younger than its refresh margin defers the fire. */
+  msSinceWarmDecision?(): number | undefined;
+  /** The warm refresh margin (ms) a young decision defers the fire by. */
+  warmMarginMs?(): number | undefined;
   /** Injectable timer seams for deterministic tests. */
   setTimeoutFn?: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimeoutFn?: (handle: TimerHandle) => void;
@@ -41,14 +56,7 @@ export class IdleTrigger<Ctx> {
     this.disarm();
     const remaining = this.opts.ttlMs(ctx) - this.opts.idleMs(ctx);
     if (!Number.isFinite(remaining)) return;
-    const delay = Math.max(this.opts.minDelayMs ?? 1000, remaining);
-    const set = this.opts.setTimeoutFn ?? setTimeout;
-    const handle = set(() => {
-      this.timer = undefined;
-      this.fire(ctx);
-    }, delay);
-    (handle as { unref?: () => void }).unref?.();
-    this.timer = handle;
+    this.schedule(ctx, Math.max(this.opts.minDelayMs ?? 1000, remaining, this.warmDeferralMs()));
   }
 
   /** Cancel any pending fire (run started, session ended, user returned). */
@@ -64,13 +72,42 @@ export class IdleTrigger<Ctx> {
     return this.timer !== undefined;
   }
 
-  /** Fire the idle compaction if the session is still idle. */
+  /** Schedule one fire after `delayMs`; the handle is unref'd so it never
+   *  keeps a print-mode process alive. */
+  private schedule(ctx: Ctx, delayMs: number): void {
+    const set = this.opts.setTimeoutFn ?? setTimeout;
+    const handle = set(() => {
+      this.timer = undefined;
+      this.fire(ctx);
+    }, delayMs);
+    (handle as { unref?: () => void }).unref?.();
+    this.timer = handle;
+  }
+
+  /** Fire the idle compaction if the session is still idle. A warm decision
+   *  that arrived after arming re-defers here: the fire waits out the
+   *  unelapsed refresh margin so the refresh can land and reset the clock. */
   private fire(ctx: Ctx): void {
     try {
       if (!this.opts.isIdle(ctx)) return;
+      const deferral = this.warmDeferralMs();
+      if (deferral > 0) {
+        this.schedule(ctx, deferral);
+        return;
+      }
       void this.opts.compact(ctx);
     } catch {
       /* automatic control must never break the process */
     }
+  }
+
+  /** How long a young warm decision defers the fire: the unelapsed part
+   *  of its refresh margin, so the refresh can land and reset the idle
+   *  clock first. An unobserved guard (no margins) defers nothing. */
+  private warmDeferralMs(): number {
+    const since = this.opts.msSinceWarmDecision?.();
+    const margin = this.opts.warmMarginMs?.();
+    if (typeof since !== "number" || typeof margin !== "number") return 0;
+    return Math.max(0, margin - since);
   }
 }

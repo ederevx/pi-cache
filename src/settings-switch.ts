@@ -23,7 +23,7 @@ import type { CompactionAdvisor } from "./compaction.ts";
 import type { AutocompactController } from "./autocompact.ts";
 import type { FastCompactionController } from "./fastcompact.ts";
 import type { UserSettings, UserSettingsStore } from "./user-settings.ts";
-import type { LiveSettings } from "./settings.ts";
+import type { SettingsPresenter, LiveSettings } from "./settings.ts";
 
 /** How one row applies its new boolean to its owning controller. */
 interface SwitchRoute {
@@ -48,6 +48,7 @@ export class SettingsSwitchBoard {
     private readonly advisor: CompactionAdvisor,
     private readonly autocompact: AutocompactController,
     private readonly fast: FastCompactionController,
+    private readonly stats: SettingsPresenter,
     private readonly store: UserSettingsStore,
     /** Row ids pinned by a PI_CACHE_* env var; toggles are refused. */
     private readonly pinned: ReadonlySet<string> = new Set(),
@@ -68,6 +69,11 @@ export class SettingsSwitchBoard {
       },
       sharedKey: { key: "sharedKey", label: "shared cache key", apply: (on) => this.cacheKey.setEnabled(on) },
       forceWarm: { key: "forceWarm", label: "force warming", apply: (on) => this.warmingPolicy.setEnabled(on) },
+      missDiagnosis: {
+        key: "missDiagnosis",
+        label: "miss diagnosis",
+        apply: (on) => this.stats.setMissDiagnosisEnabled(on),
+      },
       advisory: { key: "advisory", label: "advisory", apply: (on) => this.advisor.setEnabled(on) },
       autoCompact: { key: "autoCompact", label: "auto-compaction", apply: (on) => this.autocompact.setEnabled(on) },
       fastCompaction: {
@@ -96,6 +102,7 @@ export class SettingsSwitchBoard {
       canonicalize: this.canonicalizer.enabled,
       sharedKey: this.cacheKey.enabled,
       forceWarm: this.warmingPolicy.enabled,
+      missDiagnosis: this.stats.missDiagnosisEnabled,
       advisory: this.advisor.enabled,
       autoCompact: this.autocompact.enabled,
       fastCompaction: this.fast.enabled,

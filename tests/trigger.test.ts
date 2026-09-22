@@ -155,6 +155,71 @@ test("idle-trigger: skips a non-idle or already-expired session", () => {
   assertEq(fired, 0, "not idle: no compaction");
 });
 
+test("idle-trigger: a young warm decision defers the fire past its margin", () => {
+  const timers = new FakeTimers();
+  let since: number | undefined = undefined;
+  let fired = 0;
+  const trigger = new IdleTrigger<FakeCtx>({
+    isEnabled: () => true,
+    isIdle: () => true,
+    idleMs: () => 30_000,
+    ttlMs: () => 300_000,
+    msSinceWarmDecision: () => since,
+    warmMarginMs: () => 260_000,
+    compact: async () => {
+      fired++;
+      return true;
+    },
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  trigger.arm({ idle: true });
+  // Remaining TTL (270s) exceeds the margin remainder, so arming is
+  // unchanged; the guard acts at fire time.
+  assertEq(timers.delayOf(timers.ids()[0]), 270_000, "armed at the remaining TTL");
+  // A warm decision lands after arming, 250s into its 260s margin.
+  since = 250_000;
+  timers.fire(timers.ids()[0]);
+  assertEq(fired, 0, "the fire waits for the margin to elapse");
+  assertEq(timers.ids().length, 1, "re-armed for the margin remainder");
+  assertEq(timers.delayOf(timers.ids()[0]), 10_000, "defers the unelapsed margin");
+  since = 260_000;
+  timers.fire(timers.ids()[0]);
+  assertEq(fired, 1, "fires once the margin has elapsed");
+});
+
+test("idle-trigger: an elapsed warm margin does not delay the fire", () => {
+  const timers = new FakeTimers();
+  const trigger = new IdleTrigger<FakeCtx>({
+    isEnabled: () => true,
+    isIdle: () => true,
+    idleMs: () => 30_000,
+    ttlMs: () => 300_000,
+    msSinceWarmDecision: () => 259_000,
+    warmMarginMs: () => 260_000,
+    compact: async () => true,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  trigger.arm({ idle: true });
+  assertEq(timers.delayOf(timers.ids()[0]), 270_000, "normal remaining TTL");
+});
+
+test("idle-trigger: without a warm guard the schedule is unchanged", () => {
+  const timers = new FakeTimers();
+  const trigger = new IdleTrigger<FakeCtx>({
+    isEnabled: () => true,
+    isIdle: () => true,
+    idleMs: () => 30_000,
+    ttlMs: () => 300_000,
+    compact: async () => true,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+  });
+  trigger.arm({ idle: true });
+  assertEq(timers.delayOf(timers.ids()[0]), 270_000, "no guard, no deferral");
+});
+
 test("idle-trigger: disarm clears the timer and disabled never arms", () => {
   const timers = new FakeTimers();
   const trigger = new IdleTrigger<FakeCtx>({
