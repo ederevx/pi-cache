@@ -80,7 +80,6 @@ function unsetEnv(keys: string[]): void {
 
 const PI_CACHE_KEYS = [
   "PI_CACHE_TELEMETRY",
-  "PI_CACHE_SORT_TOOLS",
   "PI_CACHE_DEDUP_TOOLS",
   "PI_CACHE_ANCHOR",
   "PI_CACHE_RETENTION_OVERRIDE",
@@ -111,9 +110,6 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
     PI_CACHE_SETTINGS: join(root, "settings.json"),
     PI_CACHE_FAST_COMPACT: "1",
-    // The lifecycle payload includes duplicates; exercise the whole
-    // tools pipeline with the (opt-in) sort transform enabled.
-    PI_CACHE_SORT_TOOLS: "1",
   });
   try {
     const { default: factory } = await import("../src/index.ts");
@@ -145,17 +141,12 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     const payloadA = {
       model: "model-a",
       messages: [{ role: "system", content: "sys" }],
+      // Duplicates exercise the dedup transform; order is preserved.
       tools: [{ name: "z", description: "z" }, { name: "a", description: "a" }, { name: "z", description: "z" }],
     };
     const [normalizedA] = await pi.emit("before_provider_request", { payload: payloadA }, {});
     assertEq(normalizedA, payloadA, "same object reference returned");
-    assertToolNames((normalizedA as { tools: Array<{ name: string }> }).tools, ["a", "z"]);
-
-    // No session-affinity header injection: the extension is observational
-    // on headers (provider affinity is pi-ai's own behavior).
-    const headers: Record<string, string> = {};
-    await pi.emit("before_provider_headers", { headers }, {});
-    assertEq(headers["x-session-id"], undefined, "no header injection");
+    assertToolNames((normalizedA as { tools: Array<{ name: string }> }).tools, ["z", "a"]);
 
     await pi.emit("before_provider_request", { payload: { ...payloadA, model: "model-b" } }, {});
 
@@ -212,7 +203,7 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     assertEq(noSummary[0], undefined, "no branch summary when not requested");
 
     // 5. /cache-stats reflects global + session ledger, live pressure,
-    // churn, affinity, and compaction counts.
+    // churn, and compaction counts.
     let notified = "";
     const statsCtx = {
       getContextUsage: () => ({ tokens: 60_000, contextWindow: 100_000, percent: 60 }),

@@ -47,7 +47,6 @@ export interface SignalSources {
   lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined;
   msSinceLastTurn(): number;
   headChurn(): number;
-  affinityRotated(): boolean;
   /** Milliseconds since pi last warmed the cache, when observed. */
   msSinceLastWarm?(): number | undefined;
 }
@@ -101,7 +100,6 @@ export class SessionSignals {
       msSinceLastTurn: () => this.sources.msSinceLastTurn(),
       msSinceCacheTouch: () => this.msSinceCacheTouch(),
       headChurn: () => this.sources.headChurn(),
-      affinityRotated: () => this.sources.affinityRotated(),
       cacheTtlMs: () => this.cacheTtlMs(ctx),
       costRates: () => this.costRates(ctx),
     };

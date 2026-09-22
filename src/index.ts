@@ -9,7 +9,6 @@
  * Hooks:
  *   session_start            — adopt the session id for session stats
  *   message_end              — record assistant usage in the ledger
- *   before_provider_headers  — observe session-affinity header stability
  *   before_provider_request — request-prefix pipeline: tools sort/dedup,
  *                             mid-history Anthropic breakpoint anchor,
  *                             per-request long-retention rewrite,
@@ -36,7 +35,7 @@
  *
  * Commands:
  *   /cache-stats             — global + session cache stats, live pressure,
- *                              churn, affinity, compactions
+ *                              churn, compactions
  *   /cache-settings          — two-column switch/option editor
  *
  * Config: PI_CACHE_* environment variables and pi-cache's owned settings
@@ -51,7 +50,6 @@ import { BackupStore } from "./backup-store.ts";
 import { TempSweeper } from "./temp-sweep.ts";
 import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
-import { AffinityObserver } from "./affinity.ts";
 import { BreakpointAnchor } from "./breakpoint-anchor.ts";
 import { RetentionRewriter } from "./retention.ts";
 import { SystemCanonicalizer } from "./canonicalizer.ts";
@@ -68,9 +66,6 @@ import { CompactionGate } from "./compaction-gate.ts";
 import { CompactionRequest } from "./compaction-request.ts";
 import { CompactionTrigger } from "./compaction-trigger.ts";
 import { IdleTrigger } from "./idle-trigger.ts";
-import { ProviderTtlResolver } from "./provider-ttl.ts";
-import { TtlLearner } from "./ttl-learner.ts";
-import { MissClassifier } from "./miss-classifier.ts";
 import { BeforeTurnTrigger } from "./before-turn-trigger.ts";
 import { WarmingObserver } from "./warming-observer.ts";
 import { UserSettingsStore } from "./user-settings.ts";
@@ -102,11 +97,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     opts.ledgerMaxRows,
   );
   const normalizer = new PrefixNormalizer({
-    sortTools: opts.sortTools,
     dedupTools: opts.dedupTools,
   });
   const advisor = new CompactionAdvisor({ enabled: opts.advisory });
-  const affinity = new AffinityObserver();
   const anchor = new BreakpointAnchor();
   const retention = new RetentionRewriter(opts.retentionOverride);
   const canonicalizer = new SystemCanonicalizer(opts.canonicalize);
@@ -159,25 +152,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   const warming = new WarmingObserver();
 
-  // Provider-aware cache TTL: the learner estimates an empirical knee from
-  // the ledger, the resolver ranks it below the PI_CACHE_TTL_SECONDS env
-  // override and the per-provider static profile. The miss classifier
-  // diagnoses full/partial misses against the resolved TTL so advisories
-  // can say which miss type dominates.
-  const ttlLearner = new TtlLearner();
-  const ttlResolver = new ProviderTtlResolver(process.env, {
-    learner: ttlLearner,
-    defaultSeconds: opts.cacheTtlSeconds,
-  });
-  const missClassifier = new MissClassifier({
-    ttlSecondsOf: (model) => ttlResolver.resolveSeconds({ model: { id: model } }),
-  });
-
   const signals = new SessionSignals(
     {
       cacheRetentionLong: opts.cacheRetentionLong,
       fallbackTtlSeconds: opts.cacheTtlSeconds,
-      fallbackTtlSecondsOf: (ctx) => ttlResolver.resolveSeconds(ctx),
       // The per-request retention rewrite wins over the static env mirror
       // so TTL-tier decisions follow the wire.
       retentionLongOf: () => retention.effectiveLong(),
@@ -187,7 +165,6 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       msSinceLastTurn: () => ledger.msSinceLastTurn(),
       msSinceLastWarm: () => warming.msSinceLastWarm(),
       headChurn: () => normalizer.churn(),
-      affinityRotated: () => affinity.rotated(),
     },
   );
 
@@ -237,7 +214,6 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       idleTrigger.disarm();
       warming.reconcile(ctx);
       ledger.useSession(signals.sessionIdOf(ctx));
-      missClassifier.useSession(signals.sessionIdOf(ctx));
       idleTrigger.arm(ctx);
     } catch {
       /* telemetry only */
@@ -249,11 +225,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const message = event.message;
       if (message?.role === "assistant") {
         const model = (ctx as SessionContextView | undefined)?.model?.id ?? "session";
-        const row = ledger.record(message.usage, model, signals.sessionIdOf(ctx));
-        if (row) {
-          ttlLearner.note(row);
-          missClassifier.feed(row);
-        }
+        ledger.record(message.usage, model, signals.sessionIdOf(ctx));
       }
     } catch {
       /* never break the turn */
@@ -295,13 +267,6 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("before_provider_headers", async (event) => {
-    try {
-      affinity.note(event.headers ?? {});
-    } catch {
-      /* observational only */
-    }
-  });
 
   pi.on("turn_end", async (event, ctx) => {
     try {
@@ -380,8 +345,6 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
           preparation.tokensBefore,
         );
         if (tip) pi.appendEntry("pi-cache-advisory", { message: tip });
-        const missTip = missClassifier.summary();
-        if (missTip) pi.appendEntry("pi-cache-advisory", { message: missTip });
       }
       const proposal = fastcompact.propose(preparation);
       if (!proposal) return;
@@ -489,26 +452,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const usage = ctx.getContextUsage?.();
       const liveSignals = signals.for(ctx as SessionContextView | undefined);
       const livePressure = autocompact.currentPressure(usage, ledger.lastUsage(), liveSignals);
-      const missStats = missClassifier.stats();
-      const misses =
-        missStats.fullMisses + missStats.partialMiss > 0
-          ? {
-              coldStart: missStats.coldStart,
-              idleExpiry: missStats.idleExpiry,
-              replicaFlap: missStats.replicaFlap,
-              partialMiss: missStats.partialMiss,
-            }
-          : undefined;
       const text = statsPresenter.render({
         global: ledger.totals(),
         session: ledger.sessionTotals(),
         churn: normalizer.churn(),
-        affinity: affinity.status(),
         compactions: autocompact.stats().compactions,
         fastCompactions: fastcompact.stats().compactions,
         fastEnabled: fastcompact.enabled,
         branchEnabled: fastcompact.branchEnabled,
-        misses,
         pressure: livePressure
           ? { pressure: livePressure.pressure, probability: livePressure.probability }
           : undefined,

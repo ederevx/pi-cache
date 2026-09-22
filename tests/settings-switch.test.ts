@@ -43,7 +43,7 @@ let seq = 0;
 function board(pinned: string[] = []) {
   const file = join(scratchDir(), `settings-switch-${seq++}.json`);
   const ledger = new CacheLedger(new MemorySink(), true, 100);
-  const normalizer = new PrefixNormalizer({ sortTools: true, dedupTools: true });
+  const normalizer = new PrefixNormalizer({ dedupTools: true });
   const anchor = new BreakpointAnchor();
   const retention = new RetentionRewriter(false);
   const canonicalizer = new SystemCanonicalizer(true);
@@ -94,14 +94,10 @@ test("settings-switch: toggling telemetry flips the ledger and persists", () => 
   assertEq(stored(file).telemetry, false);
 });
 
-test("settings-switch: sort and dedup flip the normalizer independently", () => {
+test("settings-switch: dedup flips the normalizer and persists", () => {
   const { board: b, normalizer, file } = board();
-  b.set("sortTools", "off");
-  assertEq(normalizer.sortTools, false);
-  assertEq(normalizer.dedupTools, true, "dedup untouched");
   b.set("dedupTools", "off");
   assertEq(normalizer.dedupTools, false);
-  assertEq(stored(file).sortTools, false);
   assertEq(stored(file).dedupTools, false);
 });
 
@@ -168,12 +164,12 @@ test("settings-switch: snapshot reflects every current value", () => {
   const before = b.snapshot();
   assertEq(before.telemetry, true);
   assertEq(before.fastBranchSummary, true);
-  b.set("sortTools", "off");
+  b.set("dedupTools", "off");
   b.set("fastCompaction", "off");
   const after = b.snapshot();
-  assertEq(after.sortTools, false);
+  assertEq(after.dedupTools, false);
   assertEq(after.fastCompaction, false);
-  assertEq(after.dedupTools, true, "untouched value still true");
+  assertEq(after.telemetry, true, "untouched value still true");
 });
 
 test("settings-switch: an unknown id changes nothing", () => {

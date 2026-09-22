@@ -21,15 +21,8 @@ compaction off with the `/cache-settings` switch or
 `PI_CACHE_FAST_COMPACT=off`; branch summaries have their own
 `PI_CACHE_FAST_BRANCH_SUMMARY` switch, and pi's own normal summarizer runs
 for whichever is off. The cache TTL that drives the idle trigger and the
-compaction-pressure ramp is provider-aware: an explicit
-`PI_CACHE_TTL_SECONDS` still overrides everything, but otherwise a
-per-provider static profile (anthropic 300 s, openai 1800 s, moonshot 300 s,
-deepseek 14400 s, z-ai/GLM 120 s, google 300 s; sources documented in
-`src/provider-ttl.ts`) is used, and a `TtlLearner` tightens it to the
-empirical TTL knee measured from the ledger rows (never above the static
-value). Full and partial misses are classified (`src/miss-classifier.ts`)
-as cold-start, idle-expiry, replica-flap, or partial so `/cache-stats` and
-the compaction advisory can say which miss type dominates. Installed in the
+compaction-pressure ramp falls back to `PI_CACHE_TTL_SECONDS` (default
+300 s) when the model declares no `promptCache` tier. Installed in the
 pi runtime; paired A/B validation is the
 remaining step.
 
@@ -57,7 +50,7 @@ Then run `/reload` in pi (or restart). No config file needed. The cache-favoring
 default (tool dedup, mid-history breakpoint anchor, system-listing
 canonicalization, compaction pressure, fast compaction, advisories,
 telemetry); the per-request long-retention override, shared OpenAI
-cache key, forced warming, and tools sorting are opt-in. Disable any
+cache key, and forced warming are opt-in. Disable any
 feature with its `PI_CACHE_*` env var (see `src/constants.ts`) or
 with the `/cache-settings` switch (which persists to pi-cache's owned
 `~/.pi/agent/.pi-cache/settings.json`; a set env var pins its row). Auto-compaction fires at three
@@ -76,8 +69,7 @@ pre-trim backup is captured before any shrinking rewrite
 (`PI_CACHE_LEDGER_BACKUPS`/`_TTL_DAYS`/`_MAX_MB`), session stats are
 rebuilt from it on session start so they survive reloads, and stale
 atomic-write temp files are swept at load. Live views: `/cache-stats`
-(global and session scopes, with live compaction pressure and miss-type
-counts) and
+(global and session scopes, with live compaction pressure) and
 `/cache-settings`.
 
 ## Uninstall
@@ -99,8 +91,7 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
    system block into stable (provider prompt + global rules) and dynamic
    (cwd, date, run metadata) regions, mirroring opencode's measured
    0% -> 97.6% cross-repo hit fix.
-3. **Tool-schema hygiene** — deterministic tool ordering (opt-in), dedup,
-   and removal
+3. **Tool-schema hygiene** — dedup and removal
    of volatile fields (cwd, absolute paths) from tool definitions.
 4. **Cache-aware compaction** — the trigger is an expected-cost
    probabilistic pressure (coldness and prefix amortization drive it,
@@ -135,11 +126,10 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
 
 - `src/` — extension source (house layout: `index.ts` wiring + per-
   responsibility modules: `ledger.ts`, `sink.ts`, `normalizer.ts`,
-  `compaction.ts`, `affinity.ts`, `markers.ts`, `breakpoint-anchor.ts`,
+  `compaction.ts`, `markers.ts`, `breakpoint-anchor.ts`,
   `retention.ts`, `canonicalizer.ts`, `cache-key.ts`, `warming-policy.ts`,
   `autocompact.ts`,
   `pressure.ts`, `economics.ts`, `context-degradation.ts`,
-  `provider-ttl.ts`, `ttl-learner.ts`, `miss-classifier.ts`,
   `fastcompact.ts`, `fast-switch.ts`, `feature-switch.ts`,
   `user-settings.ts`, `settings.ts`, `settings-view.ts`, `stats.ts`,
   `temp-sweep.ts`, `constants.ts`)

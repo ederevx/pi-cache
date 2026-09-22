@@ -194,13 +194,13 @@ decide "warm" the cache is valuable and compaction pressure should be
 suppressed. Evidence:
 `docs/research/internet-prompt-caching-2026-09-18.md#cache-coldness-2026-09-20`.
 
-### 6. Affinity guardrails (always on, observational)
+### 6. Removed: affinity observation
 
-- Detect per-turn `session_id` / prefix-identity churn and report it
-  (`/cache-stats`), keyed to OpenRouter's sticky-routing identity hash.
-- Optionally pin TTL policy advice: `PI_CACHE_RETENTION=long` trades 2x
-  writes for fewer 1h expiries; recommend based on measured gap-vs-write
-  patterns.
+Header-affinity observation and the provider-TTL learner/resolver were
+removed: pi 0.87 providers key affinity on content (prompt_cache_key,
+or the sticky-routing headers pi-ai already emits), so the observed
+headers were inert, and the learned TTL knee never beat the documented
+provider profile.
 
 ## Config surface
 
@@ -208,8 +208,8 @@ House-consistent, not a config JSON: tunables live in
 `src/constants.ts` and are overridable with `PI_CACHE_*` environment
 variables (the env-var idiom common to pi extensions):
 
-- `PI_CACHE_TELEMETRY` (default true), `PI_CACHE_SORT_TOOLS` (opt-in,
-  default off), `PI_CACHE_DEDUP_TOOLS` (default true), `PI_CACHE_ANCHOR`
+- `PI_CACHE_TELEMETRY` (default true), `PI_CACHE_DEDUP_TOOLS`
+  (default true), `PI_CACHE_ANCHOR`
   (default true), `PI_CACHE_RETENTION_OVERRIDE` (default off),
   `PI_CACHE_CANONICALIZE` (default true), `PI_CACHE_SHARED_KEY`
   (default off), `PI_CACHE_FORCE_WARM` (default off),
@@ -218,6 +218,9 @@ variables (the env-var idiom common to pi extensions):
   content (prompt_cache_key / sticky-routing headers pi-ai already
   sends), so header injection was inert; OpenAI bucket sharing is the
   shared-cache-key transform's job now
+- Removed: `PI_CACHE_SORT_TOOLS` — pi builds the tools array in a
+  fixed per-session order, so sorting only re-canonicalized away from
+  pi's own order; tool dedup stays
 - `PI_CACHE_LEDGER` (default `~/.pi/agent/.pi-cache/ledger.jsonl` —
   hidden dot-dir, house-consistent convention), `PI_CACHE_LEDGER_MAX_ROWS`
   (default 20000; <= 0 keeps every row)

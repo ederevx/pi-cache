@@ -2,8 +2,7 @@
  * pi-cache — /cache-stats presenter tests.
  * The two rendered lines must keep global and session scopes distinct, use
  * the no-usage wording for empty scopes, and put the live session signals
- * (compaction pressure, churn, affinity, compaction counts) on the session
- * line only.
+ * (compaction pressure, churn, compaction counts) on the session line only.
  */
 
 import { test, assert } from "./harness.ts";
@@ -16,7 +15,6 @@ test("stats: renders distinct global and session usage lines", () => {
     global: { n: 12, input: 1000, cacheRead: 3000, cacheWrite: 500 },
     session: { n: 2, input: 100, cacheRead: 900, cacheWrite: 50 },
     churn: 0,
-    affinity: "affinity stable",
     compactions: 1,
     fastCompactions: 1,
     fastEnabled: true,
@@ -34,7 +32,6 @@ test("stats: empty scopes render the no-usage wording", () => {
     global: { n: 0, input: 0, cacheRead: 0, cacheWrite: 0 },
     session: { n: 0, input: 0, cacheRead: 0, cacheWrite: 0 },
     churn: 0,
-    affinity: "affinity n/a",
     compactions: 0,
     fastCompactions: 0,
     fastEnabled: false,
@@ -49,7 +46,6 @@ test("stats: session line carries pressure, churn and compaction counts", () => 
     global: { n: 1, input: 100, cacheRead: 900, cacheWrite: 0 },
     session: { n: 1, input: 100, cacheRead: 900, cacheWrite: 0 },
     churn: 3,
-    affinity: "affinity stable",
     compactions: 2,
     fastCompactions: 1,
     fastEnabled: true,
@@ -65,7 +61,6 @@ test("stats: observed miss types render on the session line only", () => {
     global: { n: 0, input: 0, cacheRead: 0, cacheWrite: 0 },
     session: { n: 3, input: 300, cacheRead: 0, cacheWrite: 300 },
     churn: 0,
-    affinity: "affinity stable",
     compactions: 0,
     fastCompactions: 0,
     fastEnabled: true,
@@ -80,7 +75,6 @@ test("stats: observed miss types render on the session line only", () => {
     global: { n: 0, input: 0, cacheRead: 0, cacheWrite: 0 },
     session: { n: 1, input: 10, cacheRead: 90, cacheWrite: 0 },
     churn: 0,
-    affinity: "affinity stable",
     compactions: 0,
     fastCompactions: 0,
     fastEnabled: true,

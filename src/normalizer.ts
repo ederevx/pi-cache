@@ -3,15 +3,14 @@
  *
  * One responsibility: make the provider-serialized prefix as byte-stable
  * as economics permit, and report churn. Only the tools array is ever
- * reordered or deduplicated; conversation messages are never touched
- * (role/tool-result association must stay intact). All transforms are
- * opt-in; without them the class only tracks head-churn.
+ * deduplicated; conversation messages are never touched (role/tool-result
+ * association must stay intact). All transforms are opt-in; without them
+ * the class only tracks head-churn.
  */
 
 import { createHash } from "node:crypto";
 
 export interface PrefixNormalizerOptions {
-  sortTools: boolean;
   dedupTools: boolean;
 }
 
@@ -26,18 +25,9 @@ export class PrefixNormalizer {
 
   constructor(private readonly opts: PrefixNormalizerOptions) {}
 
-  /** The live deterministic-sort switch (toggled from /cache-settings). */
-  get sortTools(): boolean {
-    return this.opts.sortTools;
-  }
-
   /** The live duplicate-schema drop switch (toggled from /cache-settings). */
   get dedupTools(): boolean {
     return this.opts.dedupTools;
-  }
-
-  setSortTools(enabled: boolean): void {
-    this.opts.sortTools = enabled;
   }
 
   setDedupTools(enabled: boolean): void {
@@ -60,7 +50,7 @@ export class PrefixNormalizer {
     return payload;
   }
 
-  /** Sort/dedup tools in place; reports whether anything changed. */
+  /** Dedup tools in place; reports whether anything changed. */
   private transformTools(body: Record<string, unknown>): boolean {
     const tools = body.tools as ToolLike[];
     const markerIndex = tools.findIndex((t) => t.cache_control !== undefined);
@@ -82,17 +72,9 @@ export class PrefixNormalizer {
       }
     }
 
-    if (this.opts.sortTools) {
-      const sorted = this.sortByName(result);
-      if (sorted !== result) {
-        result = sorted;
-        changed = true;
-      }
-    }
-
     if (changed) {
       // Re-pin a trailing Anthropic cache_control marker to the new last
-      // tool (sort/dedup move it otherwise, breaking the breakpoint).
+      // tool (dedup moves it otherwise, breaking the breakpoint).
       if (hasMarker && marker !== undefined) result = this.repinMarker(result, marker);
       body.tools = result;
     }
@@ -110,13 +92,6 @@ export class PrefixNormalizer {
       deduped.push(tool);
     }
     return deduped.length === tools.length ? tools : deduped;
-  }
-
-  /** Deterministic name order; returns the same array when already sorted. */
-  private sortByName(tools: ToolLike[]): ToolLike[] {
-    const byName = [...tools];
-    byName.sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
-    return JSON.stringify(byName) === JSON.stringify(tools) ? tools : byName;
   }
 
   /** Move a trailing cache_control marker onto the new last tool. */

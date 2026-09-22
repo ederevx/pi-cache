@@ -63,10 +63,11 @@ investments on idle gaps.
 
 ## Consequence for existing pi-cache code
 
-`PI_CACHE_SORT_TOOLS=1` currently sorts `payload.tools`, which **moves the
-Anthropic/OpenRouter-anthropic `cache_control` marker** that pi-ai pins to
-the **last** tool (`anthropic-messages.js:1133-1135`,
-`openai-completions.js:837,866`). Sort must re-pin the marker to the new
-last tool (implemented in `src/normalizer.ts`), and the immediate-vs-deferred
-split must be preserved. Everything else in the list above lands as opt-in
-env-gated transforms on the same hook.
+Sorting `payload.tools` **moves the Anthropic/OpenRouter-anthropic
+`cache_control` marker** that pi-ai pins to the **last** tool
+(`anthropic-messages.js:1133-1135`, `openai-completions.js:837,866`), and
+pi already builds the tools array in a fixed per-session order, so the
+sort transform was removed (2026-09-22): the marker never moves and
+pi's own order stands. The immediate-vs-deferred split must still be
+preserved by the remaining transforms. Everything else in the list above
+lands as opt-in env-gated transforms on the same hook.
