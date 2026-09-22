@@ -38,12 +38,37 @@ export class UserSettingsStore {
   load(): UserSettings {
     try {
       const parsed = JSON.parse(readFileSync(this.file, "utf8")) as unknown;
-      if (parsed !== null && typeof parsed === "object") return parsed as UserSettings;
+      if (parsed !== null && typeof parsed === "object") {
+        return UserSettingsStore.sanitize(parsed as Record<string, unknown>);
+      }
     } catch {
       /* absent or corrupt: fall back to defaults */
     }
     return {};
   }
+
+  /** Keep only known keys whose value is a real boolean. Every owned
+   *  option is a switch, so a truthy non-boolean in a hand-edited or
+   *  corrupt file (e.g. `"telemetry": "no"`) must not flip it on: the
+   *  field falls back to its default, exactly like an absent key. */
+  private static sanitize(raw: Record<string, unknown>): UserSettings {
+    const settings: UserSettings = {};
+    for (const key of UserSettingsStore.BOOLEAN_KEYS) {
+      if (typeof raw[key] === "boolean") settings[key] = raw[key] as boolean;
+    }
+    return settings;
+  }
+
+  private static readonly BOOLEAN_KEYS: Array<keyof UserSettings> = [
+    "telemetry",
+    "sortTools",
+    "dedupTools",
+    "pinSession",
+    "advisory",
+    "autoCompact",
+    "fastCompaction",
+    "fastBranchSummary",
+  ];
 
   /** Merge `patch` into the stored document and persist atomically. */
   save(patch: UserSettings): UserSettings {
