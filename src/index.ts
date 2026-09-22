@@ -10,12 +10,16 @@
  *   session_start            — adopt the session id for session stats
  *   message_end              — record assistant usage in the ledger
  *   before_provider_headers  — observe session-affinity header stability
- *   before_provider_request — tools sort/dedup + head-churn watch (+
- *                             provider session-id pin for stateless runs)
+ *   before_provider_request — request-prefix pipeline: tools sort/dedup,
+ *                             mid-history Anthropic breakpoint anchor,
+ *                             per-request long-retention rewrite,
+ *                             system-listing canonicalization, and
+ *                             shared OpenAI prompt_cache_key derivation
  *   turn_end                 — reconcile landed warm refreshes + turn
  *                              bookkeeping for auto-compaction
- *   cache_warming_decision   — observe pi's warm intent and reconcile the
- *                              persisted cache_warm entries
+ *   cache_warming_decision   — observe pi's warm intent, reconcile the
+ *                              persisted cache_warm entries, and apply the
+ *                              forced-warm policy when enabled
  *   agent_settled            — cache-aware auto-compaction: a compaction
  *                              pressure draw blending context degradation
  *                              with expected-cost cache economics
@@ -48,7 +52,11 @@ import { TempSweeper } from "./temp-sweep.ts";
 import { PrefixNormalizer } from "./normalizer.ts";
 import { CompactionAdvisor } from "./compaction.ts";
 import { AffinityObserver } from "./affinity.ts";
-import { SessionPinner } from "./session-pin.ts";
+import { BreakpointAnchor } from "./breakpoint-anchor.ts";
+import { RetentionRewriter } from "./retention.ts";
+import { SystemCanonicalizer } from "./canonicalizer.ts";
+import { CacheKeySharer } from "./cache-key.ts";
+import { WarmingPolicy } from "./warming-policy.ts";
 import { AutocompactController } from "./autocompact.ts";
 import { CompactionPressure } from "./pressure.ts";
 import { CacheEconomics } from "./economics.ts";
@@ -72,7 +80,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { dirname } from "node:path";
 
 export default function piCacheExtension(pi: ExtensionAPI): void {
-  const opts = new OptionsLoader().load();
+  const loader = new OptionsLoader();
+  const opts = loader.load();
   // Sweep stale atomic-write temp files before the ledger/settings are read.
   // The settings file may live outside the ledger dir (PI_CACHE_SETTINGS),
   // so both directories are swept; sweeping one dir twice is a harmless
@@ -98,7 +107,12 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
   const advisor = new CompactionAdvisor({ enabled: opts.advisory });
   const affinity = new AffinityObserver();
-  const sessionPinner = new SessionPinner(opts.pinSession);
+  const anchor = new BreakpointAnchor();
+  const retention = new RetentionRewriter(opts.retentionOverride);
+  const canonicalizer = new SystemCanonicalizer(opts.canonicalize);
+  const cacheKey = new CacheKeySharer(opts.sharedKey);
+  const warmingPolicy = new WarmingPolicy(opts.forceWarm);
+  const envPinned = new Set(loader.envPinnedIds());
   const economics = new CacheEconomics({
     continuationProbability: opts.pressureContinuation,
     maxRequests: opts.pressureMaxRequests,
@@ -131,11 +145,16 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const switchBoard = new SettingsSwitchBoard(
     ledger,
     normalizer,
-    sessionPinner,
+    anchor,
+    retention,
+    canonicalizer,
+    cacheKey,
+    warmingPolicy,
     advisor,
     autocompact,
     fastcompact,
     settingsStore,
+    envPinned,
   );
 
   const warming = new WarmingObserver();
@@ -159,6 +178,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       cacheRetentionLong: opts.cacheRetentionLong,
       fallbackTtlSeconds: opts.cacheTtlSeconds,
       fallbackTtlSecondsOf: (ctx) => ttlResolver.resolveSeconds(ctx),
+      // The per-request retention rewrite wins over the static env mirror
+      // so TTL-tier decisions follow the wire.
+      retentionLongOf: () => retention.effectiveLong(),
     },
     {
       lastUsage: () => ledger.lastUsage(),
@@ -239,9 +261,35 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("before_provider_request", async (event) => {
+    // One coordinated prefix pipeline, each stage fail-open and in order:
+    // tool transforms (may re-pin pi's trailing tool marker), then the
+    // message-level anchor (spends the fourth breakpoint), then the
+    // retention rewrite (upgrades every marker consistently), then
+    // system-text canonicalization, then shared-key derivation. Any stage
+    // that throws leaves the payload as earlier stages produced it.
     try {
-      sessionPinner.propose(event.payload);
-      return normalizer.normalize(event.payload);
+      const payload = normalizer.normalize(event.payload);
+      try {
+        anchor.apply(payload);
+      } catch {
+        /* anchor is advisory to the prefix */
+      }
+      try {
+        retention.apply(payload);
+      } catch {
+        /* retention is advisory to the prefix */
+      }
+      try {
+        canonicalizer.apply(payload);
+      } catch {
+        /* canonicalization is advisory to the prefix */
+      }
+      try {
+        cacheKey.apply(payload);
+      } catch {
+        /* cache-key sharing is advisory to the prefix */
+      }
+      return payload;
     } catch {
       return event.payload;
     }
@@ -249,7 +297,6 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.on("before_provider_headers", async (event) => {
     try {
-      sessionPinner.apply(event.headers ?? {});
       affinity.note(event.headers ?? {});
     } catch {
       /* observational only */
@@ -284,13 +331,16 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("cache_warming_decision", async (event, ctx) => {
-    // Observational: a warm refresh resets the provider cache TTL, so the
-    // idle trigger must not compact a cache pi just kept alive. The decision
-    // is only the intent; reconcile the persisted entries first so a refresh
-    // that already landed wins, then record the new intent.
+    // A warm refresh resets the provider cache TTL, so the idle trigger
+    // must not compact a cache pi just kept alive. The decision is only
+    // the intent; reconcile the persisted entries first so a refresh that
+    // already landed wins, record pi's intent, then apply the forced-warm
+    // policy when enabled (pi honors the last returned action).
     try {
       warming.reconcile(ctx);
       warming.noteDecision(event?.action);
+      const action = warmingPolicy.decide(event);
+      if (action) return { action };
     } catch {
       /* observational only */
     }
@@ -425,6 +475,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
             const message = switchBoard.set(id, value);
             if (message) ctx.ui?.notify?.(message, "info");
           },
+          envPinned,
         );
       } catch {
         console.error("pi-cache: could not render settings");

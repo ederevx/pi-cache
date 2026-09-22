@@ -208,8 +208,16 @@ House-consistent, not a config JSON: tunables live in
 `src/constants.ts` and are overridable with `PI_CACHE_*` environment
 variables (the env-var idiom common to pi extensions):
 
-- `PI_CACHE_TELEMETRY` (default true), `PI_CACHE_SORT_TOOLS`,
-  `PI_CACHE_DEDUP_TOOLS`, `PI_CACHE_ADVISORY` (default true)
+- `PI_CACHE_TELEMETRY` (default true), `PI_CACHE_SORT_TOOLS` (opt-in,
+  default off), `PI_CACHE_DEDUP_TOOLS` (default true), `PI_CACHE_ANCHOR`
+  (default true), `PI_CACHE_RETENTION_OVERRIDE` (default off),
+  `PI_CACHE_CANONICALIZE` (default true), `PI_CACHE_SHARED_KEY`
+  (default off), `PI_CACHE_FORCE_WARM` (default off),
+  `PI_CACHE_ADVISORY` (default true)
+- Removed: `PI_CACHE_PIN_SESSION` — pi 0.87 providers key affinity on
+  content (prompt_cache_key / sticky-routing headers pi-ai already
+  sends), so header injection was inert; OpenAI bucket sharing is the
+  shared-cache-key transform's job now
 - `PI_CACHE_LEDGER` (default `~/.pi/agent/.pi-cache/ledger.jsonl` —
   hidden dot-dir, house-consistent convention), `PI_CACHE_LEDGER_MAX_ROWS`
   (default 20000; <= 0 keeps every row)
