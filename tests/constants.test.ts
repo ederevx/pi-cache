@@ -42,7 +42,6 @@ function settingsPath(name: string): string {
 
 const CLEAN = {
   PI_CACHE_TELEMETRY: undefined,
-  PI_CACHE_SORT_TOOLS: undefined,
   PI_CACHE_DEDUP_TOOLS: undefined,
   PI_CACHE_ANCHOR: undefined,
   PI_CACHE_RETENTION_OVERRIDE: undefined,
@@ -74,7 +73,6 @@ test("constants: default options", () => {
   withEnv({ ...CLEAN, PI_CACHE_SETTINGS: settingsPath("default") }, () => {
     const opts = loadOptions();
     assertEq(opts.telemetry, true);
-    assertEq(opts.sortTools, false, "sorting demoted to opt-in");
     assertEq(opts.dedupTools, true);
     assertEq(opts.anchor, true);
     assertEq(opts.retentionOverride, false);
@@ -119,7 +117,6 @@ test("constants: boolean env parsing", () => {
   withEnv(
     {
       PI_CACHE_TELEMETRY: "1",
-      PI_CACHE_SORT_TOOLS: "true",
       PI_CACHE_DEDUP_TOOLS: "yes",
       PI_CACHE_ANCHOR: "0",
       PI_CACHE_RETENTION_OVERRIDE: "1",
@@ -135,7 +132,6 @@ test("constants: boolean env parsing", () => {
     () => {
       const opts = loadOptions();
       assertEq(opts.telemetry, true);
-      assertEq(opts.sortTools, true);
       assertEq(opts.dedupTools, true);
       assertEq(opts.anchor, false);
       assertEq(opts.retentionOverride, true);
@@ -176,7 +172,6 @@ test("constants: owned settings drive every option", () => {
     file,
     JSON.stringify({
       telemetry: false,
-      sortTools: false,
       dedupTools: false,
       anchor: false,
       retentionOverride: false,
@@ -190,7 +185,6 @@ test("constants: owned settings drive every option", () => {
   withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file }, () => {
     const opts = loadOptions();
     assertEq(opts.telemetry, false);
-    assertEq(opts.sortTools, false);
     assertEq(opts.dedupTools, false);
     assertEq(opts.anchor, false);
     assertEq(opts.retentionOverride, false);

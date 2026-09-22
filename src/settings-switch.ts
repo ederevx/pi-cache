@@ -54,7 +54,6 @@ export class SettingsSwitchBoard {
   ) {
     this.routes = {
       telemetry: { key: "telemetry", label: "telemetry", apply: (on) => this.ledger.setEnabled(on) },
-      sortTools: { key: "sortTools", label: "sort tools", apply: (on) => this.normalizer.setSortTools(on) },
       dedupTools: { key: "dedupTools", label: "dedup tools", apply: (on) => this.normalizer.setDedupTools(on) },
       anchor: { key: "anchor", label: "breakpoint anchor", apply: (on) => this.anchor.setEnabled(on) },
       retentionOverride: {
@@ -91,7 +90,6 @@ export class SettingsSwitchBoard {
   snapshot(): LiveSettings {
     return {
       telemetry: this.ledger.enabled,
-      sortTools: this.normalizer.sortTools,
       dedupTools: this.normalizer.dedupTools,
       anchor: this.anchor.enabled,
       retentionOverride: this.retention.enabled,

@@ -16,8 +16,6 @@ import { dirname } from "node:path";
 export interface UserSettings {
   /** Record per-request cache usage to the ledger. */
   telemetry?: boolean;
-  /** Deterministic tool order for byte-stable prefixes (opt-in). */
-  sortTools?: boolean;
   /** Drop exact-duplicate tool schemas from the payload. */
   dedupTools?: boolean;
   /** Pin a fourth Anthropic breakpoint on stable mid-history. */
@@ -69,7 +67,6 @@ export class UserSettingsStore {
 
   private static readonly BOOLEAN_KEYS: Array<keyof UserSettings> = [
     "telemetry",
-    "sortTools",
     "dedupTools",
     "anchor",
     "retentionOverride",

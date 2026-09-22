@@ -26,7 +26,6 @@ export interface SettingRow {
  */
 export interface LiveSettings {
   telemetry: boolean;
-  sortTools: boolean;
   dedupTools: boolean;
   anchor: boolean;
   retentionOverride: boolean;
@@ -61,7 +60,6 @@ export class SettingsPresenter {
     });
     return [
       row("telemetry", "Telemetry", "Record per-request cache usage to the ledger", on(live.telemetry)),
-      row("sortTools", "Sort tools", "Deterministic tool order for byte-stable prefixes", on(live.sortTools)),
       row("dedupTools", "Dedup tools", "Drop exact-duplicate tool schemas from the payload", on(live.dedupTools)),
       row("anchor", "Breakpoint anchor", "Pin a fourth Anthropic breakpoint on stable mid-history", on(live.anchor)),
       row("retentionOverride", "Long retention override", "Rewrite cache markers to the 1h/24h tier per request", on(live.retentionOverride)),

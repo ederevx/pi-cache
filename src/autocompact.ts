@@ -13,7 +13,7 @@
  * injected `CompactionPressure`, which blends context degradation with
  * the expected cost of continuing versus rewriting the prefix. Coldness is
  * computed here from the last request's cached share, the prefix-head churn
- * / affinity-rotation signals, and a TTL-based idle-time ramp; it feeds the
+ * signal, and a TTL-based idle-time ramp; it feeds the
  * economics read rate rather than a raw utilization ramp (the pressure
  * model owns the probability math and the draw).
  *
@@ -38,8 +38,6 @@ export interface AutocompactSignal {
   msSinceCacheTouch?(): number;
   /** Number of times the prefix head changed this session (normalizer.churn). */
   headChurn(): number;
-  /** Whether the provider session-affinity header has rotated (affinity.rotated). */
-  affinityRotated(): boolean;
   /** Provider cache lifetime in ms when known (model.promptCache tier). */
   cacheTtlMs?(): number | undefined;
   /** Model cache cost rates; absent means economics is unavailable. */
@@ -187,9 +185,9 @@ export class AutocompactController {
     };
   }
 
-  /** Whether the prefix head churned or the affinity header rotated. */
+  /** Whether the prefix head churned. */
   private churned(signals: AutocompactSignal): boolean {
-    return signals.headChurn() > 0 || signals.affinityRotated();
+    return signals.headChurn() > 0;
   }
 
   /**

@@ -107,7 +107,7 @@ bash "$repo/scripts/install.sh" >/dev/null 2>&1 || fail "reinstall failed"
 printf 'tampered\n' >> "$dest/index.ts"
 bash "$repo/scripts/uninstall.sh" >/dev/null 2>&1 || fail "uninstall exited nonzero"
 [[ -f "$dest/index.ts" ]] || fail "hash-mismatched file should survive"
-[[ ! -e "$dest/affinity.ts" ]] || fail "untampered file should be removed"
+[[ ! -e "$dest/canonicalizer.ts" ]] || fail "untampered file should be removed"
 echo "  ok: mismatched file preserved, others removed"
 
 echo "scripts test: ok"

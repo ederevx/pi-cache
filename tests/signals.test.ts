@@ -13,7 +13,6 @@ function sources(overrides: Partial<SignalSources> = {}): SignalSources {
     lastUsage: () => ({ input: 10, cacheRead: 90, cacheWrite: 0 }),
     msSinceLastTurn: () => 1234,
     headChurn: () => 2,
-    affinityRotated: () => true,
     ...overrides,
   };
 }
@@ -61,7 +60,6 @@ test("signals: the signal set reads the injected collaborator seam", () => {
   assertEq(signal.lastUsage()?.cacheRead, 90);
   assertEq(signal.msSinceLastTurn(), 1234);
   assertEq(signal.headChurn(), 2);
-  assertEq(signal.affinityRotated(), true);
   assertEq(signal.cacheTtlMs?.(), 10_000);
   assert(signal.costRates?.() === undefined, "no cost declared");
 });
