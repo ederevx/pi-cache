@@ -20,7 +20,17 @@ override that replaces pi's LLM summarizer entirely, and answers a wanted
 compaction off with the `/cache-settings` switch or
 `PI_CACHE_FAST_COMPACT=off`; branch summaries have their own
 `PI_CACHE_FAST_BRANCH_SUMMARY` switch, and pi's own normal summarizer runs
-for whichever is off. Installed in the pi runtime; paired A/B validation is the
+for whichever is off. The cache TTL that drives the idle trigger and the
+compaction-pressure ramp is provider-aware: an explicit
+`PI_CACHE_TTL_SECONDS` still overrides everything, but otherwise a
+per-provider static profile (anthropic 300 s, openai 1800 s, moonshot 300 s,
+deepseek 14400 s, z-ai/GLM 120 s, google 300 s; sources documented in
+`src/provider-ttl.ts`) is used, and a `TtlLearner` tightens it to the
+empirical TTL knee measured from the ledger rows (never above the static
+value). Full and partial misses are classified (`src/miss-classifier.ts`)
+as cold-start, idle-expiry, replica-flap, or partial so `/cache-stats` and
+the compaction advisory can say which miss type dominates. Installed in the
+pi runtime; paired A/B validation is the
 remaining step.
 
 ## Installation
@@ -64,7 +74,8 @@ pre-trim backup is captured before any shrinking rewrite
 (`PI_CACHE_LEDGER_BACKUPS`/`_TTL_DAYS`/`_MAX_MB`), session stats are
 rebuilt from it on session start so they survive reloads, and stale
 atomic-write temp files are swept at load. Live views: `/cache-stats`
-(global and session scopes, with live compaction pressure) and
+(global and session scopes, with live compaction pressure and miss-type
+counts) and
 `/cache-settings`.
 
 ## Uninstall
@@ -118,6 +129,7 @@ scripts/uninstall.sh --purge` also removes them plus any stale temp files.
   responsibility modules: `ledger.ts`, `sink.ts`, `normalizer.ts`,
   `compaction.ts`, `affinity.ts`, `session-pin.ts`, `autocompact.ts`,
   `pressure.ts`, `economics.ts`, `context-degradation.ts`,
+  `provider-ttl.ts`, `ttl-learner.ts`, `miss-classifier.ts`,
   `fastcompact.ts`, `fast-switch.ts`, `feature-switch.ts`,
   `user-settings.ts`, `settings.ts`, `settings-view.ts`, `stats.ts`,
   `temp-sweep.ts`, `constants.ts`)
