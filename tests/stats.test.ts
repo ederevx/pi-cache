@@ -60,3 +60,32 @@ test("stats: session line carries pressure, churn and compaction counts", () => 
   assert(text.includes("head churn 3"), text);
   assert(text.includes("compactions 2 (fast 1, compaction on, branch on)"), text);
 });
+test("stats: observed miss types render on the session line only", () => {
+  const text = presenter.render({
+    global: { n: 0, input: 0, cacheRead: 0, cacheWrite: 0 },
+    session: { n: 3, input: 300, cacheRead: 0, cacheWrite: 300 },
+    churn: 0,
+    affinity: "affinity stable",
+    compactions: 0,
+    fastCompactions: 0,
+    fastEnabled: true,
+    branchEnabled: true,
+    misses: { coldStart: 1, idleExpiry: 2, replicaFlap: 5, partialMiss: 1 },
+  });
+  assert(text.includes("misses cold-start 1, idle-expiry 2, replica-flap 5, partial 1"), text);
+  const [globalLine] = text.split("\n");
+  assert(!globalLine.includes("misses"), "miss types stay on the session line");
+  // Zero counts render nothing.
+  const clean = presenter.render({
+    global: { n: 0, input: 0, cacheRead: 0, cacheWrite: 0 },
+    session: { n: 1, input: 10, cacheRead: 90, cacheWrite: 0 },
+    churn: 0,
+    affinity: "affinity stable",
+    compactions: 0,
+    fastCompactions: 0,
+    fastEnabled: true,
+    branchEnabled: true,
+    misses: { coldStart: 0, idleExpiry: 0, replicaFlap: 0, partialMiss: 0 },
+  });
+  assert(!clean.includes("misses"), clean);
+});
