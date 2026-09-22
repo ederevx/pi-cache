@@ -60,6 +60,9 @@ import { CompactionGate } from "./compaction-gate.ts";
 import { CompactionRequest } from "./compaction-request.ts";
 import { CompactionTrigger } from "./compaction-trigger.ts";
 import { IdleTrigger } from "./idle-trigger.ts";
+import { ProviderTtlResolver } from "./provider-ttl.ts";
+import { TtlLearner } from "./ttl-learner.ts";
+import { MissClassifier } from "./miss-classifier.ts";
 import { BeforeTurnTrigger } from "./before-turn-trigger.ts";
 import { WarmingObserver } from "./warming-observer.ts";
 import { UserSettingsStore } from "./user-settings.ts";
@@ -137,10 +140,25 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   const warming = new WarmingObserver();
 
+  // Provider-aware cache TTL: the learner estimates an empirical knee from
+  // the ledger, the resolver ranks it below the PI_CACHE_TTL_SECONDS env
+  // override and the per-provider static profile. The miss classifier
+  // diagnoses full/partial misses against the resolved TTL so advisories
+  // can say which miss type dominates.
+  const ttlLearner = new TtlLearner();
+  const ttlResolver = new ProviderTtlResolver(process.env, {
+    learner: ttlLearner,
+    defaultSeconds: opts.cacheTtlSeconds,
+  });
+  const missClassifier = new MissClassifier({
+    ttlSecondsOf: (model) => ttlResolver.resolveSeconds({ model: { id: model } }),
+  });
+
   const signals = new SessionSignals(
     {
       cacheRetentionLong: opts.cacheRetentionLong,
       fallbackTtlSeconds: opts.cacheTtlSeconds,
+      fallbackTtlSecondsOf: (ctx) => ttlResolver.resolveSeconds(ctx),
     },
     {
       lastUsage: () => ledger.lastUsage(),
@@ -197,6 +215,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       idleTrigger.disarm();
       warming.reconcile(ctx);
       ledger.useSession(signals.sessionIdOf(ctx));
+      missClassifier.useSession(signals.sessionIdOf(ctx));
       idleTrigger.arm(ctx);
     } catch {
       /* telemetry only */
@@ -208,7 +227,11 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const message = event.message;
       if (message?.role === "assistant") {
         const model = (ctx as SessionContextView | undefined)?.model?.id ?? "session";
-        ledger.record(message.usage, model, signals.sessionIdOf(ctx));
+        const row = ledger.record(message.usage, model, signals.sessionIdOf(ctx));
+        if (row) {
+          ttlLearner.note(row);
+          missClassifier.feed(row);
+        }
       }
     } catch {
       /* never break the turn */
@@ -307,6 +330,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
           preparation.tokensBefore,
         );
         if (tip) pi.appendEntry("pi-cache-advisory", { message: tip });
+        const missTip = missClassifier.summary();
+        if (missTip) pi.appendEntry("pi-cache-advisory", { message: missTip });
       }
       const proposal = fastcompact.propose(preparation);
       if (!proposal) return;
@@ -413,6 +438,16 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const usage = ctx.getContextUsage?.();
       const liveSignals = signals.for(ctx as SessionContextView | undefined);
       const livePressure = autocompact.currentPressure(usage, ledger.lastUsage(), liveSignals);
+      const missStats = missClassifier.stats();
+      const misses =
+        missStats.fullMisses + missStats.partialMiss > 0
+          ? {
+              coldStart: missStats.coldStart,
+              idleExpiry: missStats.idleExpiry,
+              replicaFlap: missStats.replicaFlap,
+              partialMiss: missStats.partialMiss,
+            }
+          : undefined;
       const text = statsPresenter.render({
         global: ledger.totals(),
         session: ledger.sessionTotals(),
@@ -422,6 +457,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         fastCompactions: fastcompact.stats().compactions,
         fastEnabled: fastcompact.enabled,
         branchEnabled: fastcompact.branchEnabled,
+        misses,
         pressure: livePressure
           ? { pressure: livePressure.pressure, probability: livePressure.probability }
           : undefined,
