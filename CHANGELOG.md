@@ -3,6 +3,42 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.7.0] - 2026-09-22
+
+### Added
+
+- Request-transform pipeline extensions (all hook-implementable, each
+  with a `/cache-settings` switch and a `PI_CACHE_*` env override): a
+  mid-history Anthropic breakpoint anchor (`PI_CACHE_ANCHOR`, default
+  on) that spends the fourth `cache_control` slot on a quantum-aligned
+  stable position behind pi's trailing marker; a per-request long
+  retention rewrite (`PI_CACHE_RETENTION_OVERRIDE`, default off) that
+  upgrades every marker to the 1h tier and OpenAI payloads carrying a
+  prompt_cache_key to 24h; system-listing canonicalization
+  (`PI_CACHE_CANONICALIZE`, default on) sorting skill and AGENTS.md
+  entries code-unit order for cross-spawn prefix stability; a shared
+  OpenAI `prompt_cache_key` derived from the prefix head
+  (`PI_CACHE_SHARED_KEY`, opt-in); and a forced-warm policy for pi's
+  cache-warming decision (`PI_CACHE_FORCE_WARM`, opt-in).
+- `/cache-settings` rows pinned by a set `PI_CACHE_*` env var are marked
+  env-pinned and refuse toggles (env beats stored settings on every
+  restart, so a losing toggle lied before).
+- The TTL signals follow the effective per-request retention tier
+  instead of the static env mirror.
+
+### Changed
+
+- `PI_CACHE_SORT_TOOLS` now defaults off: pi 0.87 already serializes
+  tools in a fixed per-session order, so sorting only re-canonicalizes
+  away from pi's own order.
+
+### Removed
+
+- `PI_CACHE_PIN_SESSION` / `SessionPinner`: pi 0.87 providers key
+  affinity on content (prompt_cache_key, or sticky-routing headers
+  pi-ai already sends), so header injection was inert. Cross-spawn
+  bucket sharing is the shared cache key's job now.
+
 ## [0.5.1] - 2026-09-21
 
 ### Fixed
@@ -24,6 +60,8 @@ git tag, and the `version` in `package.json` matches the newest tag.
   settings file now backs all eight options below `PI_CACHE_*` env precedence.
 
 [0.5.0]: https://github.com/ederevx/pi-cache/releases/tag/v0.5.0
+
+[0.7.0]: https://github.com/ederevx/pi-cache/compare/v0.6.0...v0.7.0
 
 ## [0.4.0] - 2026-09-21
 
