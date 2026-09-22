@@ -2,8 +2,8 @@
  * pi-cache — /cache-stats presenter.
  *
  * One responsibility: render the global and session cache scopes plus the
- * live session signals (compaction pressure, churn, affinity, compaction
- * counts) into the two-line /cache-stats text. Owns no state; the caller
+ * live session signals (compaction pressure, churn, compaction counts)
+ * into the two-line /cache-stats text. Owns no state; the caller
  * gathers the numbers from their owners and the ledger/pressure classes
  * remain the single source of each value.
  */
@@ -25,7 +25,6 @@ export interface CacheStatsInput {
   global: CacheStatsScope;
   session: CacheStatsScope;
   churn: number;
-  affinity: string;
   compactions: number;
   fastCompactions: number;
   fastEnabled: boolean;
@@ -75,7 +74,6 @@ export class CacheStatsPresenter {
       );
     }
     if (input.churn > 0) signals.push(`head churn ${input.churn}`);
-    signals.push(input.affinity);
     const misses = input.misses ? this.missSignal(input.misses) : undefined;
     if (misses) signals.push(misses);
     signals.push(

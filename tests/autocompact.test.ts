@@ -1,7 +1,7 @@
 /**
  * pi-cache — auto-compaction controller tests.
  * decide() must compact only when cache coldness clears the floor (or the
- * prefix churned/rotated) and cooldowns elapsed; the TTL idle ramp raises
+ * prefix churned) and cooldowns elapsed; the TTL idle ramp raises
  * coldness, and the pressure model owns the probabilistic context gate.
  */
 
@@ -21,7 +21,6 @@ function baseSignals() {
     /** Absent by default so the idle ramp falls back to the last turn. */
     msSinceCacheTouch: undefined as (() => number) | undefined,
     headChurn: () => 0,
-    affinityRotated: () => false,
   };
 }
 
@@ -109,13 +108,6 @@ test("autocompact: churned prefix is cold", () => {
   assertEq(verdict.shouldCompact, true);
   assertEq(verdict.reason, "churned prefix + context threshold");
   assertEq(verdict.coldness, 1);
-});
-
-test("autocompact: rotation also triggers the churn path", () => {
-  const c = new AutocompactController(opts);
-  c.noteTurn(0);
-  const verdict = c.decide(85, signals({ affinityRotated: () => true }));
-  assertEq(verdict.shouldCompact, true);
 });
 
 test("autocompact: cooldown turns gate repeated compaction", () => {

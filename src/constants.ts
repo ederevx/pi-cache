@@ -22,10 +22,6 @@ const BACKUP_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "backups");
 export interface PiCacheOptions {
   /** Whether telemetry is recorded at all. */
   telemetry: boolean;
-  /** Opt-in tool transforms; sorting now defaults OFF (pi builds tools
-   *  deterministically per session, so sorting only re-canonicalizes away
-   *  from pi's own order), dedup stays ON. */
-  sortTools: boolean;
   /** Exact-schema tool dedup (opt-in, default on). */
   dedupTools: boolean;
   /** Pin a fourth Anthropic breakpoint on stable mid-history (default on). */
@@ -92,10 +88,6 @@ export class OptionsLoader {
     const stored: UserSettings = new UserSettingsStore(this.userSettingsPath()).load();
     return {
       telemetry: this.envBool("PI_CACHE_TELEMETRY", stored.telemetry ?? true),
-      // Sorting is demoted to opt-in: pi 0.87 already serializes tools in a
-      // fixed per-session order, so sorting only re-canonicalizes away from
-      // pi's own order.
-      sortTools: this.envBool("PI_CACHE_SORT_TOOLS", stored.sortTools ?? false),
       dedupTools: this.envBool("PI_CACHE_DEDUP_TOOLS", stored.dedupTools ?? true),
       anchor: this.envBool("PI_CACHE_ANCHOR", stored.anchor ?? true),
       retentionOverride: this.envBool(
@@ -159,7 +151,6 @@ export class OptionsLoader {
   envPinnedIds(): string[] {
     const pins: Array<[string, string]> = [
       ["telemetry", "PI_CACHE_TELEMETRY"],
-      ["sortTools", "PI_CACHE_SORT_TOOLS"],
       ["dedupTools", "PI_CACHE_DEDUP_TOOLS"],
       ["anchor", "PI_CACHE_ANCHOR"],
       ["retentionOverride", "PI_CACHE_RETENTION_OVERRIDE"],
