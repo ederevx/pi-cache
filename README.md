@@ -36,6 +36,17 @@ Cache-aware compaction has two layers, both on by default.
   `PI_CACHE_FAST_COMPACT=off`; branch summaries have their own
   `PI_CACHE_FAST_BRANCH_SUMMARY` switch, and pi's own normal summarizer
   runs for whichever is off.
+- **Dropped-span digest.** The fast stub alone discards the summarized
+  span's content; with the digest on (default), pi-cache appends a
+  deterministic, bounded extractive record after the stub — modified
+  and read files (from pi's own `fileOps`), one capped line per turn
+  (first user text, bash commands, tool names) — and folds the previous
+  compaction's digest blocks in, so the record accumulates across
+  repeated compactions instead of vanishing. The digest sits after the
+  stub text, so the shared prefix head is byte-identical either way;
+  spans above `PI_CACHE_FAST_DIGEST_MAX_SPAN_TOKENS` (default 24000)
+  fall back to pi's LLM summarizer. Disable with the `/cache-settings`
+  switch or `PI_CACHE_FAST_DIGEST=off`.
 
 The cache TTL that drives the idle trigger and the compaction-pressure
 ramp falls back to `PI_CACHE_TTL_SECONDS` (default 300 s) when the model
@@ -158,7 +169,10 @@ temp files.
    (`src/context-degradation.ts`); fast compaction overrides pi's
    summarizer via `session_before_compact` for every reason and
    `session_before_tree` for a wanted branch summary (each with its own
-   switch: `PI_CACHE_FAST_COMPACT` / `PI_CACHE_FAST_BRANCH_SUMMARY`).
+   switch: `PI_CACHE_FAST_COMPACT` / `PI_CACHE_FAST_BRANCH_SUMMARY`);
+   the dropped-span digest (`PI_CACHE_FAST_DIGEST`, default on) appends
+   a bounded deterministic record after the stub and folds prior digest
+   blocks in across compactions.
    `AutocompactController` accounts for every completed compaction (its
    own trigger, pi's threshold/overflow, the override), and cooldowns
    (seconds + turns) gate repetition; `PI_CACHE_FAST_COMPACT=off` (or
