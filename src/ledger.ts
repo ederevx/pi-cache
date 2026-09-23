@@ -29,6 +29,30 @@ export interface UsageRow {
   cacheRead: number;
   cacheWrite: number;
   totalTokens: number;
+  /** pi-cache's coldness-ramp TTL view (ms) at record time. Optional so
+   *  older ledger files without the field stay valid append-compatible. */
+  cacheTtlMs?: number;
+  /** pi's tier-or-undefined warming view (ms); omitted when pi has no
+   *  tier for the model, so absence itself carries signal. */
+  piTtlMs?: number;
+  /** True when the request ran on the long retention tier. */
+  retentionLong?: boolean;
+  /** True when the cache was warm (a touch within the effective TTL)
+   *  when this request was recorded. */
+  warm?: boolean;
+  /** Age (ms) of the last cache touch at record time; omitted when the
+   *  cache was never touched in the session. */
+  msSinceCacheTouch?: number;
+}
+
+/** Per-request cache state a caller attaches to a row. Every field is
+ *  optional; omitted fields keep the row identical to the old schema. */
+export interface RecordExtras {
+  cacheTtlMs?: number;
+  piTtlMs?: number;
+  retentionLong?: boolean;
+  warm?: boolean;
+  msSinceCacheTouch?: number;
 }
 
 /** Persistence seam: the ledger owns rows, the sink owns bytes. */
@@ -94,9 +118,10 @@ export class CacheLedger {
     usage: Usage | undefined,
     model: string,
     session: string = this.sessionId ?? "session",
+    extras: RecordExtras = {},
   ): UsageRow | undefined {
     if (!usage || !this.enabledOn) return undefined;
-    const row = this.buildRow(usage, model, session);
+    const row = this.buildRow(usage, model, session, extras);
     this.rows.push(row);
     this.noteSessionRow(row);
     this.sink.append(row);
@@ -176,7 +201,7 @@ export class CacheLedger {
   }
 
   /** Build one ledger row from a recorded usage. */
-  private buildRow(usage: Usage, model: string, session: string): UsageRow {
+  private buildRow(usage: Usage, model: string, session: string, extras: RecordExtras = {}): UsageRow {
     return {
       id: `${process.pid}:${this.boot}:${this.seq}`,
       seq: this.seq++,
@@ -189,6 +214,7 @@ export class CacheLedger {
       cacheRead: usage.cacheRead ?? 0,
       cacheWrite: usage.cacheWrite ?? 0,
       totalTokens: usage.totalTokens ?? 0,
+      ...extras,
     };
   }
 
