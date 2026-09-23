@@ -638,6 +638,77 @@ test("extension: fast branch-summary switch toggles independently", async () => 
   }
 });
 
+test("extension: fast digest appends the span record and toggles independently", async () => {
+  const root = join(scratchDir(), "e2e-digest-switch");
+  mkdirSync(root, { recursive: true });
+  const settingsFile = join(root, "settings.json");
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: settingsFile,
+    PI_CACHE_AUTO_COMPACT: "0",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    const ctx = {};
+
+    // Default on: the fast proposal carries the digest after the stub.
+    const prep = {
+      preparation: {
+        firstKeptEntryId: "E7",
+        tokensBefore: 40_000,
+        messagesToSummarize: [
+          { role: "user", content: "repair the ledger" },
+          { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "read", arguments: {} }] },
+        ],
+        fileOps: { read: new Set(["ledger.ts"]), edited: new Set() },
+      },
+      reason: "threshold",
+    };
+    const before = await pi.emit("session_before_compact", prep, ctx);
+    const fast = before[0] as { compaction?: { summary: string } } | undefined;
+    assert(fast?.compaction !== undefined, "fast override present");
+    assert(fast!.compaction!.summary.startsWith(FAST_SUMMARY_STUB), "stub first");
+    assert(fast!.compaction!.summary.includes("- U: repair the ledger"), "turn record");
+    assert(fast!.compaction!.summary.includes("Files read: ledger.ts"), "file record");
+
+    // Toggle it off through the two-column view: the stub stands alone.
+    let view: { selectItem(id: string): void; handleInput(data: string): void } | undefined;
+    const settingsCtx = {
+      mode: "tui",
+      ui: {
+        custom: async (
+          factory: (
+            tui: unknown,
+            theme: { fg: (c: string, t: string) => string },
+            kb: unknown,
+            done: () => void,
+          ) => { selectItem(id: string): void; handleInput(data: string): void },
+        ): Promise<void> => {
+          view = factory({}, { fg: (_c, t) => t }, {}, () => {});
+        },
+        notify: () => {},
+      },
+    };
+    await pi.commands.get("cache-settings")!.handler([], settingsCtx as never);
+    assert(view !== undefined, "digest switch row present");
+    view.selectItem("fastDigest");
+    view.handleInput("\r");
+    const saved = JSON.parse(readFileSync(settingsFile, "utf8")) as {
+      fastDigest?: boolean;
+    };
+    assertEq(saved.fastDigest, false, "digest switch persisted off");
+
+    const after = await pi.emit("session_before_compact", prep, ctx);
+    const fastAfter = after[0] as { compaction?: { summary: string } } | undefined;
+    assert(fastAfter?.compaction !== undefined, "fast compaction unaffected");
+    assertEq(fastAfter!.compaction!.summary, FAST_SUMMARY_STUB, "stub only after toggle");
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
 test("extension: option rows toggle, persist, and take effect", async () => {
   const root = join(scratchDir(), "e2e-option-switch");
   mkdirSync(root, { recursive: true });

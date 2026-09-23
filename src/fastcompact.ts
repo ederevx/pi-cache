@@ -19,18 +19,39 @@
  */
 
 import { FeatureSwitch } from "./feature-switch.ts";
+import { SpanDigest, type SpanFileOps } from "./digest.ts";
 
 export interface FastCompactOptions {
   enabled: boolean;
   /** Separate switch for the /tree branch-summary override. */
   branchEnabled: boolean;
+  /** Append a deterministic digest of the dropped span after the stub. */
+  digestEnabled: boolean;
+  /** Dropped-span token estimate at/above which pi's LLM summarizer runs. */
+  digestMaxSpanTokens: number;
 }
 
 /** The subset of `CompactionPreparation` this controller reads. */
 export interface FastCompactPreparation {
   firstKeptEntryId: string;
   tokensBefore: number;
+  /** Messages pi will discard (summarized span). */
+  messagesToSummarize?: readonly unknown[];
+  /** Messages of a split turn's prefix, when pi cuts mid-turn. */
+  turnPrefixMessages?: readonly unknown[];
+  /** True when pi's cut point lands inside a turn. */
+  isSplitTurn?: boolean;
+  /** The previous compaction's summary text, when one projects. */
+  previousSummary?: string;
+  /** File operations pi extracted from the dropped span. */
+  fileOps?: SpanFileOps;
 }
+
+/** ~4 chars/token heuristic for the dropped-span size gate. */
+const CHARS_PER_TOKEN = 4;
+
+/** Maximum message content parts walked per message in the size estimate. */
+const MAX_CONTENT_PARTS = 64;
 
 /**
  * The fixed, byte-stable stand-in for the summarized span. A literal
@@ -54,16 +75,32 @@ export const FAST_BRANCH_STUB =
 export class FastCompactionController {
   private readonly compaction: FeatureSwitch;
   private readonly branch: FeatureSwitch;
+  private readonly digest: FeatureSwitch;
+  private readonly digestMaxSpanTokens: number;
+  private readonly spanDigest: SpanDigest;
   private compactions = 0;
 
   constructor(opts: FastCompactOptions) {
     this.compaction = new FeatureSwitch(opts.enabled);
     this.branch = new FeatureSwitch(opts.branchEnabled);
+    this.digest = new FeatureSwitch(opts.digestEnabled);
+    this.digestMaxSpanTokens = opts.digestMaxSpanTokens;
+    this.spanDigest = new SpanDigest();
   }
 
   /** The live compaction switch (toggled from /cache-settings). */
   get enabled(): boolean {
     return this.compaction.enabled;
+  }
+
+  /** The live dropped-span digest switch (toggled from /cache-settings). */
+  get digestEnabled(): boolean {
+    return this.digest.enabled;
+  }
+
+  /** Turn the digest on or off in place. */
+  setDigestEnabled(enabled: boolean): void {
+    this.digest.set(enabled);
   }
 
   /** The live branch-summary switch (its own /cache-settings row). */
@@ -93,11 +130,79 @@ export class FastCompactionController {
     if (!preparation) return undefined;
     if (typeof preparation.firstKeptEntryId !== "string") return undefined;
     if (typeof preparation.tokensBefore !== "number") return undefined;
+    if (this.digest.enabled && this.spanTooLarge(preparation)) return undefined;
     return {
-      summary: FAST_SUMMARY_STUB,
+      summary: this.fastSummary(preparation),
       firstKeptEntryId: preparation.firstKeptEntryId,
       tokensBefore: preparation.tokensBefore,
     };
+  }
+
+  /**
+   * The fast summary: the constant stub, optionally followed by the
+   * accumulated digest region. The stub comes first so the shared
+   * prefix head is byte-identical whether or not a digest follows
+   * (cache-neutral); the digest preserves the dropped span's file and
+   * turn record and folds the previous compaction's digest blocks in.
+   */
+  private fastSummary(preparation: FastCompactPreparation): string {
+    if (!this.digest.enabled) return FAST_SUMMARY_STUB;
+    try {
+      const block = this.spanDigest.build(
+        preparation.messagesToSummarize ?? [],
+        preparation.isSplitTurn ? (preparation.turnPrefixMessages ?? []) : [],
+        preparation.fileOps,
+      );
+      const region = this.spanDigest.compose(preparation.previousSummary, block);
+      if (region.length === 0) return FAST_SUMMARY_STUB;
+      return `${FAST_SUMMARY_STUB}\n\n${region}`;
+    } catch {
+      // Digest failure must never wedge compaction: degrade to the stub.
+      return FAST_SUMMARY_STUB;
+    }
+  }
+
+  /**
+   * Whether the dropped span is too large to summarize extractively:
+   * past the token gate the digest's preservation value no longer
+   * covers the loss, so the proposal yields to pi's LLM summarizer
+   * (propose() returns undefined, fail-open).
+   */
+  private spanTooLarge(preparation: FastCompactPreparation): boolean {
+    const messages = preparation.messagesToSummarize;
+    const historyChars = Array.isArray(messages)
+      ? FastCompactionController.spanChars(messages)
+      : 0;
+    const prefixMessages = preparation.turnPrefixMessages;
+    const prefixChars =
+      preparation.isSplitTurn && Array.isArray(prefixMessages)
+        ? FastCompactionController.spanChars(prefixMessages)
+        : 0;
+    return (historyChars + prefixChars) / CHARS_PER_TOKEN > this.digestMaxSpanTokens;
+  }
+
+  /** Cheap serialized-size estimate of a message list, in characters. */
+  private static spanChars(messages: readonly unknown[]): number {
+    let total = 0;
+    for (const message of messages) {
+      const m = message as { content?: unknown; command?: unknown } | undefined;
+      if (!m || typeof m !== "object") continue;
+      const content = m.content;
+      if (typeof content === "string") {
+        total += content.length;
+      } else if (Array.isArray(content)) {
+        let parts = 0;
+        for (const part of content) {
+          if (parts++ >= MAX_CONTENT_PARTS) break;
+          const block = part as { text?: unknown; data?: unknown } | undefined;
+          if (!block || typeof block !== "object") continue;
+          if (typeof block.text === "string") total += block.text.length;
+          else if (typeof block.data === "string") total += block.data.length;
+        }
+      }
+      if (typeof m.command === "string") total += m.command.length;
+    }
+    return total;
   }
 
   /** Count a completed fast compaction for /cache-stats. */

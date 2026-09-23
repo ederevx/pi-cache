@@ -68,6 +68,10 @@ export interface PiCacheOptions {
   fastCompact: boolean;
   /** Separate fast branch-summary override (default on; its own switch). */
   fastBranchSummary: boolean;
+  /** Append a deterministic dropped-span digest after the fast stub (default on). */
+  fastDigest: boolean;
+  /** Dropped-span token estimate at/above which pi's LLM summarizer runs. */
+  fastDigestMaxSpanTokens: number;
   /** Absolute path of pi-cache's owned user-settings JSON. */
   settingsPath: string;
   /** Probabilistic compaction-pressure model tunables. */
@@ -123,6 +127,10 @@ export class OptionsLoader {
         "PI_CACHE_FAST_BRANCH_SUMMARY",
         stored.fastBranchSummary ?? true,
       ),
+      // The digest keeps the dropped span's file/turn record after the
+      // stub; huge spans still yield to pi's LLM summarizer.
+      fastDigest: this.envBool("PI_CACHE_FAST_DIGEST", stored.fastDigest ?? true),
+      fastDigestMaxSpanTokens: this.envInt("PI_CACHE_FAST_DIGEST_MAX_SPAN_TOKENS", 24_000),
       settingsPath: this.userSettingsPath(),
       // Compaction pressure: expected-cost economics (write amortization
       // over the expected remaining requests) composed with context
@@ -165,6 +173,7 @@ export class OptionsLoader {
       ["autoCompact", "PI_CACHE_AUTO_COMPACT"],
       ["fastCompaction", "PI_CACHE_FAST_COMPACT"],
       ["fastBranchSummary", "PI_CACHE_FAST_BRANCH_SUMMARY"],
+      ["fastDigest", "PI_CACHE_FAST_DIGEST"],
     ];
     return pins.filter(([id, name]) => this.env[name] !== undefined).map(([id]) => id);
   }
