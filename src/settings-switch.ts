@@ -84,6 +84,11 @@ export class SettingsSwitchBoard {
           this.autocompact.setCacheNeutral(on);
         },
       },
+      fastDigest: {
+        key: "fastDigest",
+        label: "fast digest",
+        apply: (on) => this.fast.setDigestEnabled(on),
+      },
       fastBranchSummary: {
         key: "fastBranchSummary",
         label: "fast branch summary",
@@ -106,6 +111,7 @@ export class SettingsSwitchBoard {
       advisory: this.advisor.enabled,
       autoCompact: this.autocompact.enabled,
       fastCompaction: this.fast.enabled,
+      fastDigest: this.fast.digestEnabled,
       fastBranchSummary: this.fast.branchEnabled,
     };
   }
