@@ -11,12 +11,32 @@
 
 export type WarmingAction = "warm" | "stop";
 
-/** A session entry, narrowed to the fields a warm refresh is detected by. */
+/** Construction options: the clock seam and the confirm sink. */
+export interface WarmingObserverOptions {
+  /** Injectable clock for deterministic tests. */
+  now?: () => number;
+  /** Invoked once per newly confirmed `cache_warm` entry (dedup by
+   *  entry id), with the entry for telemetry. */
+  onConfirm?: (entry: WarmUsageEntry) => void;
+}
+
+/** A session entry, narrowed to the fields a warm refresh is detected
+ *  and recorded by. */
 export interface WarmUsageEntry {
   type?: string;
   id?: string;
   kind?: string;
   timestamp?: string;
+  /** pi-ai usage of the refresh request (a full-prefix cache read). */
+  usage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    totalTokens?: number;
+  };
+  model?: string;
+  provider?: string;
 }
 
 /** The context slice needed to read the session's persisted entries. */
@@ -28,8 +48,13 @@ export class WarmingObserver {
   private decisionAt: number | undefined;
   private confirmedAt: number | undefined;
   private lastWarmEntryId: string | undefined;
+  private readonly now: () => number;
+  private readonly onConfirm: ((entry: WarmUsageEntry) => void) | undefined;
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(options: WarmingObserverOptions = {}) {
+    this.now = options.now ?? Date.now;
+    this.onConfirm = options.onConfirm;
+  }
 
   /**
    * Record pi's warming decision (or another extension's override). The
@@ -58,6 +83,14 @@ export class WarmingObserver {
       this.lastWarmEntryId = entry.id;
       const parsed = Date.parse(entry.timestamp ?? "");
       this.confirmedAt = Number.isFinite(parsed) ? parsed : this.now();
+      // The entry may carry the refresh's usage: hand it to telemetry
+      // exactly once per landing. A sink failure must not unwind the
+      // observer's own state, which is already updated.
+      try {
+        this.onConfirm?.(entry);
+      } catch {
+        /* telemetry only */
+      }
       return;
     }
   }
