@@ -43,10 +43,15 @@ Cache-aware compaction has two layers, both on by default.
   (first user text, bash commands, tool names) — and folds the previous
   compaction's digest blocks in, so the record accumulates across
   repeated compactions instead of vanishing. The digest sits after the
-  stub text, so the shared prefix head is byte-identical either way;
-  spans above `PI_CACHE_FAST_DIGEST_MAX_SPAN_TOKENS` (default 24000)
-  fall back to pi's LLM summarizer. Disable with the `/cache-settings`
-  switch or `PI_CACHE_FAST_DIGEST=off`.
+  stub text, so the shared prefix head is byte-identical either way.
+  Fast compaction is enforced for dropped spans of any size — no span
+  ever falls back to pi's slow LLM summarizer. After the digest (or
+  alone when it is empty) the summary carries a deterministic
+  transcript pointer naming the session file and the boundary entry id,
+  so dropped detail stays recallable on demand with a bounded search
+  (`grep -m 5 '<term>' <session-file>`) instead of a whole-file read.
+  Disable the digest with the `/cache-settings` switch or
+  `PI_CACHE_FAST_DIGEST=off`.
 
 The cache TTL that drives the idle trigger and the compaction-pressure
 ramp falls back to `PI_CACHE_TTL_SECONDS` (default 300 s) when the model
