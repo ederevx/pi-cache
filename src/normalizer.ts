@@ -8,7 +8,7 @@
  * the class only tracks head-churn.
  */
 
-import { createHash } from "node:crypto";
+import { PrefixHead } from "./prefix-head.ts";
 
 export interface PrefixNormalizerOptions {
   dedupTools: boolean;
@@ -110,20 +110,7 @@ export class PrefixNormalizer {
 
   /** Track byte-stability of the prefix-relevant head (tools + leading system). */
   private noteHead(body: Record<string, unknown>): void {
-    const messages = (body.messages as Array<{ role: string; content: unknown }>) ?? [];
-    const hash = createHash("sha256")
-      .update(
-        JSON.stringify({
-          model: body.model,
-          sys: messages
-            .filter((m) => m.role === "system" || m.role === "developer")
-            .slice(0, 2)
-            .map((m) => m.content),
-          tools: body.tools,
-        }),
-      )
-      .digest("hex")
-      .slice(0, 12);
+    const hash = PrefixHead.hash(body, 12);
     if (this.lastHeadHash !== "" && hash !== this.lastHeadHash) this.churnCount++;
     this.lastHeadHash = hash;
   }
