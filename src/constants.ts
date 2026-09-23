@@ -70,8 +70,6 @@ export interface PiCacheOptions {
   fastBranchSummary: boolean;
   /** Append a deterministic dropped-span digest after the fast stub (default on). */
   fastDigest: boolean;
-  /** Dropped-span token estimate at/above which pi's LLM summarizer runs. */
-  fastDigestMaxSpanTokens: number;
   /** Absolute path of pi-cache's owned user-settings JSON. */
   settingsPath: string;
   /** Probabilistic compaction-pressure model tunables. */
@@ -128,9 +126,8 @@ export class OptionsLoader {
         stored.fastBranchSummary ?? true,
       ),
       // The digest keeps the dropped span's file/turn record after the
-      // stub; huge spans still yield to pi's LLM summarizer.
+      // stub; enforced for dropped spans of any size.
       fastDigest: this.envBool("PI_CACHE_FAST_DIGEST", stored.fastDigest ?? true),
-      fastDigestMaxSpanTokens: this.envInt("PI_CACHE_FAST_DIGEST_MAX_SPAN_TOKENS", 24_000),
       settingsPath: this.userSettingsPath(),
       // Compaction pressure: expected-cost economics (write amortization
       // over the expected remaining requests) composed with context
