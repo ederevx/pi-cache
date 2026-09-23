@@ -45,6 +45,7 @@
 
 import { OptionsLoader } from "./constants.ts";
 import { CacheLedger } from "./ledger.ts";
+import { RowExtrasBuilder } from "./row-extras.ts";
 import { FileRecordSink } from "./sink.ts";
 import { BackupStore } from "./backup-store.ts";
 import { TempSweeper } from "./temp-sweep.ts";
@@ -175,6 +176,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   // the last request actually ran on (per-request override aware).
   const warmingSchedule = new WarmingSchedule(signals, retention);
 
+  // Per-row cache state for the ledger: the TTL views, the effective
+  // tier, and the warm state at record time.
+  const rowExtras = new RowExtrasBuilder(signals);
+
   // Miss taxonomy: /cache-stats diagnosis fed from the ledger's rows; the
   // TTL comes from the same unified signals view the idle ramp uses.
   const missClassifier = new MissClassifier({
@@ -245,7 +250,12 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const message = event.message;
       if (message?.role === "assistant") {
         const model = (ctx as SessionContextView | undefined)?.model?.id ?? "session";
-        const row = ledger.record(message.usage, model, signals.sessionIdOf(ctx));
+        const row = ledger.record(
+          message.usage,
+          model,
+          signals.sessionIdOf(ctx),
+          rowExtras.build(ctx as SessionContextView | undefined),
+        );
         if (row) missClassifier.feed(row);
       }
     } catch {

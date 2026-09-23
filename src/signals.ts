@@ -88,10 +88,17 @@ export class SessionSignals {
     return (resolved ?? this.opts.fallbackTtlSeconds) * 1000;
   }
 
+  /** Whether the effective retention is the long tier: the live wire
+   *  state when a per-request override ran, else the env-mirror flag.
+   *  Public so ledger rows can stamp the tier the request actually rode. */
+  retentionLong(): boolean {
+    return this.opts.retentionLongOf?.() ?? this.opts.cacheRetentionLong;
+  }
+
   /** The model's tier seconds for the effective retention (long wins when
    *  the per-request override ran, else the env-mirror flag). */
   private tierSeconds(ctx: SessionContextView | undefined): number | undefined {
-    const effective = this.opts.retentionLongOf?.() ?? this.opts.cacheRetentionLong;
+    const effective = this.retentionLong();
     return ctx?.model?.promptCache?.[effective ? "long" : "short"];
   }
 

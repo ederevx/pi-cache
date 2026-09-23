@@ -62,7 +62,12 @@ compaction finishes, `PI_CACHE_BEFORE_TURN`). With fast compaction on the
 cache-window gate is relaxed because the override is prefix-stable, and
 with it off compaction stays inside cold/churned windows.
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
-reloads. The ledger keeps the most recent `PI_CACHE_LEDGER_MAX_ROWS` rows
+reloads. Each usage row also carries the request's cache state as
+optional fields (`cacheTtlMs`, `piTtlMs`, `retentionLong`, `warm`,
+`msSinceCacheTouch`) so tier and warm-vs-miss questions are answerable
+from the ledger itself; rows written without them stay
+schema-compatible. The ledger keeps the most recent
+`PI_CACHE_LEDGER_MAX_ROWS` rows
 (default 20000, trimmed on load, in-session once a full window of
 appends accumulates, and at session shutdown), a bounded
 pre-trim backup is captured before any shrinking rewrite

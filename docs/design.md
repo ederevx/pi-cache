@@ -209,6 +209,16 @@ taxonomy (`src/miss-classifier.ts`) binds the unified `cacheTtlMs`
 view and feeds the /cache-stats miss line
 (`PI_CACHE_MISS_DIAGNOSIS`, default on).
 
+Ledger rows carry that same state per request as optional fields —
+`cacheTtlMs`, `piTtlMs`, `retentionLong`, `warm` (a touch within the
+effective TTL), `msSinceCacheTouch` — assembled by
+`RowExtrasBuilder` at `message_end`, field-by-field fail-open, and
+schema-compatible with rows written without them. This makes tier and
+warm-vs-miss questions answerable from the ledger itself; warm
+refreshes themselves still bypass `message_end` (pi's warmer records
+only `cache_warm` session entries), so they are observed through the
+reconciling `WarmingObserver`, not as rows.
+
 Warming: pi decides warm/stop from expected savings
 (`continuationProbability * missCost - warmCost`) with a $0.05 floor,
 computed from a request-scoped retention tier pi-cache's per-request
