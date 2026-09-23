@@ -39,6 +39,7 @@
     }
   },
   "scripts": {
+    "postinstall": "node scripts/postinstall.mjs",
     "test": "node --experimental-strip-types --experimental-transform-types tests/run.ts"
   }
 }
