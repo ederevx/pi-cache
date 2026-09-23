@@ -10,8 +10,9 @@
  * Fail-open on read: a missing or corrupt file yields defaults.
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { AtomicFile } from "./atomic-file.ts";
 
 export interface UserSettings {
   /** Record per-request cache usage to the ledger. */
@@ -98,11 +99,14 @@ export class UserSettingsStore {
     return this.save(patch);
   }
 
-  /** Write the complete document to a sibling temp file, then rename it. */
+  /** Write the complete document to a sibling temp, then rename it over
+   *  the original, preserving its permissions (owner-only by default). */
   private writeAtomic(settings: UserSettings): void {
     mkdirSync(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n", { mode: 0o600 });
-    renameSync(tmp, this.file);
+    AtomicFile.write(
+      this.file,
+      JSON.stringify(settings, null, 2) + "\n",
+      AtomicFile.modeOf(this.file, 0o600),
+    );
   }
 }

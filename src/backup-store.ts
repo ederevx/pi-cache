@@ -3,12 +3,13 @@
  *
  * One responsibility: capture the ledger bytes before a retention rewrite
  * and keep the backup directory bounded — newest `keep`, TTL, and total
- * size — so a recovery copy is always available without the backups
- * growing forever. Every operation is best-effort.
+ * size. Every operation is best-effort.
  */
 
-import { copyFileSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import { TempSweeper } from "./temp-sweep.ts";
+import { AtomicFile } from "./atomic-file.ts";
 
 export interface BackupOptions {
   /** Newest backups to retain (ring). */
@@ -33,6 +34,8 @@ export class BackupStore {
 
   private seq = 0;
   private readonly now: () => number;
+  /** The shared stale-temp sweeper owns this directory's abandoned temps. */
+  private readonly sweeper = new TempSweeper(BackupStore.TEMP_STALE_MS);
 
   constructor(
     private readonly dir: string,
@@ -48,11 +51,10 @@ export class BackupStore {
   }
 
   /**
-   * Copy `source` under a unique, atomic name. The pid plus a per-instance
+   * Copy `source` under a unique, atomic name: the pid plus a per-instance
    * sequence keeps sibling processes from overwriting one another's
-   * pre-image; writing to a temp name and renaming keeps a torn copy from
-   * being counted as a valid backup. Best-effort: a failure never breaks
-   * the caller.
+   * pre-image, and the temp+rename move keeps a torn copy from counting
+   * as a valid backup. Best-effort: a failure never breaks the caller.
    */
   private storeCopy(source: string): void {
     let tmp: string | undefined;
@@ -64,67 +66,37 @@ export class BackupStore {
       const final = join(this.dir, `${stamp}-${process.pid}-${seq}-${stem}.jsonl`);
       tmp = `${final}.tmp`;
       copyFileSync(source, tmp);
-      renameSync(tmp, final);
+      AtomicFile.replace(tmp, final);
     } catch {
-      if (tmp !== undefined) {
-        try {
-          rmSync(tmp, { force: true });
-        } catch {
-          /* an ignored temp never counts as a backup */
-        }
-      }
+      if (tmp !== undefined) AtomicFile.discard(tmp);
     }
   }
 
-  /** Bound the store by ring, TTL, and total size. */
+  /** Bound the store by ring, TTL, and total size. Every policy keeps a
+   *  prefix of the newest-first order, so one greedy pass over ring
+   *  budget, TTL, and size cap keeps exactly the survivors the three
+   *  sequential sweeps kept. */
   prune(): void {
     this.sweepTemps();
-    this.applyRing(this.list());
-    this.applyTtl(this.list());
-    this.applySize(this.list());
+    let kept = 0;
+    let bytes = 0;
+    const cutoff = this.opts.ttlMs > 0 ? this.now() - this.opts.ttlMs : -Number.POSITIVE_INFINITY;
+    for (const file of this.list()) {
+      const over =
+        kept >= this.opts.keep ||
+        file.mtimeMs < cutoff ||
+        (this.opts.maxBytes > 0 && bytes + file.size > this.opts.maxBytes);
+      if (over) this.remove(file.path);
+      else {
+        kept++;
+        bytes += file.size;
+      }
+    }
   }
 
   /** Remove an abandoned atomic-write temp left by a crash mid-capture. */
   private sweepTemps(): void {
-    const cutoff = this.now() - BackupStore.TEMP_STALE_MS;
-    try {
-      for (const name of readdirSync(this.dir)) {
-        if (!name.endsWith(".tmp")) continue;
-        const path = join(this.dir, name);
-        try {
-          if (statSync(path).mtimeMs <= cutoff) rmSync(path, { force: true });
-        } catch {
-          /* retry on the next prune */
-        }
-      }
-    } catch {
-      /* the directory may not exist yet */
-    }
-  }
-
-  /** Keep only the newest `keep` backups. */
-  private applyRing(files: BackupFile[]): void {
-    for (const file of files.slice(this.opts.keep)) this.remove(file.path);
-  }
-
-  /** Drop backups older than the TTL. */
-  private applyTtl(files: BackupFile[]): void {
-    if (this.opts.ttlMs <= 0) return;
-    const cutoff = this.now() - this.opts.ttlMs;
-    for (const file of files) if (file.mtimeMs < cutoff) this.remove(file.path);
-  }
-
-  /** Keep the newest backups up to the total-size cap (oldest dropped). */
-  private applySize(files: BackupFile[]): void {
-    if (this.opts.maxBytes <= 0) return;
-    let total = 0;
-    for (const file of files) {
-      if (total + file.size > this.opts.maxBytes) {
-        this.remove(file.path);
-        continue;
-      }
-      total += file.size;
-    }
+    this.sweeper.sweep(this.dir);
   }
 
   /** Backups newest-first. */
