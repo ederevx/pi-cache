@@ -11,6 +11,23 @@ import { FastCompactionController, FAST_BRANCH_STUB, FAST_SUMMARY_STUB } from ".
 
 const prep = { firstKeptEntryId: "E42", tokensBefore: 123_456 };
 
+/** The default controller: fast compaction + digest on. */
+const digested = (
+  opts: Partial<ConstructorParameters<typeof FastCompactionController>[0]> = {},
+): FastCompactionController =>
+  new FastCompactionController({
+    enabled: true,
+    branchEnabled: false,
+    digestEnabled: true,
+    digestMaxSpanTokens: 24_000,
+    ...opts,
+  });
+
+/** A dropped span of roughly `tokens` tokens (one long user message). */
+const spanOfTokens = (tokens: number): unknown[] => [
+  { role: "user", content: "x".repeat(Math.max(0, tokens * 4 - 2)) },
+];
+
 test("fastcompact: disabled proposes nothing", () => {
   const c = new FastCompactionController({ enabled: false, branchEnabled: false });
   assertEq(c.propose(prep), undefined);
@@ -23,6 +40,84 @@ test("fastcompact: enabled proposes the byte-stable stub at pi's cut", () => {
   assertEq(proposal!.summary, FAST_SUMMARY_STUB);
   assertEq(proposal!.firstKeptEntryId, "E42");
   assertEq(proposal!.tokensBefore, 123_456);
+});
+
+test("fastcompact: digest enabled appends the span record after the stub", () => {
+  const c = digested();
+  const full = {
+    ...prep,
+    messagesToSummarize: [
+      { role: "user", content: "fix the bug in src/a.ts" },
+      { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "edit", arguments: {} }] },
+    ],
+    fileOps: { read: new Set(["src/a.ts"]), edited: new Set(["src/a.ts"]) },
+  };
+  const proposal = c.propose(full);
+  assert(proposal !== undefined, "proposal expected");
+  assert(proposal!.summary.startsWith(FAST_SUMMARY_STUB), "stub first: shared head intact");
+  assert(proposal!.summary.includes("Files modified: src/a.ts"), "file record kept");
+  assert(proposal!.summary.includes("U: fix the bug in src/a.ts"), "turn record kept");
+  assert(proposal!.summary.includes("tools: edit"), "tool names kept");
+});
+
+test("fastcompact: digest off keeps the exact legacy stub", () => {
+  const c = digested({ digestEnabled: false });
+  const proposal = c.propose({ ...prep, messagesToSummarize: [{ role: "user", content: "hi" }] });
+  assert(proposal !== undefined, "proposal expected");
+  assertEq(proposal!.summary, FAST_SUMMARY_STUB);
+});
+
+test("fastcompact: an oversized span falls back to pi's summarizer", () => {
+  const c = digested({ digestMaxSpanTokens: 100 });
+  assertEq(c.propose({ ...prep, messagesToSummarize: spanOfTokens(101) }), undefined);
+  // Split-turn prefix participates in the gate.
+  assertEq(
+    c.propose({
+      ...prep,
+      messagesToSummarize: spanOfTokens(60),
+      isSplitTurn: true,
+      turnPrefixMessages: spanOfTokens(42),
+    }),
+    undefined,
+    "history+prefix over the gate",
+  );
+  // At/below the gate the fast proposal stands.
+  assert(c.propose({ ...prep, messagesToSummarize: spanOfTokens(100) }) !== undefined, "at gate");
+  // Digest off removes the gate entirely (legacy behavior).
+  const legacy = digested({ digestEnabled: false, digestMaxSpanTokens: 1 });
+  assert(
+    legacy.propose({ ...prep, messagesToSummarize: spanOfTokens(10_000) }) !== undefined,
+    "no gate when digest off",
+  );
+});
+
+test("fastcompact: digest accumulates across compactions via previousSummary", () => {
+  const c = digested();
+  const priorSummary = `${FAST_SUMMARY_STUB}\n\n<pi-cache-digest>\nFiles read: old.ts\n- U: earlier work\n</pi-cache-digest>`;
+  const proposal = c.propose({
+    ...prep,
+    messagesToSummarize: [{ role: "user", content: "next task in src/b.ts" }],
+    previousSummary: priorSummary,
+    fileOps: { read: new Set(["src/b.ts"]) },
+  });
+  assert(proposal !== undefined, "proposal expected");
+  const summary = proposal!.summary;
+  const priorIdx = summary.indexOf("earlier work");
+  const newIdx = summary.indexOf("next task in src/b.ts");
+  assert(priorIdx !== -1 && newIdx !== -1, "both generations present");
+  assert(priorIdx < newIdx, "prior block precedes the new one");
+  assert(summary.indexOf("old.ts") < summary.indexOf("src/b.ts"), "file record order");
+});
+
+test("fastcompact: digest switch toggles live", () => {
+  const c = digested();
+  assertEq(c.digestEnabled, true);
+  const full = { ...prep, messagesToSummarize: [{ role: "user", content: "hello" }] };
+  assert(c.propose(full)!.summary.includes("U: hello"), "digest on records the turn");
+  c.setDigestEnabled(false);
+  assertEq(c.propose(full)!.summary, FAST_SUMMARY_STUB);
+  c.setDigestEnabled(true);
+  assert(c.propose(full)!.summary.includes("U: hello"), "digest back on");
 });
 
 test("fastcompact: malformed preparation fails open", () => {
