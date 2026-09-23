@@ -184,19 +184,20 @@ export class OptionsLoader {
     return raw === "1" || raw === "true" || raw === "yes";
   }
 
-  /** parseFloat with a guarded default: unset/unparsable values fall back. */
-  private envFloat(name: string, fallback: number): number {
+  /** parseFloat/parseInt with a guarded default: unset/unparsable values
+   *  fall back; `parse` selects int or float so one method covers both. */
+  private envNumber(name: string, fallback: number, parse: (raw: string) => number): number {
     const raw = this.env[name];
     if (raw === undefined || raw === "") return fallback;
-    const n = parseFloat(raw);
+    const n = parse(raw);
     return Number.isFinite(n) ? n : fallback;
   }
 
-  /** parseInt with a guarded default: unset/unparsable values fall back. */
+  private envFloat(name: string, fallback: number): number {
+    return this.envNumber(name, fallback, parseFloat);
+  }
+
   private envInt(name: string, fallback: number): number {
-    const raw = this.env[name];
-    if (raw === undefined || raw === "") return fallback;
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) ? n : fallback;
+    return this.envNumber(name, fallback, (raw) => parseInt(raw, 10));
   }
 }
