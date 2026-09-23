@@ -147,6 +147,24 @@ compaction is on, makes the compaction itself prefix-stable:
    `session_before_tree` answers a wanted branch summary with
    `FAST_BRANCH_STUB`. Any error returns nothing, leaving pi's summarizer
    as the fail-open fallback.
+5. With the dropped-span digest on (`PI_CACHE_FAST_DIGEST`, default on;
+   `src/digest.ts`), the fast summary becomes `stub + digest`: a
+   deterministic, bounded extractive record of the summarized span
+   (modified/read files from pi's `fileOps`, one capped line per turn —
+   first user text, bash commands, tool names — fixed truncation,
+   stable ordering) appended AFTER the stub so the shared prefix head is
+   byte-identical whether or not a digest follows (cache-neutral).
+   Blocks self-anchor between `<pi-cache-digest>` markers inside the
+   summary text; the next compaction folds the previous summary's
+   blocks (from `previousSummary`) in ahead of the new one, so the
+   record accumulates across repeated compactions instead of the prior
+   summary vanishing inside the newly dropped span. Caps: 40 turns and
+   4000 chars per block, 20 files per list, 8 blocks / 8000 chars per
+   region, oldest blocks dropped with an omission counter. A span
+   estimated above `PI_CACHE_FAST_DIGEST_MAX_SPAN_TOKENS` (default
+   24000, ~4 chars/token) yields the whole proposal to pi's LLM
+   summarizer — very large losses still get real distillation. Digest
+   failure degrades to the bare stub (never wedges compaction).
 
 **Expected effect.** Compaction fires when it is the cheaper choice over
 the expected horizon or when the context has passed the degradation onset,
@@ -293,6 +311,16 @@ provider (simulated cache) gives offline harness tests.
 > (`FastCompactionController`, `FAST_SUMMARY_STUB`), plus the
 > economics-and-degradation probabilistic `src/pressure.ts`. The retired compact store/legacy option
 > names stay banned by `tests/oop_lint.py`.
+>
+> **2026-09-23 — digest extension**: the stub alone discards the
+> dropped span's content entirely (and a second compaction drops the
+> first stub with it, since the projected prior summary lies inside the
+> new span). `src/digest.ts` (`SpanDigest`) appends a bounded
+> deterministic extractive record after the stub and accumulates it
+> across compactions via `previousSummary`; see the mechanism step 5
+> above. Cache contract unchanged: the stub text and its position are
+> untouched, the digest lives after it, and the shared head still never
+> moves.
 
 **Definition.** Fast "soft" compaction whose ONLY purposes are better cache
 hits and fewer input tokens, re-armed whenever the live context grows back

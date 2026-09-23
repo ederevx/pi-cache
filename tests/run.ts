@@ -36,6 +36,7 @@ try {
 
 // Test modules self-register on import.
 import "./constants.test.ts";
+import "./digest.test.ts";
 import "./ledger.test.ts";
 import "./sink.test.ts";
 import "./backup-store.test.ts";

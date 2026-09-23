@@ -38,6 +38,8 @@ export interface UserSettings {
   fastCompaction?: boolean;
   /** Separate switch for the /tree branch-summary overlay. */
   fastBranchSummary?: boolean;
+  /** Deterministic dropped-span digest after the fast stub. */
+  fastDigest?: boolean;
 }
 
 export class UserSettingsStore {
@@ -79,6 +81,7 @@ export class UserSettingsStore {
     "autoCompact",
     "fastCompaction",
     "fastBranchSummary",
+    "fastDigest",
   ];
 
   /** Merge `patch` into the stored document and persist atomically. */
