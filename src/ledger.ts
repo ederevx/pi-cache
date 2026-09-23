@@ -149,6 +149,16 @@ export class CacheLedger {
     return last ? { input: last.input, cacheRead: last.cacheRead, cacheWrite: last.cacheWrite } : undefined;
   }
 
+  /** Last recorded request's usage of any kind — turn or warm refresh.
+   *  A warm refresh re-reads the whole prefix, so its cached share is the
+   *  freshest measurement of the cache's actual warmth; live views sample
+   *  this instead of `lastUsage` so idle warming cannot pin the reading
+   *  to a stale turn. */
+  lastRequestUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined {
+    const last = this.sessionRows[this.sessionRows.length - 1];
+    return last ? { input: last.input, cacheRead: last.cacheRead, cacheWrite: last.cacheWrite } : undefined;
+  }
+
   /** Milliseconds since the current session's last recorded turn ended. */
   msSinceLastTurn(): number {
     const last = this.lastTurnRow();
