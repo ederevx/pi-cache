@@ -499,7 +499,12 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => {
       const usage = ctx.getContextUsage?.();
       const liveSignals = signals.for(ctx as SessionContextView | undefined);
-      const livePressure = autocompact.currentPressure(usage, ledger.lastUsage(), liveSignals);
+      // The live preview reads the freshest request of any kind: a warm
+      // refresh re-reads the whole prefix, so skipping it here would pin
+      // the displayed pressure to a stale turn's coldness while pi's
+      // warmer keeps the cache alive (the trigger paths keep
+      // turn-scoped `lastUsage`).
+      const livePressure = autocompact.currentPressure(usage, ledger.lastRequestUsage(), liveSignals);
       const text = statsPresenter.render({
         global: ledger.totals(),
         session: ledger.sessionTotals(),
