@@ -131,7 +131,6 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     enabled: opts.fastCompact,
     branchEnabled: opts.fastBranchSummary,
     digestEnabled: opts.fastDigest,
-    digestMaxSpanTokens: opts.fastDigestMaxSpanTokens,
   });
   const autocompact = new AutocompactController({
     enabled: opts.autoCompact,
@@ -382,7 +381,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_before_compact", async (event) => {
+  pi.on("session_before_compact", async (event, ctx) => {
     // One handler, explicit order: the observational warm-cache advisory runs
     // first and never returns, then the fast cache-aware override ("overall")
     // may replace pi's default LLM summarizer for EVERY reason
@@ -399,7 +398,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
         );
         if (tip) pi.appendEntry("pi-cache-advisory", { message: tip });
       }
-      const proposal = fastcompact.propose(preparation);
+      const proposal = fastcompact.propose(
+        preparation,
+        ctx?.sessionManager?.getSessionFile?.(),
+      );
       if (!proposal) return;
       return { compaction: proposal };
     } catch {

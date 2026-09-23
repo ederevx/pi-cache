@@ -181,7 +181,8 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
     );
     const fast = compactResults[0] as { compaction?: { summary: string; firstKeptEntryId: string } } | undefined;
     assert(fast?.compaction !== undefined, "fast override returned a compaction");
-    assertEq(fast!.compaction!.summary, FAST_SUMMARY_STUB);
+    assert(fast!.compaction!.summary.startsWith(FAST_SUMMARY_STUB), "stub first");
+    assert(fast!.compaction!.summary.includes("entries before E9"), "transcript pointer present");
     assertEq(fast!.compaction!.firstKeptEntryId, "E9");
 
     // 4c. Fast branch-summary override: a /tree navigation that wants a
@@ -703,6 +704,8 @@ test("extension: fast digest appends the span record and toggles independently",
     const after = await pi.emit("session_before_compact", prep, ctx);
     const fastAfter = after[0] as { compaction?: { summary: string } } | undefined;
     assert(fastAfter?.compaction !== undefined, "fast compaction unaffected");
+    // This test's ctx carries no sessionManager, so no transcript pointer:
+    // the legacy stub stands alone after the digest toggle.
     assertEq(fastAfter!.compaction!.summary, FAST_SUMMARY_STUB, "stub only after toggle");
   } finally {
     unsetEnv(PI_CACHE_KEYS);

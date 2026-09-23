@@ -19,7 +19,6 @@ const digested = (
     enabled: true,
     branchEnabled: false,
     digestEnabled: true,
-    digestMaxSpanTokens: 24_000,
     ...opts,
   });
 
@@ -60,35 +59,52 @@ test("fastcompact: digest enabled appends the span record after the stub", () =>
   assert(proposal!.summary.includes("tools: edit"), "tool names kept");
 });
 
-test("fastcompact: digest off keeps the exact legacy stub", () => {
+test("fastcompact: digest off keeps the exact legacy stub without a session file", () => {
   const c = digested({ digestEnabled: false });
   const proposal = c.propose({ ...prep, messagesToSummarize: [{ role: "user", content: "hi" }] });
   assert(proposal !== undefined, "proposal expected");
   assertEq(proposal!.summary, FAST_SUMMARY_STUB);
 });
 
-test("fastcompact: an oversized span falls back to pi's summarizer", () => {
-  const c = digested({ digestMaxSpanTokens: 100 });
-  assertEq(c.propose({ ...prep, messagesToSummarize: spanOfTokens(101) }), undefined);
-  // Split-turn prefix participates in the gate.
-  assertEq(
-    c.propose({
-      ...prep,
-      messagesToSummarize: spanOfTokens(60),
-      isSplitTurn: true,
-      turnPrefixMessages: spanOfTokens(42),
-    }),
-    undefined,
-    "history+prefix over the gate",
-  );
-  // At/below the gate the fast proposal stands.
-  assert(c.propose({ ...prep, messagesToSummarize: spanOfTokens(100) }) !== undefined, "at gate");
-  // Digest off removes the gate entirely (legacy behavior).
-  const legacy = digested({ digestEnabled: false, digestMaxSpanTokens: 1 });
-  assert(
-    legacy.propose({ ...prep, messagesToSummarize: spanOfTokens(10_000) }) !== undefined,
-    "no gate when digest off",
-  );
+test("fastcompact: transcript pointer names session file and boundary", () => {
+  const c = digested();
+  const full = {
+    ...prep,
+    messagesToSummarize: [{ role: "user", content: "hello" }],
+    fileOps: { read: new Set(["a.ts"]) },
+  };
+  const withFile = c.propose(full, "/x/s1.jsonl");
+  assert(withFile !== undefined, "proposal expected");
+  assert(withFile!.summary.startsWith(FAST_SUMMARY_STUB), "stub first");
+  assert(withFile!.summary.includes("/x/s1.jsonl"), "session file named");
+  assert(withFile!.summary.includes("entries before E42"), "boundary entry named");
+  assert(withFile!.summary.includes("grep -m 5"), "bounded recall suggested");
+  assert(withFile!.summary.indexOf("</pi-cache-digest>") < withFile!.summary.indexOf("Full pre-compaction transcript"), "pointer after digest");
+
+  // Pointer stands alone when the digest is off or empty.
+  const bare = digested({ digestEnabled: false }).propose(full, "/x/s2.jsonl");
+  assert(bare !== undefined, "proposal expected");
+  assertEq(bare!.summary, `${FAST_SUMMARY_STUB}\n\nFull pre-compaction transcript: /x/s2.jsonl — entries before E42 were dropped by this compaction and remain readable there. Recall with a bounded search, e.g. grep -m 5 '<term>' /x/s2.jsonl; never read the file whole.`);
+
+  // No session file: pointer is omitted entirely (legacy stub).
+  const noFile = c.propose(full);
+  assert(noFile !== undefined, "proposal expected");
+  assert(!noFile!.summary.includes("transcript"), "no pointer without a session file");
+});
+
+test("fastcompact: enforced for spans of any size", () => {
+  const c = digested();
+  const proposal = c.propose({ ...prep, messagesToSummarize: spanOfTokens(100_000) });
+  assert(proposal !== undefined, "huge span still fast-compacted");
+  assert(proposal!.summary.startsWith(FAST_SUMMARY_STUB), "stub first");
+  // Split-turn prefixes are enforced too, not gated.
+  const split = c.propose({
+    ...prep,
+    messagesToSummarize: spanOfTokens(60_000),
+    isSplitTurn: true,
+    turnPrefixMessages: spanOfTokens(42_000),
+  });
+  assert(split !== undefined, "split-turn span still fast-compacted");
 });
 
 test("fastcompact: digest accumulates across compactions via previousSummary", () => {
