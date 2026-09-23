@@ -27,8 +27,6 @@ export interface FastCompactOptions {
   branchEnabled: boolean;
   /** Append a deterministic digest of the dropped span after the stub. */
   digestEnabled: boolean;
-  /** Dropped-span token estimate at/above which pi's LLM summarizer runs. */
-  digestMaxSpanTokens: number;
 }
 
 /** The subset of `CompactionPreparation` this controller reads. */
@@ -46,12 +44,6 @@ export interface FastCompactPreparation {
   /** File operations pi extracted from the dropped span. */
   fileOps?: SpanFileOps;
 }
-
-/** ~4 chars/token heuristic for the dropped-span size gate. */
-const CHARS_PER_TOKEN = 4;
-
-/** Maximum message content parts walked per message in the size estimate. */
-const MAX_CONTENT_PARTS = 64;
 
 /**
  * The fixed, byte-stable stand-in for the summarized span. A literal
@@ -76,7 +68,6 @@ export class FastCompactionController {
   private readonly compaction: FeatureSwitch;
   private readonly branch: FeatureSwitch;
   private readonly digest: FeatureSwitch;
-  private readonly digestMaxSpanTokens: number;
   private readonly spanDigest: SpanDigest;
   private compactions = 0;
 
@@ -84,7 +75,6 @@ export class FastCompactionController {
     this.compaction = new FeatureSwitch(opts.enabled);
     this.branch = new FeatureSwitch(opts.branchEnabled);
     this.digest = new FeatureSwitch(opts.digestEnabled);
-    this.digestMaxSpanTokens = opts.digestMaxSpanTokens;
     this.spanDigest = new SpanDigest();
   }
 
@@ -119,9 +109,12 @@ export class FastCompactionController {
   /**
    * The fast proposal for `session_before_compact`, or `undefined` to let
    * pi's default summarizer run. Applies to every compaction reason when
-   * enabled (the "overall" override).
+   * enabled (the "overall" override), for dropped spans of any size.
    */
-  propose(preparation: FastCompactPreparation | undefined): {
+  propose(
+    preparation: FastCompactPreparation | undefined,
+    sessionFile?: string,
+  ): {
     summary: string;
     firstKeptEntryId: string;
     tokensBefore: number;
@@ -130,9 +123,8 @@ export class FastCompactionController {
     if (!preparation) return undefined;
     if (typeof preparation.firstKeptEntryId !== "string") return undefined;
     if (typeof preparation.tokensBefore !== "number") return undefined;
-    if (this.digest.enabled && this.spanTooLarge(preparation)) return undefined;
     return {
-      summary: this.fastSummary(preparation),
+      summary: this.fastSummary(preparation, sessionFile),
       firstKeptEntryId: preparation.firstKeptEntryId,
       tokensBefore: preparation.tokensBefore,
     };
@@ -145,8 +137,13 @@ export class FastCompactionController {
    * (cache-neutral); the digest preserves the dropped span's file and
    * turn record and folds the previous compaction's digest blocks in.
    */
-  private fastSummary(preparation: FastCompactPreparation): string {
-    if (!this.digest.enabled) return FAST_SUMMARY_STUB;
+  private fastSummary(
+    preparation: FastCompactPreparation,
+    sessionFile: string | undefined,
+  ): string {
+    const pointer = this.transcriptPointer(preparation, sessionFile);
+    const stubbed = pointer.length > 0 ? `${FAST_SUMMARY_STUB}\n\n${pointer}` : FAST_SUMMARY_STUB;
+    if (!this.digest.enabled) return stubbed;
     try {
       const block = this.spanDigest.build(
         preparation.messagesToSummarize ?? [],
@@ -154,55 +151,33 @@ export class FastCompactionController {
         preparation.fileOps,
       );
       const region = this.spanDigest.compose(preparation.previousSummary, block);
-      if (region.length === 0) return FAST_SUMMARY_STUB;
-      return `${FAST_SUMMARY_STUB}\n\n${region}`;
+      if (region.length === 0) return stubbed;
+      const summary = `${FAST_SUMMARY_STUB}\n\n${region}`;
+      return pointer.length > 0 ? `${summary}\n\n${pointer}` : summary;
     } catch {
       // Digest failure must never wedge compaction: degrade to the stub.
-      return FAST_SUMMARY_STUB;
+      return stubbed;
     }
   }
 
   /**
-   * Whether the dropped span is too large to summarize extractively:
-   * past the token gate the digest's preservation value no longer
-   * covers the loss, so the proposal yields to pi's LLM summarizer
-   * (propose() returns undefined, fail-open).
+   * The deterministic transcript pointer: names the session file and the
+   * boundary entry id so the agent can recall dropped detail on demand
+   * with a bounded search instead of losing it to the summary. Empty when
+   * no session file is known. Sits last so the stub head and the digest
+   * region stay byte-stable regardless of the pointer.
    */
-  private spanTooLarge(preparation: FastCompactPreparation): boolean {
-    const messages = preparation.messagesToSummarize;
-    const historyChars = Array.isArray(messages)
-      ? FastCompactionController.spanChars(messages)
-      : 0;
-    const prefixMessages = preparation.turnPrefixMessages;
-    const prefixChars =
-      preparation.isSplitTurn && Array.isArray(prefixMessages)
-        ? FastCompactionController.spanChars(prefixMessages)
-        : 0;
-    return (historyChars + prefixChars) / CHARS_PER_TOKEN > this.digestMaxSpanTokens;
-  }
-
-  /** Cheap serialized-size estimate of a message list, in characters. */
-  private static spanChars(messages: readonly unknown[]): number {
-    let total = 0;
-    for (const message of messages) {
-      const m = message as { content?: unknown; command?: unknown } | undefined;
-      if (!m || typeof m !== "object") continue;
-      const content = m.content;
-      if (typeof content === "string") {
-        total += content.length;
-      } else if (Array.isArray(content)) {
-        let parts = 0;
-        for (const part of content) {
-          if (parts++ >= MAX_CONTENT_PARTS) break;
-          const block = part as { text?: unknown; data?: unknown } | undefined;
-          if (!block || typeof block !== "object") continue;
-          if (typeof block.text === "string") total += block.text.length;
-          else if (typeof block.data === "string") total += block.data.length;
-        }
-      }
-      if (typeof m.command === "string") total += m.command.length;
-    }
-    return total;
+  private transcriptPointer(
+    preparation: FastCompactPreparation,
+    sessionFile: string | undefined,
+  ): string {
+    if (typeof sessionFile !== "string" || sessionFile.length === 0) return "";
+    return (
+      `Full pre-compaction transcript: ${sessionFile} — entries before ` +
+      `${preparation.firstKeptEntryId} were dropped by this compaction and ` +
+      `remain readable there. Recall with a bounded search, e.g. ` +
+      `grep -m 5 '<term>' ${sessionFile}; never read the file whole.`
+    );
   }
 
   /** Count a completed fast compaction for /cache-stats. */
