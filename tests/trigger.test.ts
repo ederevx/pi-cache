@@ -155,7 +155,7 @@ test("idle-trigger: skips a non-idle or already-expired session", () => {
   assertEq(fired, 0, "not idle: no compaction");
 });
 
-test("idle-trigger: a young warm decision defers the fire past its margin", () => {
+test("idle-trigger: a young warm decision defers the fire past margin+grace", () => {
   const timers = new FakeTimers();
   let since: number | undefined = undefined;
   let fired = 0;
@@ -180,12 +180,18 @@ test("idle-trigger: a young warm decision defers the fire past its margin", () =
   // A warm decision lands after arming, 250s into its 260s margin.
   since = 250_000;
   timers.fire(timers.ids()[0]);
-  assertEq(fired, 0, "the fire waits for the margin to elapse");
-  assertEq(timers.ids().length, 1, "re-armed for the margin remainder");
-  assertEq(timers.delayOf(timers.ids()[0]), 10_000, "defers the unelapsed margin");
-  since = 260_000;
+  assertEq(fired, 0, "the fire waits out margin+grace");
+  assertEq(timers.ids().length, 1, "re-armed for the unelapsed horizon");
+  assertEq(timers.delayOf(timers.ids()[0]), 40_000, "defers to margin+grace");
+  // Past the margin but within the round-trip grace: still deferred,
+  // because the refresh may be in flight (late timers are anticipated).
+  since = 265_000;
   timers.fire(timers.ids()[0]);
-  assertEq(fired, 1, "fires once the margin has elapsed");
+  assertEq(fired, 0, "the grace covers an in-flight refresh");
+  assertEq(timers.delayOf(timers.ids()[0]), 25_000, "defers the unelapsed grace");
+  since = 290_000;
+  timers.fire(timers.ids()[0]);
+  assertEq(fired, 1, "fires once margin+grace has elapsed");
 });
 
 test("idle-trigger: an elapsed warm margin does not delay the fire", () => {
