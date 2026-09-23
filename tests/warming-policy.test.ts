@@ -65,3 +65,16 @@ test("policy: non-numeric economics fields count as unavailable", () => {
     "warm",
   );
 });
+
+test("policy: an empty prefix defers even when pi's economics are absent", () => {
+  let hasTurns = false;
+  const policy = new WarmingPolicy(true, { hasPromptEvidence: () => hasTurns });
+  assertEq(policy.decide({}), undefined, "no prompt evidence: defer");
+  hasTurns = true;
+  assertEq(policy.decide({}), "warm", "a recorded turn keeps the cheap warm");
+});
+
+test("policy: without the evidence seam the old unavailable-economics warm stands", () => {
+  const policy = new WarmingPolicy(true);
+  assertEq(policy.decide({}), "warm", "unwired evidence keeps prior behavior");
+});

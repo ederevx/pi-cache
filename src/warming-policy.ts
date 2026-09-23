@@ -30,7 +30,10 @@ export class WarmingPolicy {
    *  override fires only when pi's economics also justified the warm. */
   private static readonly SAVINGS_FLOOR_DOLLARS = 0.05;
 
-  constructor(private enabledOn: boolean = false) {}
+  constructor(
+    private enabledOn: boolean = false,
+    private readonly evidence: { hasPromptEvidence?: () => boolean } = {},
+  ) {}
 
   /** The live force-warm switch (toggled from /cache-settings). */
   get enabled(): boolean {
@@ -47,8 +50,14 @@ export class WarmingPolicy {
     if (!this.enabledOn) return undefined;
     const savings = this.expectedSavings(event);
     // pi's economics are absent or incomputable (sub-minimum warm costs
-    // hide the fields): keep the refresh — the cheap, conservative warm.
-    if (savings === undefined) return "warm";
+    // hide the fields): keep the refresh — the cheap, conservative warm —
+    // but only when a real prompt exists to keep warm. An empty prefix
+    // (no turn recorded yet) has nothing to refresh, so defer.
+    if (savings === undefined) {
+      return this.evidence.hasPromptEvidence && !this.evidence.hasPromptEvidence()
+        ? undefined
+        : "warm";
+    }
     return savings >= WarmingPolicy.SAVINGS_FLOOR_DOLLARS ? "warm" : undefined;
   }
 
