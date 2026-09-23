@@ -110,4 +110,27 @@ bash "$repo/scripts/uninstall.sh" >/dev/null 2>&1 || fail "uninstall exited nonz
 [[ ! -e "$dest/canonicalizer.ts" ]] || fail "untampered file should be removed"
 echo "  ok: mismatched file preserved, others removed"
 
+echo "== install refuses when the package is pinned =="
+# A fresh agent dir: the guard must refuse before anything is written,
+# independent of whatever the tampered-file section left behind.
+guard_home="$scratch/guard-home"
+mkdir -p "$guard_home"
+settings="$guard_home/settings.json"
+printf '{"packages":["git:github.com/ederevx/pi-cache@v9.9.9"]}
+' > "$settings"
+PI_CODING_AGENT_DIR="$guard_home" bash "$repo/scripts/install.sh" 2> "$scratch/guard-err"   && fail "guard exit expected"
+grep -q "installed as a pi package" "$scratch/guard-err" || fail "guard message missing"
+[[ ! -e "$guard_home/extensions/pi-cache" ]] || fail "guard must install nothing"
+echo "  ok: pinned install refuses, nothing installed"
+
+echo "== postinstall drops manual copies beside the package =="
+rm -f "$settings"
+bash "$repo/scripts/install.sh" >/dev/null 2>&1 || fail "manual reinstall failed"
+printf '{"packages":["git:github.com/ederevx/pi-cache@v9.9.9"]}
+' > "$settings"
+node "$repo/scripts/postinstall.mjs" 2> "$scratch/post-err"
+grep -q "removed manual-install copies" "$scratch/post-err" || fail "postinstall cleanup missing"
+[[ ! -e "$dest/index.ts" ]] || fail "manifest-owned copy should be removed"
+echo "  ok: manual copies removed beside the package"
+
 echo "scripts test: ok"
