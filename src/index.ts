@@ -107,7 +107,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const retention = new RetentionRewriter(opts.retentionOverride);
   const canonicalizer = new SystemCanonicalizer(opts.canonicalize);
   const cacheKey = new CacheKeySharer(opts.sharedKey);
-  const warmingPolicy = new WarmingPolicy(opts.forceWarm);
+  const warmingPolicy = new WarmingPolicy(opts.forceWarm, {
+    hasPromptEvidence: () => ledger.lastUsage() !== undefined,
+  });
   const envPinned = new Set(loader.envPinnedIds());
   const economics = new CacheEconomics({
     continuationProbability: opts.pressureContinuation,
@@ -154,7 +156,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     envPinned,
   );
 
-  const warming = new WarmingObserver();
+  const warming = new WarmingObserver({
+    // Each newly confirmed warm refresh becomes a ledger row flagged
+    // `warm` (turn-scoped accessors skip it; totals count it), making
+    // idle-mode warming spend visible to /cache-stats.
+    onConfirm: (entry) => {
+      ledger.recordWarm(entry.usage, entry.model ?? "cache-warm");
+    },
+  });
 
   const signals = new SessionSignals(
     {
@@ -336,6 +345,14 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       warming.reconcile(ctx);
       warming.noteDecision(event?.action);
       const action = warmingPolicy.decide(event);
+      if ((action ?? event?.action) === "warm") {
+        // A kept warm resets the provider TTL: re-arm the idle fire from
+        // the newest touch so it lands near the refreshed expiry instead
+        // of the pre-refresh clock, and the fire's margin+grace guard
+        // defers past pi's due refresh. Idle only: a run disarms at
+        // agent_start and its fire would decline anyway.
+        if (ctx?.isIdle?.()) idleTrigger.arm(ctx);
+      }
       if (action) return { action };
     } catch {
       /* observational only */

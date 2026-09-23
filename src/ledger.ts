@@ -141,22 +141,40 @@ export class CacheLedger {
   }
 
   /** Last completed turn's usage for the current session, for the
-   *  auto-compaction trigger. */
+   *  auto-compaction trigger. Warm-refresh rows (extras.warm) are not
+   *  turns: the accessors below skip them so a background refresh can
+   *  never masquerade as turn activity. */
   lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined {
-    const last = this.sessionRows[this.sessionRows.length - 1];
+    const last = this.lastTurnRow();
     return last ? { input: last.input, cacheRead: last.cacheRead, cacheWrite: last.cacheWrite } : undefined;
   }
 
   /** Milliseconds since the current session's last recorded turn ended. */
   msSinceLastTurn(): number {
-    const last = this.sessionRows[this.sessionRows.length - 1];
+    const last = this.lastTurnRow();
     return last ? Date.now() - last.ts : Number.POSITIVE_INFINITY;
   }
 
   /** Globally-unique id of the current session's last row, if any. */
   lastRowId(): string | undefined {
-    const last = this.sessionRows[this.sessionRows.length - 1];
-    return last?.id;
+    return this.lastTurnRow()?.id;
+  }
+
+  /** The session's newest non-warm row (a real turn), scanning back over
+   *  any warm-refresh rows appended after it. */
+  private lastTurnRow(): UsageRow | undefined {
+    for (let i = this.sessionRows.length - 1; i >= 0; i--) {
+      if (this.sessionRows[i].warm !== true) return this.sessionRows[i];
+    }
+    return undefined;
+  }
+
+  /** Record one confirmed warm refresh as a ledger row, flagged `warm`
+   *  so turn-scoped accessors skip it while totals and /cache-stats
+   *  still count it. Stamp time is reconcile time, at most one refresh
+   *  cadence after the refresh itself landed. */
+  recordWarm(usage: Usage | undefined, model: string): UsageRow | undefined {
+    return this.record(usage, model, undefined, { warm: true });
   }
 
   /** Flush queued appends, then bound the file; call once at shutdown. */

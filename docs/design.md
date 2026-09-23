@@ -224,11 +224,21 @@ Warming: pi decides warm/stop from expected savings
 computed from a request-scoped retention tier pi-cache's per-request
 rewrite can change after the fact. When `PI_CACHE_FORCE_WARM` is on,
 the policy keeps the refresh only where pi's own numbers clear its
-floor (or are unavailable — sub-minimum warm costs hide the fields);
-otherwise pi's decision stands. `WarmingSchedule` mirrors pi's
+floor — and only when a real turn exists to keep warm (an empty
+prefix defers) — deferring otherwise. `WarmingSchedule` mirrors pi's
 refresh margin (90% of the effective tier's lifetime less a 10s
 margin) from the tier the rewrite actually put on the wire, so the
 guard and the idle race window follow the wire, not pi's env tier.
+The idle fire defers until margin plus a 30s round-trip grace: the
+`cache_warm` confirmation only lands after the refresh response, so
+a fire inside the grace window could compact a cache being refreshed.
+A kept warm also re-arms the idle fire from the newest touch (idle
+only), so compaction lands near the refreshed expiry instead of the
+pre-refresh clock. Each confirmed refresh is recorded as a ledger row
+flagged `warm` — totals and /cache-stats count it, while the
+turn-scoped accessors (`lastUsage`, `msSinceLastTurn`, `lastRowId`)
+skip it so a background refresh can never masquerade as turn
+activity.
 
 ### 6. Removed: affinity observation
 

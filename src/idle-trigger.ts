@@ -13,9 +13,9 @@
  * the confirmation the idle timer can read a stale cache touch and fire a
  * compaction into a cache pi is about to refresh. `arm` therefore guards
  * on the injected `warmingMarginMs`: while a warm decision is younger than
- * its refresh margin, the fire is deferred until the margin elapses (the
- * refresh will have landed and reset the idle clock by then). The guard
- * is observational when no margin is injected, preserving the pre-guard
+ * its margin plus a round-trip grace, the fire is deferred until the
+ * refresh has had time to land and reset the idle clock. The guard is
+ * observational when no margin is injected, preserving the pre-guard
  * behavior for tests and callers that do not wire it.
  */
 
@@ -38,6 +38,12 @@ export interface IdleTriggerOptions<Ctx> {
   msSinceWarmDecision?(): number | undefined;
   /** The warm refresh margin (ms) a young decision defers the fire by. */
   warmMarginMs?(): number | undefined;
+  /** Round-trip allowance (ms) past the margin: pi's refresh may still
+   *  be in flight when the margin elapses (late timers are anticipated
+   *  upstream), and the `cache_warm` confirmation only lands after the
+   *  response. The fire defers until margin+grace, so it cannot compact
+   *  into a cache being refreshed. Default 30s. */
+  warmGraceMs?: number;
   /** Injectable timer seams for deterministic tests. */
   setTimeoutFn?: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimeoutFn?: (handle: TimerHandle) => void;
@@ -84,9 +90,10 @@ export class IdleTrigger<Ctx> {
     this.timer = handle;
   }
 
-  /** Fire the idle compaction if the session is still idle. A warm decision
-   *  that arrived after arming re-defers here: the fire waits out the
-   *  unelapsed refresh margin so the refresh can land and reset the clock. */
+  /** Fire the idle compaction if the session is still idle. A warm
+   *  decision that arrived after arming re-defers here: the fire waits
+   *  out the refresh margin plus the round-trip grace so the refresh
+   *  can land and reset the idle clock first. */
   private fire(ctx: Ctx): void {
     try {
       if (!this.opts.isIdle(ctx)) return;
@@ -102,12 +109,14 @@ export class IdleTrigger<Ctx> {
   }
 
   /** How long a young warm decision defers the fire: the unelapsed part
-   *  of its refresh margin, so the refresh can land and reset the idle
-   *  clock first. An unobserved guard (no margins) defers nothing. */
+   *  of its refresh margin plus the round-trip grace, so the refresh
+   *  lands and resets the idle clock before the fire. An unobserved
+   *  guard (no margins) defers nothing. */
   private warmDeferralMs(): number {
     const since = this.opts.msSinceWarmDecision?.();
     const margin = this.opts.warmMarginMs?.();
     if (typeof since !== "number" || typeof margin !== "number") return 0;
-    return Math.max(0, margin - since);
+    const horizon = margin + (this.opts.warmGraceMs ?? 30_000);
+    return since >= horizon ? 0 : horizon - since;
   }
 }

@@ -263,3 +263,27 @@ test("ledger: old-schema rows rehydrate alongside extended rows", async () => {
   assertEq(parsed[0].cacheTtlMs, undefined, "old row untouched");
   assertEq(parsed[1].cacheTtlMs, 300_000, "new row carries extras");
 });
+
+test("ledger: warm rows are recorded but never masquerade as turns", () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true);
+  ledger.useSession("s");
+  ledger.record({ ...usage, input: 100, cacheRead: 900 }, "m");
+  const turnGap = ledger.msSinceLastTurn();
+  ledger.recordWarm({ input: 5000, output: 1, cacheRead: 50_000, cacheWrite: 0, totalTokens: 55_001 }, "m");
+  assertEq(sink.rows.length, 2, "warm row recorded");
+  assertEq(sink.rows[1].warm, true, "flagged warm");
+  assertEq(ledger.totals().n, 2, "totals count warm rows");
+  assertEq(ledger.sessionTotals().n, 2, "session totals count warm rows");
+  assert(ledger.msSinceLastTurn() >= turnGap, "warm rows do not reset the turn clock");
+  assertEq(ledger.lastUsage()?.input, 100, "lastUsage is the real turn");
+  assertEq(ledger.lastRowId(), sink.rows[0].id, "window key skips warm rows");
+});
+
+test("ledger: recordWarm of nothing records nothing", () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, false);
+  ledger.recordWarm(undefined, "m");
+  ledger.recordWarm({ input: 1, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 1 }, "m");
+  assertEq(sink.rows.length, 0, "disabled or empty usage records nothing");
+});
