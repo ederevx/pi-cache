@@ -13,7 +13,7 @@
  * compatible endpoint).
  */
 
-import { createHash } from "node:crypto";
+import { PrefixHead } from "./prefix-head.ts";
 
 export class CacheKeySharer {
   constructor(private enabledOn: boolean = false) {}
@@ -42,19 +42,6 @@ export class CacheKeySharer {
 
   /** Stable 24-hex digest of the prefix head (mirrors the pinner's head). */
   private headHash(body: Record<string, unknown>): string {
-    const messages = (body.messages as Array<{ role?: unknown; content?: unknown }>) ?? [];
-    return createHash("sha256")
-      .update(
-        JSON.stringify({
-          model: body.model,
-          sys: messages
-            .filter((m) => m.role === "system" || m.role === "developer")
-            .slice(0, 2)
-            .map((m) => m.content),
-          tools: body.tools ?? null,
-        }),
-      )
-      .digest("hex")
-      .slice(0, 24);
+    return PrefixHead.hash(body, 24);
   }
 }

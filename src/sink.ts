@@ -8,16 +8,9 @@
  * session.
  */
 
-import {
-  appendFileSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { AtomicFile } from "./atomic-file.ts";
 import type { BackupStore } from "./backup-store.ts";
 import type { RecordSink, UsageRow } from "./ledger.ts";
 
@@ -27,17 +20,15 @@ const LOCK_STALE_MS = 30_000;
 export class FileRecordSink implements RecordSink {
   private prepared = false;
 
+  /** Synchronous short sleep; never used on the hot path. */
+  private static sleep(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  }
+
   constructor(
     private readonly path: string,
     private readonly backups?: BackupStore,
   ) {}
-
-  append(row: UsageRow): void {
-    // Prefer the lock so a concurrent rewrite cannot clobber the row; retry
-    // briefly under contention, then append unlocked rather than drop it.
-    if (this.appendLocked(row)) return;
-    this.appendUnlocked(row);
-  }
 
   load(): UsageRow[] {
     try {
@@ -53,7 +44,7 @@ export class FileRecordSink implements RecordSink {
    * is held across load and write, so a concurrent append cannot be lost.
    */
   transform(keep: (rows: UsageRow[]) => UsageRow[]): void {
-    this.withLock(() => {
+    this.underLock(() => {
       const raw = this.load();
       const next = keep(raw);
       if (next === raw) return;
@@ -95,40 +86,21 @@ export class FileRecordSink implements RecordSink {
     this.prepared = true;
   }
 
-  /** Ensure the directory, then run `fn` holding the rewrite lock. */
-  private withLock(fn: () => void): void {
+  /** Ensure the directory, then run `fn` holding the rewrite lock.
+   *  Fail-open: false means the lock was unavailable or `fn` threw
+   *  (telemetry must never break the session); the lock is always
+   *  released. */
+  private underLock(fn: () => void): boolean {
     try {
       this.ensureDir();
     } catch {
       /* an unwritable ledger dir disables persistence, never the session */
-      return;
-    }
-    const lock = this.acquireLockWithRetry();
-    if (lock === undefined) return;
-    try {
-      fn();
-    } catch {
-      /* telemetry must never break the session */
-    } finally {
-      try {
-        rmSync(lock, { force: true });
-      } catch {
-        /* a later sweep clears a leaked lock */
-      }
-    }
-  }
-
-  /** Append one row while holding the lock; false means contention. */
-  private appendLocked(row: UsageRow): boolean {
-    try {
-      this.ensureDir();
-    } catch {
       return false;
     }
     const lock = this.acquireLockWithRetry();
     if (lock === undefined) return false;
     try {
-      appendFileSync(this.path, JSON.stringify(row) + "\n", "utf8");
+      fn();
       return true;
     } catch {
       return false;
@@ -141,14 +113,21 @@ export class FileRecordSink implements RecordSink {
     }
   }
 
-  /** Last-resort append that never drops a row when the lock is unavailable. */
-  private appendUnlocked(row: UsageRow): void {
+  append(row: UsageRow): void {
+    // Prefer the lock so a concurrent rewrite cannot clobber the row; retry
+    // briefly under contention, then append unlocked rather than drop it.
+    if (this.underLock(() => this.appendBytes(row))) return;
     try {
       this.ensureDir();
-      appendFileSync(this.path, JSON.stringify(row) + "\n", "utf8");
+      this.appendBytes(row);
     } catch {
       /* telemetry must never break the session */
     }
+  }
+
+  /** Serialize one row onto the ledger file; callers own the lock and dir. */
+  private appendBytes(row: UsageRow): void {
+    appendFileSync(this.path, JSON.stringify(row) + "\n", "utf8");
   }
 
   /** Retry the lock briefly so a short rewrite does not drop an append. */
@@ -159,11 +138,6 @@ export class FileRecordSink implements RecordSink {
       FileRecordSink.sleep(1);
     }
     return undefined;
-  }
-
-  /** Synchronous short sleep; never used on the hot path. */
-  private static sleep(ms: number): void {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   }
 
   /** Acquire the rewrite lock, clearing a stale one; undefined on contention. */
@@ -194,23 +168,14 @@ export class FileRecordSink implements RecordSink {
     }
   }
 
-  /** Write all rows to a sibling temp file and rename it over the ledger. */
+  /** Write all rows to a sibling temp file and rename it over the ledger,
+   *  preserving the current permissions (owner-only by default). */
   private writeAtomic(rows: UsageRow[]): void {
-    const tmp = `${this.path}.${process.pid}.tmp`;
     const body = rows.map((row) => JSON.stringify(row)).join("\n");
-    writeFileSync(tmp, body.length > 0 ? body + "\n" : "", {
-      encoding: "utf8",
-      mode: this.existingMode(),
-    });
-    renameSync(tmp, this.path);
-  }
-
-  /** Preserve the ledger's current permissions; default to owner-only. */
-  private existingMode(): number {
-    try {
-      return statSync(this.path).mode & 0o777;
-    } catch {
-      return 0o600;
-    }
+    AtomicFile.write(
+      this.path,
+      body.length > 0 ? body + "\n" : "",
+      AtomicFile.modeOf(this.path, 0o600),
+    );
   }
 }
