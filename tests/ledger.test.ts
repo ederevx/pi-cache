@@ -201,3 +201,65 @@ test("ledger: close flushes and bounds the file", async () => {
   await ledger.close();
   assertEq(sink.rows.length, 2, "file bounded after close");
 });
+
+test("ledger: record with extras carries the cache-state fields", () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true);
+  ledger.record(usage, "m", "s", {
+    cacheTtlMs: 300_000,
+    piTtlMs: 300_000,
+    retentionLong: false,
+    warm: true,
+    msSinceCacheTouch: 42_000,
+  });
+  assertEq(sink.rows.length, 1);
+  assertEq(sink.rows[0].cacheTtlMs, 300_000);
+  assertEq(sink.rows[0].piTtlMs, 300_000);
+  assertEq(sink.rows[0].retentionLong, false);
+  assertEq(sink.rows[0].warm, true);
+  assertEq(sink.rows[0].msSinceCacheTouch, 42_000);
+});
+
+test("ledger: record without extras keeps the old schema", () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true);
+  ledger.record(usage, "m", "s");
+  const row = sink.rows[0];
+  assertEq(row.cacheTtlMs, undefined, "no cacheTtlMs");
+  assertEq(row.piTtlMs, undefined, "no piTtlMs");
+  assertEq(row.retentionLong, undefined, "no retentionLong");
+  assertEq(row.warm, undefined, "no warm");
+  assertEq(row.msSinceCacheTouch, undefined, "no msSinceCacheTouch");
+});
+
+test("ledger: old-schema rows rehydrate alongside extended rows", async () => {
+  const file = join(scratchDir(), "ledger-mixed-schema.jsonl");
+  const oldRow = {
+    id: "old:1",
+    seq: 0,
+    ts: Date.now() - 1000,
+    pid: 1,
+    session: "s",
+    model: "m",
+    input: 10,
+    output: 0,
+    cacheRead: 5,
+    cacheWrite: 0,
+    totalTokens: 15,
+  };
+  writeFileSync(file, JSON.stringify(oldRow) + "\n");
+  const ledger = new CacheLedger(new FileRecordSink(file), true);
+  assertEq(ledger.totals().n, 1, "old row rehydrates");
+  ledger.record(usage, "m", "s", { cacheTtlMs: 300_000, warm: false });
+  await waitFor(() => {
+    try {
+      return readFileSync(file, "utf8").split("\n").filter(Boolean).length === 2;
+    } catch {
+      return false;
+    }
+  }, "extended row persisted");
+  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  const parsed = lines.map((l) => JSON.parse(l) as UsageRow);
+  assertEq(parsed[0].cacheTtlMs, undefined, "old row untouched");
+  assertEq(parsed[1].cacheTtlMs, 300_000, "new row carries extras");
+});
