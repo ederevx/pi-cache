@@ -3,6 +3,22 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.10.0] - 2026-09-23
+
+### Added
+
+- Dropped-span digest for fast compaction (`src/digest.ts`, behind the
+  new `fastDigest` /cache-settings switch, `PI_CACHE_FAST_DIGEST`
+  env var, default on): a bounded deterministic extractive record of
+  the summarized span (files from pi's `fileOps`, one capped line per
+  turn) appended after the stub, folding the previous compaction's
+  digest blocks in so the record accumulates across repeated
+  compactions instead of the prior summary vanishing inside the next
+  dropped span. Position is cache-neutral (after the stub text); spans
+  above `PI_CACHE_FAST_DIGEST_MAX_SPAN_TOKENS` (default 24000) fall
+  back to pi's LLM summarizer; digest failure degrades to the bare
+  stub.
+
 ## [0.8.0] - 2026-09-22
 
 ### Removed
