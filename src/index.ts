@@ -25,7 +25,10 @@
  *   session_before_compact   — warm-cache advisory (observational) then,
  *                              when fast compaction is on, the cache-aware
  *                              override that replaces pi's summarizer for
- *                              EVERY compaction reason ("overall")
+ *                              EVERY compaction reason ("overall"), with
+ *                              a deterministic digest of the dropped span
+ *                              appended after the stub (PI_CACHE_FAST_DIGEST;
+ *                              huge spans fall back to pi's summarizer)
  *   session_compact          — autocompaction accounting (all sources) +
  *                              telemetry
  *   session_compact_failed   — failure advisory
@@ -127,6 +130,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const fastcompact = new FastCompactionController({
     enabled: opts.fastCompact,
     branchEnabled: opts.fastBranchSummary,
+    digestEnabled: opts.fastDigest,
+    digestMaxSpanTokens: opts.fastDigestMaxSpanTokens,
   });
   const autocompact = new AutocompactController({
     enabled: opts.autoCompact,
