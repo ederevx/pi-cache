@@ -287,3 +287,14 @@ test("ledger: recordWarm of nothing records nothing", () => {
   ledger.recordWarm({ input: 1, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 1 }, "m");
   assertEq(sink.rows.length, 0, "disabled or empty usage records nothing");
 });
+
+test("ledger: lastRequestUsage sees warm rows lastUsage skips", () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true);
+  ledger.useSession("s");
+  ledger.record({ ...usage, input: 100, cacheRead: 900 }, "m");
+  ledger.recordWarm({ input: 5000, output: 1, cacheRead: 50_000, cacheWrite: 0, totalTokens: 55_001 }, "m");
+  assertEq(ledger.lastUsage()?.input, 100, "turn-scoped view skips the warm row");
+  assertEq(ledger.lastRequestUsage()?.input, 5000, "request view reads the warm row");
+  assertEq(ledger.lastRequestUsage()?.cacheRead, 50_000, "warm refresh carries its usage");
+});
