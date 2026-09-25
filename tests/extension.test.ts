@@ -17,7 +17,7 @@ import {
   waitFor,
 } from "./harness.ts";
 import { join } from "node:path";
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { FAST_BRANCH_STUB, FAST_SUMMARY_STUB } from "../src/fastcompact.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
@@ -778,6 +778,53 @@ test("extension: option rows toggle, persist, and take effect", async () => {
     await pi.emit("message_end", usageEvent, { model: { id: "m1" } });
     await pi.commands.get("cache-stats")!.handler([], statsCtx as never);
     assert(notified.includes("global: 1 req"), "telemetry off drops the new turn: " + notified);
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
+test("extension: /cache-settings restore clears the stored overrides", async () => {
+  const root = join(scratchDir(), "e2e-restore");
+  mkdirSync(root, { recursive: true });
+  const settingsFile = join(root, "settings.json");
+  writeFileSync(
+    settingsFile,
+    JSON.stringify({ telemetry: false, anchor: false }) + "\n",
+    { mode: 0o600 },
+  );
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: settingsFile,
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    let notified = "";
+    const notifyCtx = {
+      mode: "print",
+      ui: { notify: (text: string) => { notified = text; } },
+    };
+    await pi.commands.get("cache-settings")!.handler("restore", notifyCtx as never);
+    assert(notified.includes("restored default configuration"), "notify: " + notified);
+    assertEq(readFileSync(settingsFile, "utf8").trim(), "{}", "overrides cleared");
+
+    // The `reset` alias behaves the same.
+    await pi.commands.get("cache-settings")!.handler("reset", notifyCtx as never);
+    assert(notified.includes("restored default configuration"), "alias: " + notified);
+
+    // The stderr fallback listing still names the action row.
+    let printed = "";
+    const original = console.error;
+    console.error = (line?: unknown) => {
+      printed += String(line);
+    };
+    try {
+      await pi.commands.get("cache-settings")!.handler("", { mode: "print" } as never);
+    } finally {
+      console.error = original;
+    }
+    assert(printed.includes("Restore default configuration"), "fallback lists the row");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
