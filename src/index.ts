@@ -155,7 +155,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     advisor,
     autocompact,
     fastcompact,
-    statsPresenter,
+    // The board toggles the miss-diagnosis switch that SettingsPresenter
+    // owns; CacheStatsPresenter is a stateless renderer and holds no flag.
+    settingsPresenter,
     settingsStore,
     envPinned,
   );
@@ -483,8 +485,16 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("cache-settings", {
     description: "Edit every pi-cache option in place",
-    handler: async (_args, ctx) => {
+    handler: async (args, ctx) => {
       try {
+        // `/cache-settings restore` (alias `reset`) is the non-interactive
+        // path; anything else opens (or prints) the switch view.
+        const argument = typeof args === "string" ? args.trim().toLowerCase() : "";
+        if (argument === "restore" || argument === "reset") {
+          const message = switchBoard.restoreDefaults();
+          ctx.ui?.notify?.(message, "info");
+          return;
+        }
         await settingsPresenter.present(
           switchBoard.snapshot(),
           ctx.ui,
@@ -494,6 +504,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
             if (message) ctx.ui?.notify?.(message, "info");
           },
           envPinned,
+          () => switchBoard.restoreDefaults(),
         );
       } catch {
         console.error("pi-cache: could not render settings");

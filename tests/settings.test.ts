@@ -9,6 +9,7 @@
 
 import { test, assert, assertEq } from "./harness.ts";
 import { SettingsPresenter, type LiveSettings, type ViewTheme } from "../src/settings.ts";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 
 const THEME: ViewTheme = { fg: (_color, text) => text };
 
@@ -62,6 +63,56 @@ test("settings: non-tui modes print the listing and never open the view", async 
   }
   assert(printed.includes("Fast compaction"), "listing names the rows");
   assert(printed.includes("current: on"), "listing shows values");
+});
+
+test("settings: the restore action row appears only with a callback", () => {
+  const bare = new SettingsPresenter().rows(LIVE);
+  assertEq(bare.length, 13, "no action row without a callback");
+  const rows = new SettingsPresenter().rows(LIVE, new Set(), () => "done");
+  assertEq(rows.length, 14, "action row appended");
+  const action = rows[rows.length - 1];
+  assertEq(action.id, "restoreDefaults");
+  assertEq(action.title, "Restore default configuration");
+  assertEq(action.value, "");
+  assert(action.submenu !== undefined, "action row opens a submenu");
+});
+
+test("settings: confirming restore defaults runs the reset callback once", () => {
+  // The selector renders through pi's global theme; initialize it.
+  initTheme("dark", false);
+  let calls = 0;
+  let closed = false;
+  const action = new SettingsPresenter().rows(LIVE, new Set(), () => {
+    calls++;
+    return "pi-cache: restored";
+  })[13];
+  const component = action.submenu!("", () => {
+    closed = true;
+  });
+  component.handleInput("\n");
+  assertEq(calls, 1, "reset invoked");
+  assertEq(closed, true, "submenu closed after the choice");
+});
+
+test("settings: the fallback listing includes the restore action row", async () => {
+  let printed = "";
+  const original = console.error;
+  console.error = (line?: unknown) => {
+    printed += String(line);
+  };
+  try {
+    await new SettingsPresenter().present(
+      LIVE,
+      undefined,
+      "print",
+      () => {},
+      new Set(),
+      () => "done",
+    );
+  } finally {
+    console.error = original;
+  }
+  assert(printed.includes("Restore default configuration"), "listing names the action row");
 });
 
 test("settings: tui mode renders the two-column view through the custom UI", async () => {

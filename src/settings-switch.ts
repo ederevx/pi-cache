@@ -31,6 +31,8 @@ interface SwitchRoute {
   key: keyof UserSettings;
   /** Human label used in the notification text. */
   label: string;
+  /** The built-in default applied by restoreDefaults(). */
+  def: boolean;
   apply(enabled: boolean): void;
 }
 
@@ -54,31 +56,35 @@ export class SettingsSwitchBoard {
     private readonly pinned: ReadonlySet<string> = new Set(),
   ) {
     this.routes = {
-      telemetry: { key: "telemetry", label: "telemetry", apply: (on) => this.ledger.setEnabled(on) },
-      dedupTools: { key: "dedupTools", label: "dedup tools", apply: (on) => this.normalizer.setDedupTools(on) },
-      anchor: { key: "anchor", label: "breakpoint anchor", apply: (on) => this.anchor.setEnabled(on) },
+      telemetry: { key: "telemetry", label: "telemetry", def: true, apply: (on) => this.ledger.setEnabled(on) },
+      dedupTools: { key: "dedupTools", label: "dedup tools", def: true, apply: (on) => this.normalizer.setDedupTools(on) },
+      anchor: { key: "anchor", label: "breakpoint anchor", def: true, apply: (on) => this.anchor.setEnabled(on) },
       retentionOverride: {
         key: "retentionOverride",
         label: "long retention override",
+        def: false,
         apply: (on) => this.retention.setEnabled(on),
       },
       canonicalize: {
         key: "canonicalize",
         label: "listing canonicalization",
+        def: true,
         apply: (on) => this.canonicalizer.setEnabled(on),
       },
-      sharedKey: { key: "sharedKey", label: "shared cache key", apply: (on) => this.cacheKey.setEnabled(on) },
-      forceWarm: { key: "forceWarm", label: "force warming", apply: (on) => this.warmingPolicy.setEnabled(on) },
+      sharedKey: { key: "sharedKey", label: "shared cache key", def: false, apply: (on) => this.cacheKey.setEnabled(on) },
+      forceWarm: { key: "forceWarm", label: "force warming", def: false, apply: (on) => this.warmingPolicy.setEnabled(on) },
       missDiagnosis: {
         key: "missDiagnosis",
         label: "miss diagnosis",
+        def: true,
         apply: (on) => this.stats.setMissDiagnosisEnabled(on),
       },
-      advisory: { key: "advisory", label: "advisory", apply: (on) => this.advisor.setEnabled(on) },
-      autoCompact: { key: "autoCompact", label: "auto-compaction", apply: (on) => this.autocompact.setEnabled(on) },
+      advisory: { key: "advisory", label: "advisory", def: true, apply: (on) => this.advisor.setEnabled(on) },
+      autoCompact: { key: "autoCompact", label: "auto-compaction", def: true, apply: (on) => this.autocompact.setEnabled(on) },
       fastCompaction: {
         key: "fastCompaction",
         label: "fast compaction",
+        def: true,
         apply: (on) => {
           this.fast.setEnabled(on);
           this.autocompact.setCacheNeutral(on);
@@ -87,11 +93,13 @@ export class SettingsSwitchBoard {
       fastDigest: {
         key: "fastDigest",
         label: "fast digest",
+        def: true,
         apply: (on) => this.fast.setDigestEnabled(on),
       },
       fastBranchSummary: {
         key: "fastBranchSummary",
         label: "fast branch summary",
+        def: true,
         apply: (on) => this.fast.setBranchEnabled(on),
       },
     };
@@ -114,6 +122,25 @@ export class SettingsSwitchBoard {
       fastDigest: this.fast.digestEnabled,
       fastBranchSummary: this.fast.branchEnabled,
     };
+  }
+
+  /** Return every option to its built-in default and delete the stored
+   *  overrides. Rows pinned by a PI_CACHE_* env var keep the env value
+   *  (env wins on every restart) but are named in the notification; the
+   *  stored file is cleared either way, since a pin makes its stored
+   *  override unreachable. */
+  restoreDefaults(): string {
+    const pinned: string[] = [];
+    for (const [id, route] of Object.entries(this.routes)) {
+      if (this.pinned.has(id)) {
+        pinned.push(route.label);
+        continue;
+      }
+      route.apply(route.def);
+    }
+    this.store.reset();
+    const suffix = pinned.length === 0 ? "" : `; pinned by PI_CACHE_* env: ${pinned.join(", ")}`;
+    return `pi-cache: restored default configuration (stored overrides cleared)${suffix}`;
   }
 
   /** Apply the row's new value to its owner, persist it, and notify. */

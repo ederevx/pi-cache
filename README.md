@@ -65,6 +65,9 @@ opt-in. Disable any feature with its `PI_CACHE_*` env var (see
 `src/constants.ts`) or with the `/cache-settings` switch (which
 persists to pi-cache's owned
 `~/.pi/agent/.pi-cache/settings.json`; a set env var pins its row).
+`/cache-settings restore` — or the view's **Restore default
+configuration** action — deletes the stored overrides and returns every
+option to its built-in default; env-pinned rows keep the env value.
 
 - **Tool dedup** — exact-schema tool dedup; volatile fields (cwd,
   absolute paths) removed from tool definitions.

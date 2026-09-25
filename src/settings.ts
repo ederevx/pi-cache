@@ -11,13 +11,25 @@
 
 import { CacheSettingsView } from "./settings-view.ts";
 import { FeatureSwitch } from "./feature-switch.ts";
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import {
+  ExtensionSelectorComponent,
+  type ExtensionUIContext,
+} from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
+
+/** A row's optional submenu factory, matching pi's SettingItem.submenu. */
+export type SettingSubmenu = (
+  currentValue: string,
+  done: (selectedValue?: string, options?: { navigateTo?: string }) => void,
+) => Component;
 
 export interface SettingRow {
   id: string;
   title: string;
   description: string;
   value: string;
+  /** Present only on action rows: opens a submenu instead of cycling. */
+  submenu?: SettingSubmenu;
 }
 
 /**
@@ -66,7 +78,11 @@ export class SettingsPresenter {
   /** The option rows, in settings-pane order, from the live snapshot.
    *  Rows whose PI_CACHE_* env var is pinned carry a marker so the user
    *  sees why a toggle would not stick across restarts. */
-  rows(live: LiveSettings, pinned: ReadonlySet<string> = new Set()): SettingRow[] {
+  rows(
+    live: LiveSettings,
+    pinned: ReadonlySet<string> = new Set(),
+    onRestore?: () => string,
+  ): SettingRow[] {
     const on = (b: boolean): string => (b ? "on" : "off");
     const row = (id: string, title: string, description: string, value: string): SettingRow => ({
       id,
@@ -74,7 +90,7 @@ export class SettingsPresenter {
       description,
       value,
     });
-    return [
+    const rows = [
       row("telemetry", "Telemetry", "Record per-request cache usage to the ledger", on(live.telemetry)),
       row("dedupTools", "Dedup tools", "Drop exact-duplicate tool schemas from the payload", on(live.dedupTools)),
       row("anchor", "Breakpoint anchor", "Pin a fourth Anthropic breakpoint on stable mid-history", on(live.anchor)),
@@ -89,6 +105,33 @@ export class SettingsPresenter {
       row("fastDigest", "Fast digest", "Append a deterministic digest of the dropped span after the fast stub; huge spans fall back to pi's summarizer", on(live.fastDigest)),
       row("fastBranchSummary", "Fast branch summary", "Override /tree branch summarization with a byte-stable stub (lossier than compaction)", on(live.fastBranchSummary)),
     ];
+    if (onRestore) rows.push(this.restoreRow(onRestore));
+    return rows;
+  }
+
+  /** The action row that confirms, then clears the stored overrides and
+   *  returns every controller to its built-in default. `onRestore` is
+   *  expected to notify with the message it returns. */
+  private restoreRow(onRestore: () => string): SettingRow {
+    return {
+      id: "restoreDefaults",
+      title: "Restore default configuration",
+      description:
+        "Delete the stored pi-cache overrides and return every option to its " +
+        "built-in default. Options pinned by a PI_CACHE_* environment variable " +
+        "still win.",
+      value: "",
+      submenu: (_current, done) =>
+        new ExtensionSelectorComponent(
+          "Restore default configuration?",
+          ["Restore defaults", "Cancel"],
+          (option) => {
+            if (option === "Restore defaults") onRestore();
+            done();
+          },
+          () => done(),
+        ),
+    };
   }
 
   /**
@@ -103,8 +146,19 @@ export class SettingsPresenter {
     mode: string | undefined,
     onChange: SettingsChange,
     pinned: ReadonlySet<string> = new Set(),
+    onRestore?: () => string,
   ): Promise<void> {
-    const rows = this.rows(live, pinned);
+    // The confirmation row reports its outcome through the same notify
+    // path as an in-place toggle, so compose the reset with that toast.
+    const restore =
+      onRestore === undefined
+        ? undefined
+        : (): string => {
+            const message = onRestore();
+            ui?.notify?.(message, "info");
+            return message;
+          };
+    const rows = this.rows(live, pinned, restore);
     if (mode === "tui" && typeof ui?.custom === "function") {
       try {
         await ui.custom((_tui, theme, _keybindings, done) =>

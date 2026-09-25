@@ -54,6 +54,7 @@ export class CacheSettingsView extends Container {
       description: row.description,
       currentValue: row.value,
       values: ["on", "off"],
+      submenu: row.submenu,
     };
   }
 

@@ -6,7 +6,7 @@
  * report each owner's live value.
  */
 
-import { test, assert, assertEq, scratchDir } from "./harness.ts";
+import { test, assert, assertEq, assertDeepEq, scratchDir } from "./harness.ts";
 import { SettingsSwitchBoard } from "../src/settings-switch.ts";
 import { SettingsPresenter } from "../src/settings.ts";
 import { CacheLedger, type RecordSink, type UsageRow } from "../src/ledger.ts";
@@ -21,7 +21,7 @@ import { AutocompactController } from "../src/autocompact.ts";
 import { FastCompactionController } from "../src/fastcompact.ts";
 import { UserSettingsStore } from "../src/user-settings.ts";
 import { join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 /** In-memory sink so the ledger needs no files. */
 class MemorySink implements RecordSink {
@@ -191,4 +191,74 @@ test("settings-switch: an unknown id changes nothing", () => {
   assertEq(b.set("nope", "on"), undefined);
   assertEq(fast.enabled, true);
   assertEq(fast.branchEnabled, true);
+});
+
+test("settings-switch: store.reset clears the file and load returns empty", () => {
+  const file = join(scratchDir(), `settings-reset-${seq++}.json`);
+  const store = new UserSettingsStore(file);
+  store.saveFlag("telemetry", false);
+  assertEq(stored(file).telemetry, false, "override persisted");
+  const mode = statSync(file).mode & 0o777;
+  store.reset();
+  assertEq(readFileSync(file, "utf8").trim(), "{}", "empty document written");
+  assertDeepEq(store.load(), {}, "load falls back to built-in defaults");
+  assertEq(statSync(file).mode & 0o777, mode, "file mode preserved");
+});
+
+test("settings-switch: restoreDefaults returns every option to its default", () => {
+  const {
+    board: b,
+    ledger,
+    normalizer,
+    anchor,
+    retention,
+    canonicalizer,
+    cacheKey,
+    warmingPolicy,
+    advisor,
+    autocompact,
+    fast,
+    stats,
+    file,
+  } = board();
+  b.set("telemetry", "off");
+  b.set("dedupTools", "off");
+  b.set("anchor", "off");
+  b.set("retentionOverride", "on");
+  b.set("canonicalize", "off");
+  b.set("sharedKey", "on");
+  b.set("forceWarm", "on");
+  b.set("missDiagnosis", "off");
+  b.set("advisory", "off");
+  b.set("autoCompact", "off");
+  b.set("fastCompaction", "off");
+  b.set("fastDigest", "off");
+  b.set("fastBranchSummary", "off");
+  const message = b.restoreDefaults();
+  assert(message.includes("restored default configuration"), message);
+  assert(message.includes("stored overrides cleared"), message);
+  assertEq(ledger.enabled, true);
+  assertEq(normalizer.dedupTools, true);
+  assertEq(anchor.enabled, true);
+  assertEq(retention.enabled, false);
+  assertEq(canonicalizer.enabled, true);
+  assertEq(cacheKey.enabled, false);
+  assertEq(warmingPolicy.enabled, false);
+  assertEq(stats.missDiagnosisEnabled, true);
+  assertEq(advisor.enabled, true);
+  assertEq(autocompact.enabled, true);
+  assertEq(fast.enabled, true);
+  assertEq(fast.digestEnabled, true);
+  assertEq(fast.branchEnabled, true);
+  assertEq(Object.keys(stored(file)).length, 0, "stored overrides cleared");
+});
+
+test("settings-switch: restoreDefaults skips env-pinned rows and reports them", () => {
+  const { board: b, retention, file } = board(["retentionOverride"]);
+  retention.setEnabled(true); // non-default state, as if the env pinned it on
+  const message = b.restoreDefaults();
+  assert(message.includes("pinned by PI_CACHE_* env"), message);
+  assert(message.includes("long retention override"), message);
+  assertEq(retention.enabled, true, "pinned row keeps its env value");
+  assertEq(Object.keys(stored(file)).length, 0, "file still cleared");
 });
