@@ -92,6 +92,13 @@ export class UserSettingsStore {
     return next;
   }
 
+  /** Restore the store to "no overrides": an empty document, written
+   *  atomically so a later load() returns {} and every built-in default
+   *  applies. The existing file mode is preserved. */
+  reset(): void {
+    this.writeAtomic({});
+  }
+
   /** Set one owned boolean flag and persist it (settings switch board). */
   saveFlag(id: keyof UserSettings, enabled: boolean): UserSettings {
     const patch: UserSettings = {};
