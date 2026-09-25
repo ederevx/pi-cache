@@ -3,6 +3,24 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.10.4] - 2026-09-25
+
+### Added
+
+- "Restore default configuration" in `/cache-settings` (and a
+  `restore`/`reset` argument): `UserSettingsStore.reset()` writes an
+  empty document through the atomic path, preserving the file mode, and
+  `SettingsSwitchBoard.restoreDefaults()` reapplies each route's
+  built-in default live, so fast compaction keeps auto-compaction's
+  cache-neutral relaxation in sync and `PI_CACHE_*` pins still win. The
+  action opens a confirmation submenu.
+
+### Fixed
+
+- Pass `SettingsPresenter` rather than the stateless
+  `CacheStatsPresenter` to the switch board, so the miss-diagnosis
+  toggle has its owning presenter.
+
 ## [0.10.2] - 2026-09-23
 
 ### Changed
