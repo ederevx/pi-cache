@@ -22,6 +22,12 @@ git tag, and the `version` in `package.json` matches the newest tag.
   DeepSeek 4h, Gemini 5m, Kimi 5m/1h, GLM ~2m) before the static
   `PI_CACHE_TTL_SECONDS` fallback.
 
+### Fixed
+
+- The startup temp sweep now covers the model-parameters directory, so an
+  interrupted OpenRouter pull cannot leave a stale atomic temp beside the
+  last-good snapshot.
+
 ### Changed
 
 - The expected-cost horizon now accounts for the last cache touch: the

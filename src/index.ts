@@ -89,13 +89,14 @@ import { dirname } from "node:path";
 export default function piCacheExtension(pi: ExtensionAPI): void {
   const loader = new OptionsLoader();
   const opts = loader.load();
-  // Sweep stale atomic-write temp files before the ledger/settings are read.
-  // The settings file may live outside the ledger dir (PI_CACHE_SETTINGS),
-  // so both directories are swept; sweeping one dir twice is a harmless
-  // no-op for the second call.
+  // Sweep stale atomic-write temp files before the ledger/settings/params
+  // are read. Any of the three files may live outside the default dir
+  // (PI_CACHE_SETTINGS / PI_CACHE_MODEL_PARAMS / PI_CACHE_LEDGER), so each
+  // directory is swept; sweeping one dir twice is a harmless no-op.
   const sweeper = new TempSweeper();
   sweeper.sweep(dirname(opts.ledgerPath));
   sweeper.sweep(dirname(opts.settingsPath));
+  sweeper.sweep(dirname(opts.modelParamsPath));
   // Pre-retention backups, bounded by their own ring/TTL/size GC.
   const backups = new BackupStore(opts.backupDir, {
     keep: opts.backupKeep,
