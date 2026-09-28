@@ -19,6 +19,49 @@ import {
 import { join } from "node:path";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { FAST_BRANCH_STUB, FAST_SUMMARY_STUB } from "../src/fastcompact.ts";
+import { buildSessionProjection } from "@earendil-works/pi-coding-agent";
+
+/** A mid-run turn: a tiny user prompt, a recent assistant tool call huge
+ *  enough to cross pi's keep-recent budget, and its tool result. */
+function toolTurnProjection() {
+  const stamp = (i: number) => new Date(1700000000000 + i * 1000).toISOString();
+  const entries = [
+    {
+      type: "message",
+      id: "e1",
+      parentId: null,
+      timestamp: stamp(1),
+      message: { role: "user", content: [{ type: "text", text: "start" }], timestamp: 1700000000000 },
+    },
+    {
+      type: "message",
+      id: "e2",
+      parentId: "e1",
+      timestamp: stamp(2),
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "x".repeat(90_000) },
+          { type: "toolCall", id: "t1", name: "read", arguments: {} },
+        ],
+        timestamp: 1700000001000,
+      },
+    },
+    {
+      type: "message",
+      id: "e3",
+      parentId: "e2",
+      timestamp: stamp(3),
+      message: {
+        role: "toolResult",
+        toolCallId: "t1",
+        content: [{ type: "text", text: "ok" }],
+        timestamp: 1700000002000,
+      },
+    },
+  ];
+  return buildSessionProjection(entries as never);
+}
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
 
@@ -139,13 +182,71 @@ test("extension: midterm fires at a turn boundary only at saturated half-full co
     await pi.emit("turn_end", { turnIndex: 0 }, below.ctx);
     assertEq(below.compactCalls.length, 0, "below half full does not fire");
 
-    // Half full, cold, economically saturated: fires at the turn boundary.
+    // Half full, cold, economically saturated: a mid-run tool turn proposes
+    // a boundary compaction draft and asks pi to continue the run.
     const saturated = makeCtx({
       model: costs,
       getContextUsage: () => ({ percent: 50, tokens: 50_000, contextWindow: 100_000 }),
+      sessionManager: {
+        getSessionId: () => "sess1",
+        getSessionFile: () => "/x/s1.jsonl",
+        buildSessionProjection: () => toolTurnProjection(),
+      },
     });
-    await pi.emit("turn_end", { turnIndex: 1 }, saturated.ctx);
-    assertEq(saturated.compactCalls.length, 1, "saturated half-full turn fires midterm");
+    const results = await pi.emit("turn_end", { turnIndex: 1, toolResults: [{}] }, saturated.ctx);
+    assertEq(saturated.compactCalls.length, 0, "draft path never calls ctx.compact");
+    const boundary = results[0] as
+      | {
+          entries?: Array<{ type: string; summary: string; firstKeptEntryId: string }>;
+          continue?: boolean;
+        }
+      | undefined;
+    assertEq(boundary?.continue, true, "requests continuation");
+    assertEq(boundary?.entries?.[0]?.type, "compaction", "proposes a compaction entry");
+    assertEq(boundary?.entries?.[0]?.firstKeptEntryId, "e2", "keeps pi's cut point");
+    assert(
+      (boundary?.entries?.[0]?.summary ?? "").startsWith(FAST_SUMMARY_STUB),
+      "uses the fast summary",
+    );
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
+test("extension: midterm falls back to the aborting request without fast compaction", async () => {
+  const root = join(scratchDir(), "midterm-fallback");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+    PI_CACHE_FAST_COMPACT: "0",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    await pi.emit(
+      "message_end",
+      {
+        message: {
+          role: "assistant",
+          usage: { input: 1000, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 1001 },
+        },
+      },
+      { model: { id: "m1" } },
+    );
+    await waitFor(() => existsSync(join(root, "ledger.jsonl")), "ledger persisted");
+    const saturated = makeCtx({
+      model: { cost: { input: 0.8, cacheRead: 0.2, cacheWrite: 0 } },
+      getContextUsage: () => ({ percent: 50, tokens: 50_000, contextWindow: 100_000 }),
+      sessionManager: {
+        getSessionId: () => "sess1",
+        getSessionFile: () => "/x/s1.jsonl",
+        buildSessionProjection: () => toolTurnProjection(),
+      },
+    });
+    await pi.emit("turn_end", { turnIndex: 1, toolResults: [{}] }, saturated.ctx);
+    assertEq(saturated.compactCalls.length, 1, "no fast summary -> aborting compaction request");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
