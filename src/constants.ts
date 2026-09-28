@@ -9,7 +9,7 @@
  * loader owns env parsing so no module-level helper reads a global.
  */
 
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { UserSettingsStore, type UserSettings } from "./user-settings.ts";
 
@@ -65,6 +65,8 @@ export interface PiCacheOptions {
   pressureColdFloor: number;
   /** Fallback provider cache lifetime (s) when the model declares none. */
   cacheTtlSeconds: number;
+  /** Absolute path of the last-good OpenRouter model-parameter snapshot. */
+  modelParamsPath: string;
   /** True when `PI_CACHE_RETENTION=long` selects the long cache tier. */
   cacheRetentionLong: boolean;
   /** Fast cache-aware compaction override (default on; /cache-settings switch). */
@@ -121,6 +123,7 @@ export class OptionsLoader {
       cooldownSeconds: this.envFloat("PI_CACHE_COOLDOWN_SECONDS", 600),
       pressureColdFloor: this.envFloat("PI_CACHE_PRESSURE_COLD_FLOOR", 0.2),
       cacheTtlSeconds: this.envFloat("PI_CACHE_TTL_SECONDS", 300),
+      modelParamsPath: this.modelParamsPath(),
       cacheRetentionLong: this.env["PI_CACHE_RETENTION"] === "long",
       // Fast compaction: env beats the owned settings switch beats default on.
       fastCompact: this.envBool("PI_CACHE_FAST_COMPACT", stored.fastCompaction ?? true),
@@ -153,6 +156,15 @@ export class OptionsLoader {
   /** The owned settings file path (env override exists for hermetic tests). */
   private userSettingsPath(): string {
     return this.env["PI_CACHE_SETTINGS"] || SETTINGS_DEFAULT;
+  }
+
+  /** The last-good model-parameter snapshot path (env override for tests);
+   *  defaults beside the ledger so all pi-cache state stays together. */
+  private modelParamsPath(): string {
+    const override = this.env["PI_CACHE_MODEL_PARAMS"];
+    if (override) return override;
+    const ledger = this.env["PI_CACHE_LEDGER"] || LEDGER_DEFAULT;
+    return join(dirname(ledger), "model-params.json");
   }
 
   /**

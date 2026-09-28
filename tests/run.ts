@@ -44,6 +44,8 @@ import "./normalizer.test.ts";
 import "./temp-sweep.test.ts";
 import "./advisor.test.ts";
 import "./signals.test.ts";
+import "./model-ttl.test.ts";
+import "./model-params.test.ts";
 import "./warming-observer.test.ts";
 import "./warming-policy.test.ts";
 import "./breakpoint-anchor.test.ts";
