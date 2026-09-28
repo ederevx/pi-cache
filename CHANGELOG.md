@@ -3,7 +3,7 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
-## [Unreleased]
+## [0.12.0] - 2026-09-28
 
 ### Added
 
