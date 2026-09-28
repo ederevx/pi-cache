@@ -53,6 +53,7 @@ const CLEAN = {
   PI_CACHE_AUTO_COMPACT: undefined,
   PI_CACHE_MIDTERM: undefined,
   PI_CACHE_LEDGER_MAX_ROWS: undefined,
+  PI_CACHE_MODEL_PARAMS: undefined,
   PI_CACHE_LEDGER_BACKUPS: undefined,
   PI_CACHE_LEDGER_BACKUP_TTL_DAYS: undefined,
   PI_CACHE_LEDGER_BACKUP_MAX_MB: undefined,
@@ -96,6 +97,10 @@ test("constants: default options", () => {
     // Windows (backslash separators) and POSIX alike.
     assert(opts.ledgerPath.endsWith(join(".pi-cache", "ledger.jsonl")), "default ledger path");
     assertEq(opts.ledgerMaxRows, 20000, "default retained ledger window");
+    assert(
+      opts.modelParamsPath.endsWith(join(".pi-cache", "model-params.json")),
+      "default model-params path",
+    );
     assertEq(opts.backupKeep, 3, "default backup ring");
     assertEq(opts.backupTtlDays, 7, "default backup TTL");
     assertEq(opts.backupMaxMb, 32, "default backup size cap");
