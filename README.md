@@ -18,7 +18,13 @@ Cache-aware compaction has two layers, both on by default.
   probabilistic *compaction pressure* that blends context degradation as
   the window fills with the expected cost of continuing versus rewriting
   the prefix (cache write amortization, coldness, TTL idle ramp), with a
-  warm-cache floor and fast compaction relaxing it. It fires at three
+  warm-cache floor and fast compaction relaxing it. The expected-cost
+  horizon shrinks toward cache expiry: the current request always
+  counts, and each further request counts only while the cache is still
+  warm, so a prefix seconds from its TTL asks for less rewrite than a
+  freshly touched one. The read rates come from pi's own model catalog,
+  or — for OpenRouter-routed models — from a freshly pulled OpenRouter
+  snapshot (see below). It fires at three
   idle points when the pressure draw passes: after a turn settles
   (`agent_settled`), on a session-scoped timer when the provider cache
   TTL expires while pi sits idle (`PI_CACHE_IDLE_TRIGGER`), and when a
@@ -60,8 +66,22 @@ Cache-aware compaction has two layers, both on by default.
   `PI_CACHE_FAST_DIGEST=off`.
 
 The cache TTL that drives the idle trigger and the compaction-pressure
-ramp falls back to `PI_CACHE_TTL_SECONDS` (default 300 s) when the model
-declares no `promptCache` tier.
+ramp uses pi's `promptCache` tier when the model declares one, else a
+provider-aware profile for the model in use (Anthropic 5m/1h, OpenAI
+30m, DeepSeek 4h, Gemini 5m, Kimi 5m/1h, GLM ~2m), and only then
+`PI_CACHE_TTL_SECONDS` (default 300 s) for an unknown model.
+
+**Live model parameters.** For OpenRouter-routed models, pi-cache pulls
+OpenRouter's public model list at session start and when the cached
+snapshot goes stale, converts its USD-per-token pricing to the per-
+million units the economics model uses, and selects any request-wide
+override tier by live token count. The last-good snapshot is persisted
+under `.pi-cache/model-params.json` (override with
+`PI_CACHE_MODEL_PARAMS`) and is used only when OpenRouter is
+inaccessible; non-OpenRouter providers keep pi's own rates. Polling is
+edge-cached (about once per 2 minutes has value), one request is
+in-flight at a time, and no prompts or session content leave the
+machine.
 
 ## Request transforms
 
@@ -180,7 +200,11 @@ temp files.
 6. **Compaction pressure + fast override** — the trigger is
    `CompactionPressure`, combining the expected-cost economics model
    (`src/economics.ts`) with the context-degradation onset
-   (`src/context-degradation.ts`); fast compaction overrides pi's
+   (`src/context-degradation.ts`); the economics horizon decays with the
+   time since the last cache touch against the model's TTL
+   (`src/model-ttl.ts`), and OpenRouter-routed models price against a
+   freshly pulled OpenRouter snapshot (`src/model-params.ts`); fast
+   compaction overrides pi's
    summarizer via `session_before_compact` for every reason and
    `session_before_tree` for a wanted branch summary (each with its own
    switch: `PI_CACHE_FAST_COMPACT` / `PI_CACHE_FAST_BRANCH_SUMMARY`);
@@ -200,7 +224,8 @@ temp files.
   `compaction.ts`, `markers.ts`, `breakpoint-anchor.ts`, `retention.ts`,
   `canonicalizer.ts`, `cache-key.ts`, `warming-policy.ts`,
   `autocompact.ts`, `pressure.ts`, `economics.ts`,
-  `context-degradation.ts`, `fastcompact.ts`, `fast-switch.ts`,
+  `context-degradation.ts`, `model-params.ts`, `model-ttl.ts`,
+  `params-store.ts`, `fastcompact.ts`, `fast-switch.ts`,
   `feature-switch.ts`, `user-settings.ts`, `settings.ts`,
   `settings-view.ts`, `stats.ts`, `temp-sweep.ts`, `constants.ts`)
 - `tests/` — zero-dependency validation + OOP/format lint suite

@@ -27,6 +27,11 @@ export interface EconomicsInput {
   coldness: number;
   /** One compaction's summarizer cost, an absolute cost in the same units. */
   summaryCost: number;
+  /** Provider cache lifetime (ms); with `msSinceCacheTouch`, shrinks the
+   *  amortization horizon toward expiry. Absent keeps the full horizon. */
+  ttlMs?: number;
+  /** Age (ms) of the last confirmed cache touch, paired with `ttlMs`. */
+  msSinceCacheTouch?: number;
 }
 
 export interface EconomicsCosts {
@@ -82,14 +87,43 @@ export class CacheEconomics {
 
   /** The continue-vs-compact costs for one sample. */
   costs(rates: CostRates, input: EconomicsInput): EconomicsCosts {
-    const horizon = this.horizon();
+    const horizon = this.effectiveHorizon(input);
     const tokens = Math.max(0, input.tokens);
     const kept = Math.max(0, Math.min(1, this.opts.keepFraction)) * tokens;
     const readRate = this.readRate(rates, input.coldness);
     const continueCost = this.price(readRate, tokens) * horizon;
     const compactCost =
       this.price(this.writeRate(rates), kept) + this.price(readRate, kept) * horizon + input.summaryCost;
-    return { continueCost, compactCost, savings: continueCost - compactCost, horizon };
+    return { continueCost, compactCost, savings: continueCost - compactCost, horizon: this.horizon() };
+  }
+
+  /**
+   * The expected-request horizon discounted by how much of the cache
+   * lifetime remains: the current request always counts, and each further
+   * expected request counts only while the cache is still warm. A prefix
+   * near TTL expiry is therefore amortized over a shorter horizon than a
+   * freshly touched one, so time-since-touch reaches the comparison itself
+   * rather than only the read-rate mix. Without a TTL/touch pair the full
+   * horizon stands.
+   */
+  private effectiveHorizon(input: EconomicsInput): number {
+    const base = this.horizon();
+    const remaining = CacheEconomics.warmRemaining(input);
+    return 1 + (base - 1) * remaining;
+  }
+
+  /**
+   * Fraction of the cache lifetime still ahead, in `[0,1]`; 1 when no
+   * usable TTL/touch pair is supplied. A zero or negative lifetime means
+   * the cache is already cold, so nothing ahead counts as warm.
+   */
+  private static warmRemaining(input: EconomicsInput): number {
+    const ttlMs = input.ttlMs;
+    const touch = input.msSinceCacheTouch;
+    if (typeof ttlMs !== "number" || !(ttlMs > 0) || typeof touch !== "number" || !Number.isFinite(touch)) {
+      return 1;
+    }
+    return Math.max(0, Math.min(1, 1 - touch / ttlMs));
   }
 
   /** Fraction of the continuing cost that compaction avoids, in `[0,1]`. */

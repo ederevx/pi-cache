@@ -59,6 +59,44 @@ test("economics: zero tokens and zero rates yield no pressure", () => {
   );
 });
 
+test("economics: time-since-touch shrinks the amortization horizon", () => {
+  const e = new CacheEconomics({ continuationProbability: 0.6 }); // horizon 2.5
+  const fresh = e.pressure(rates, {
+    tokens: 120_000,
+    coldness: 1,
+    summaryCost: 0,
+    ttlMs: 300_000,
+    msSinceCacheTouch: 0,
+  });
+  const near = e.pressure(rates, {
+    tokens: 120_000,
+    coldness: 1,
+    summaryCost: 0,
+    ttlMs: 300_000,
+    msSinceCacheTouch: 270_000,
+  });
+  assert(near < fresh, `near expiry pressures less (${near} < ${fresh})`);
+  assertEq(
+    fresh,
+    e.pressure(rates, { tokens: 120_000, coldness: 1, summaryCost: 0 }),
+    "a freshly touched cache preserves the full horizon",
+  );
+});
+
+test("economics: an expired touch removes any future warm benefit", () => {
+  const e = new CacheEconomics({ continuationProbability: 0.6 });
+  const expired = e.costs(rates, {
+    tokens: 120_000,
+    coldness: 1,
+    summaryCost: 0,
+    ttlMs: 300_000,
+    msSinceCacheTouch: 600_000,
+  });
+  assertEq(expired.horizon, e.horizon(), "the reported horizon stays the base expected requests");
+  const noTiming = e.costs(rates, { tokens: 120_000, coldness: 1, summaryCost: 0 });
+  assert(expired.compactCost < noTiming.compactCost, "fewer future warm reads means a cheaper rewrite");
+});
+
 test("economics: non-finite options fall back safely", () => {
   const e = new CacheEconomics({
     continuationProbability: Number.NaN,
