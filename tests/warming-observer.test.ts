@@ -1,10 +1,11 @@
 /**
  * pi-cache — cache-warming observer tests.
  *
- * Only a real "warm" refresh resets the measured cache age; "stop" and an
- * absent action leave the last warm untouched. A landed refresh is confirmed
- * from the persisted `cache_warm` usage entries, newest-wins and deduped by
- * id, and combined with the decision intent by taking the most recent.
+ * Only a confirmed "warm" refresh resets the measured cache age; "stop", an
+ * absent action, and an unconfirmed intent leave it untouched. A landed
+ * refresh is confirmed from the persisted `cache_warm` usage entries,
+ * newest-wins and deduped by id; the decision intent is exposed separately
+ * for the idle trigger's deferral guard.
  */
 
 import { test, assertEq } from "./harness.ts";
@@ -17,17 +18,20 @@ const warm = (id: string, atMs: number) => ({
   timestamp: new Date(atMs).toISOString(),
 });
 
-test("warming-observer: only a warm decision resets the cache age", () => {
+test("warming-observer: only a confirmed warm refresh resets the cache age", () => {
   let now = 1000;
   const observer = new WarmingObserver({ now: () => now });
   assertEq(observer.msSinceLastWarm(), undefined, "no warm observed yet");
   observer.noteDecision("stop");
   assertEq(observer.msSinceLastWarm(), undefined, "stop is not a refresh");
   observer.noteDecision("warm");
+  assertEq(observer.msSinceLastWarm(), undefined, "an unconfirmed intent is not a touch");
   now = 4000;
-  assertEq(observer.msSinceLastWarm(), 3000, "warm timed");
+  assertEq(observer.msSinceDecision(), 3000, "the intent is exposed for the idle guard");
+  observer.reconcile({ sessionManager: { getEntries: () => [warm("w1", 1000)] } });
+  assertEq(observer.msSinceLastWarm(), 3000, "a landed refresh sets the age");
   observer.noteDecision(undefined);
-  assertEq(observer.msSinceLastWarm(), 3000, "an absent action leaves the last warm");
+  assertEq(observer.msSinceLastWarm(), 3000, "an absent action leaves the confirmed warm");
 });
 
 test("warming-observer: reconcile confirms a landed refresh from its entry", () => {
@@ -67,14 +71,14 @@ test("warming-observer: reconcile ignores other entries and empty sessions", () 
   assertEq(observer.msSinceLastWarm(), undefined, "no warm entry observed");
 });
 
-test("warming-observer: the most recent of intent and confirmation measures the age", () => {
+test("warming-observer: an intent never overrides the confirmed touch age", () => {
   let now = 1000;
   const observer = new WarmingObserver({ now: () => now });
   observer.noteDecision("warm");
   now = 5000;
   observer.reconcile({ sessionManager: { getEntries: () => [warm("w1", 4000)] } });
   now = 9000;
-  assertEq(observer.msSinceLastWarm(), 5000, "confirmation later than the intent");
+  assertEq(observer.msSinceLastWarm(), 5000, "the confirmation sets the age");
 
   let now2 = 1000;
   const observer2 = new WarmingObserver({ now: () => now2 });
@@ -82,7 +86,8 @@ test("warming-observer: the most recent of intent and confirmation measures the 
   now2 = 8000;
   observer2.noteDecision("warm");
   now2 = 10_000;
-  assertEq(observer2.msSinceLastWarm(), 2000, "intent later than the confirmation");
+  assertEq(observer2.msSinceLastWarm(), 9000, "a later intent does not reset the age");
+  assertEq(observer2.msSinceDecision(), 2000, "the intent is still observable");
 });
 
 test("warming-observer: a malformed timestamp falls back to the current clock", () => {

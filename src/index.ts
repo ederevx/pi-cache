@@ -206,6 +206,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     },
     {
       lastUsage: () => ledger.lastUsage(),
+      lastRequestUsage: () => ledger.lastRequestUsage(),
       msSinceLastTurn: () => ledger.msSinceLastTurn(),
       msSinceLastWarm: () => warming.msSinceLastWarm(),
       headChurn: () => normalizer.churn(),
@@ -220,8 +221,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   // tier, and the warm state at record time.
   const rowExtras = new RowExtrasBuilder(signals);
 
-  // Miss taxonomy: /cache-stats diagnosis fed from the ledger's rows; the
-  // TTL comes from the same unified signals view the idle ramp uses.
+  // Miss taxonomy: /cache-stats diagnosis fed from the ledger's rows. Each
+  // row carries the TTL recorded with its full model context, so the
+  // classifier shares the idle ramp's lifetime; the model-id lookup is the
+  // legacy-row fallback only.
   const missClassifier = new MissClassifier({
     ttlMsOf: (model: string) =>
       signals.cacheTtlMs({ model: { id: model } } as SessionContextView),
@@ -587,11 +590,11 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => {
       const usage = ctx.getContextUsage?.();
       const liveSignals = signals.for(ctx as SessionContextView | undefined);
-      // The live preview reads the freshest request of any kind: a warm
-      // refresh re-reads the whole prefix, so skipping it here would pin
-      // the displayed pressure to a stale turn's coldness while pi's
-      // warmer keeps the cache alive (the trigger paths keep
-      // turn-scoped `lastUsage`).
+      // The preview reads the freshest request of any kind, exactly as the
+      // trigger's own decision does (the trigger still gates on the last
+      // real turn first), so the displayed pressure matches what would
+      // fire rather than pinning to a stale turn's coldness after a warm
+      // refresh.
       const livePressure = autocompact.currentPressure(usage, ledger.lastRequestUsage(), liveSignals);
       const text = statsPresenter.render({
         global: ledger.totals(),

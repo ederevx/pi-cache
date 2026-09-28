@@ -25,12 +25,15 @@
  * cooldown and counter stay tied to reality.
  */
 
-import type { CompactionPressure, PressureVerdict } from "./pressure.ts";
+import type { CompactionPressure, PressureSample, PressureVerdict } from "./pressure.ts";
 import type { CostRates } from "./economics.ts";
 
 export interface AutocompactSignal {
   /** Last completed turn's usage, if any. */
   lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined;
+  /** Newest request usage of any kind (turn or warm refresh); the freshest
+   *  measurement of the cache's warmth. Falls back to `lastUsage` when absent. */
+  lastRequestUsage?(): { input: number; cacheRead: number; cacheWrite: number } | undefined;
   /** Milliseconds since the last completed turn (TTL-gap ramp). */
   msSinceLastTurn(): number;
   /** Milliseconds since the cache was last touched (last turn or a pi warm
@@ -166,8 +169,13 @@ export class AutocompactController {
     signals: AutocompactSignal,
   ): AutocompactVerdict {
     if (!this.opts.enabled) return { shouldCompact: false, reason: undefined };
-    const usage = signals.lastUsage();
-    if (!usage) return { shouldCompact: false, reason: "no usage yet" };
+    const turnUsage = signals.lastUsage();
+    if (!turnUsage) return { shouldCompact: false, reason: "no usage yet" };
+    // The freshest request of any kind measures warmth best: a warm refresh
+    // re-reads the whole prefix, so its cached share tracks the live cache
+    // better than the last real turn. The turn usage still gates "has a turn
+    // happened yet" and keeps a lone warm row from driving the decision.
+    const usage = signals.lastRequestUsage?.() ?? turnUsage;
 
     const view = this.readContext(usageOrPercent);
     const churned = this.churned(signals);
@@ -277,21 +285,22 @@ export class AutocompactController {
     signals: AutocompactSignal,
   ): boolean {
     if (!this.opts.enabled || !this.midterm) return false;
-    const usage = signals.lastUsage();
-    if (!usage) return false;
+    const turnUsage = signals.lastUsage();
+    if (!turnUsage) return false;
+    const usage = signals.lastRequestUsage?.() ?? turnUsage;
     const view = this.readContext(usageView);
     if (!AutocompactController.atLeastPercent(view, AutocompactController.MIDTERM_MIN_CONTEXT_PERCENT)) {
       return false;
     }
     const churned = this.churned(signals);
-    const verdict = this.samplePressure(
+    const probability = this.pressureProbability(
       view,
       usage,
       this.coldness(usage, churned, signals),
       signals.costRates?.(view.tokens),
       this.cacheTiming(signals),
     );
-    if (!verdict || verdict.probability < 1) return false;
+    if (probability === undefined || probability < 1) return false;
     return this.cooldownElapsed();
   }
 
@@ -385,6 +394,31 @@ export class AutocompactController {
     rates: CostRates | undefined,
     timing: CacheTiming,
   ): PressureVerdict | undefined {
+    const input = this.pressureInput(view, usage, coldness, rates, timing);
+    return input === undefined ? undefined : this.opts.pressure?.sample(input);
+  }
+
+  /** The draw-free probability for the same sample the trigger would draw. */
+  private pressureProbability(
+    view: AutocompactView,
+    usage: { input: number; cacheRead: number; cacheWrite: number },
+    coldness: number,
+    rates: CostRates | undefined,
+    timing: CacheTiming,
+  ): number | undefined {
+    const input = this.pressureInput(view, usage, coldness, rates, timing);
+    return input === undefined ? undefined : this.opts.pressure?.probability(input);
+  }
+
+  /** The pressure sample for a live context view, or undefined without the
+   *  model, a token count, or a window. */
+  private pressureInput(
+    view: AutocompactView,
+    usage: { input: number; cacheRead: number; cacheWrite: number },
+    coldness: number,
+    rates: CostRates | undefined,
+    timing: CacheTiming,
+  ): PressureSample | undefined {
     if (
       !this.opts.pressure ||
       typeof view.tokens !== "number" ||
@@ -392,7 +426,7 @@ export class AutocompactController {
     ) {
       return undefined;
     }
-    return this.opts.pressure.sample({
+    return {
       tokens: view.tokens,
       contextWindow: view.contextWindow,
       coldness,
@@ -403,7 +437,7 @@ export class AutocompactController {
       input: usage.input,
       ttlMs: timing.ttlMs,
       msSinceCacheTouch: timing.msSinceCacheTouch,
-    });
+    };
   }
 
   /** The positive TTL and finite touch age the horizon may decay against. */
