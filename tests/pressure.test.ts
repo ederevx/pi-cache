@@ -104,6 +104,21 @@ test("pressure: the injected RNG drives the draw", () => {
   assertEq(never.sample(sample).fire, false);
 });
 
+test("pressure: probability() composes without consuming the draw", () => {
+  let draws = 0;
+  const p = new CompactionPressure({
+    random: () => {
+      draws++;
+      return 0.5;
+    },
+  });
+  const input = { tokens: 120_000, contextWindow: 200_000, coldness: 1 as const, rates };
+  const probability = p.probability(input);
+  assertEq(draws, 0, "no draw consumed by the predicate");
+  assertEq(probability, p.sample(input).probability, "matches the sampled probability");
+  assertEq(draws, 1, "an explicit sample draws exactly once");
+});
+
 test("pressure: either reason alone can saturate the ramp", () => {
   // Context degradation saturates by itself without rates.
   const degradationOnly = pressure().sample({ tokens: 200_000, contextWindow: 200_000 });

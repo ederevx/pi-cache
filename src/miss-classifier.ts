@@ -110,7 +110,7 @@ export class MissClassifier {
         this.counts.coldStart++;
         return "cold-start";
       }
-      if (row.ts - prev.ts > this.ttlMsOf(row.model)) {
+      if (row.ts - prev.ts > this.ttlMsOfRow(row)) {
         this.counts.idleExpiry++;
         return "idle-expiry";
       }
@@ -181,6 +181,14 @@ export class MissClassifier {
     this.counts.replicaFlap = 0;
     this.counts.partialMiss = 0;
     this.counts.other = 0;
+  }
+
+  /** The effective lifetime at the row's own record time. The row carries
+   *  the TTL recorded with its full model context (provider and declared
+   *  promptCache tier); the model-id lookup is a legacy-row fallback only,
+   *  so the diagnosis shares the idle ramp's single lifetime model. */
+  private ttlMsOfRow(row: UsageRow): number {
+    return typeof row.cacheTtlMs === "number" ? row.cacheTtlMs : this.opts.ttlMsOf(row.model);
   }
 
   private minMissInputTokens(): number {

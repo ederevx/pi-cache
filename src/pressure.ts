@@ -89,11 +89,30 @@ export class CompactionPressure {
 
   /** Compose the pressure and probability into the drawn verdict. */
   sample(input: PressureSample): PressureVerdict {
-    const degradation = this.degradationFor(input);
-    const economics = this.economicsFor(input);
-    const pressure = CompactionPressure.combine(degradation, economics);
+    const { pressure, degradation, economics } = this.compose(input);
     const probability = this.probabilityFor(pressure);
     return { pressure, degradation, economics, probability, fire: this.opts.random() < probability };
+  }
+
+  /** The Bernoulli probability for a sample without drawing, so a caller's
+   *  predicate (the midterm gate) can read it without consuming the RNG. */
+  probability(input: PressureSample): number {
+    return this.probabilityFor(this.compose(input).pressure);
+  }
+
+  /** Compose the two reasons into the combined pressure, without a draw. */
+  private compose(input: PressureSample): {
+    pressure: number;
+    degradation: number;
+    economics: number;
+  } {
+    const degradation = this.degradationFor(input);
+    const economics = this.economicsFor(input);
+    return {
+      pressure: CompactionPressure.combine(degradation, economics),
+      degradation,
+      economics,
+    };
   }
 
   /** Context-degradation pressure from the active model's onset. */

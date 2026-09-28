@@ -84,6 +84,19 @@ test("miss: below-floor full misses and foreign sessions are ignored", () => {
   assertEq(stats.fullMisses, 0);
 });
 
+test("miss: a row's recorded TTL overrides the model-id fallback", () => {
+  // The 60 s fallback would keep this a pending miss; the 10 s TTL recorded
+  // with the row's full model context makes it an idle expiry instead.
+  const c = new MissClassifier({ ttlMsOf: () => 60_000 });
+  c.useSession("s");
+  c.feed(row({ seq: 1, ts: 1_000_000, cacheRead: 900 }));
+  assertEq(
+    c.feed(row({ seq: 2, ts: 1_000_000 + 30_000, cacheTtlMs: 10_000 })),
+    "idle-expiry",
+    "the recorded TTL wins over the fallback",
+  );
+});
+
 test("miss: stats carry the aggregate and reset per session", () => {
   const c = classifier();
   c.useSession("s");

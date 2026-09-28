@@ -4,9 +4,10 @@
  * One responsibility: remember when pi last touched the provider cache.
  * Two signals feed it: pi's `cache_warming_decision` (intent, fired before
  * the refresh is sent) and the persisted `cache_warm` usage entries (proof
- * the refresh actually landed). The idle TTL trigger measures from the most
- * recent of the two, so it never compacts a cache pi just rewarmed while an
- * unconfirmed warm decision still counts conservatively.
+ * the refresh actually landed). Only a landed refresh resets the provider
+ * TTL the coldness ramp and idle clock measure; an intent that never lands
+ * must not falsely reset it, so the intent is exposed separately and the
+ * idle trigger defers through its own margin/grace guard instead.
  */
 
 export type WarmingAction = "warm" | "stop";
@@ -95,22 +96,19 @@ export class WarmingObserver {
     }
   }
 
-  /** Milliseconds since the last warm refresh, or undefined if none yet. */
+  /** Milliseconds since the last confirmed warm refresh, or undefined if
+   *  none landed yet. An unconfirmed decision is not a touch: it has not
+   *  reset the provider TTL, so it must not reset the measured cache age. */
   msSinceLastWarm(): number | undefined {
-    const last = this.latestTouch();
-    return last === undefined ? undefined : Math.max(0, this.now() - last);
+    return this.confirmedAt === undefined
+      ? undefined
+      : Math.max(0, this.now() - this.confirmedAt);
   }
 
   /** Milliseconds since the newest warm decision intent, or undefined
-   *  when none was observed yet (confirmation-only observers). */
+   *  when none was observed yet (confirmation-only observers). Used by the
+   *  idle trigger's deferral guard, never by the coldness ramp. */
   msSinceDecision(): number | undefined {
     return this.decisionAt === undefined ? undefined : Math.max(0, this.now() - this.decisionAt);
-  }
-
-  /** The most recent intent-or-confirmed cache touch, if any. */
-  private latestTouch(): number | undefined {
-    if (this.confirmedAt === undefined) return this.decisionAt;
-    if (this.decisionAt === undefined) return this.confirmedAt;
-    return Math.max(this.confirmedAt, this.decisionAt);
   }
 }
