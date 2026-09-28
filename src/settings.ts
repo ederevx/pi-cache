@@ -47,6 +47,7 @@ export interface LiveSettings {
   forceWarm: boolean;
   advisory: boolean;
   autoCompact: boolean;
+  midterm: boolean;
   fastCompaction: boolean;
   fastBranchSummary: boolean;
   fastDigest: boolean;
@@ -101,6 +102,7 @@ export class SettingsPresenter {
       row("missDiagnosis", "Miss diagnosis", "Show the miss taxonomy (cold-start, idle-expiry, replica-flap, partial) in /cache-stats", on(live.missDiagnosis)),
       row("advisory", "Compaction advisory", "Note warm-cache compactions that re-write the prefix", on(live.advisory)),
       row("autoCompact", "Auto-compaction", "Compact in cold-window turns (cache already lost) at idle", on(live.autoCompact)),
+      row("midterm", "Midterm compaction", "Allow a mid-run compaction when pressure is saturated and the context is at least half full", on(live.midterm)),
       row("fastCompaction", "Fast compaction", "Override pi's summarizer with a byte-stable fast cache-aware compaction", on(live.fastCompaction)),
       row("fastDigest", "Fast digest", "Append a deterministic digest of the dropped span after the fast stub; huge spans fall back to pi's summarizer", on(live.fastDigest)),
       row("fastBranchSummary", "Fast branch summary", "Override /tree branch summarization with a byte-stable stub (lossier than compaction)", on(live.fastBranchSummary)),

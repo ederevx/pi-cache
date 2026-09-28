@@ -24,6 +24,7 @@ const LIVE: LiveSettings = {
   missDiagnosis: true,
   advisory: false,
   autoCompact: true,
+  midterm: true,
   fastCompaction: true,
   fastBranchSummary: false,
   fastDigest: true,
@@ -31,16 +32,17 @@ const LIVE: LiveSettings = {
 
 test("settings: rows keep the option order and every row carries a value", () => {
   const rows = new SettingsPresenter().rows(LIVE);
-  assertEq(rows.length, 13, "row count");
+  assertEq(rows.length, 14, "row count");
   assertEq(
     rows.map((r) => r.id).join(","),
-    "telemetry,dedupTools,anchor,retentionOverride,canonicalize,sharedKey,forceWarm,missDiagnosis,advisory,autoCompact,fastCompaction,fastDigest,fastBranchSummary",
+    "telemetry,dedupTools,anchor,retentionOverride,canonicalize,sharedKey,forceWarm,missDiagnosis,advisory,autoCompact,midterm,fastCompaction,fastDigest,fastBranchSummary",
   );
   assertEq(rows[1].value, "off", "stored option reflected");
   assertEq(rows[7].value, "on", "live miss-diagnosis switch reflected");
-  assertEq(rows[10].value, "on", "live compaction switch reflected");
-  assertEq(rows[11].value, "on", "live digest switch reflected");
-  assertEq(rows[12].value, "off", "live branch switch reflected");
+  assertEq(rows[10].value, "on", "live midterm switch reflected");
+  assertEq(rows[11].value, "on", "live compaction switch reflected");
+  assertEq(rows[12].value, "on", "live digest switch reflected");
+  assertEq(rows[13].value, "off", "live branch switch reflected");
 });
 
 test("settings: non-tui modes print the listing and never open the view", async () => {
@@ -67,9 +69,9 @@ test("settings: non-tui modes print the listing and never open the view", async 
 
 test("settings: the restore action row appears only with a callback", () => {
   const bare = new SettingsPresenter().rows(LIVE);
-  assertEq(bare.length, 13, "no action row without a callback");
+  assertEq(bare.length, 14, "no action row without a callback");
   const rows = new SettingsPresenter().rows(LIVE, new Set(), () => "done");
-  assertEq(rows.length, 14, "action row appended");
+  assertEq(rows.length, 15, "action row appended");
   const action = rows[rows.length - 1];
   assertEq(action.id, "restoreDefaults");
   assertEq(action.title, "Restore default configuration");
@@ -85,7 +87,7 @@ test("settings: confirming restore defaults runs the reset callback once", () =>
   const action = new SettingsPresenter().rows(LIVE, new Set(), () => {
     calls++;
     return "pi-cache: restored";
-  })[13];
+  })[14];
   const component = action.submenu!("", () => {
     closed = true;
   });
