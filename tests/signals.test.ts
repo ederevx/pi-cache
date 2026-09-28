@@ -91,6 +91,29 @@ test("signals: piTtlMs stays undefined where pi's warmer schedules nothing", () 
   );
 });
 
+test("signals: the injected live rates precede pi's declared rates", () => {
+  const s = new SessionSignals(
+    {
+      cacheRetentionLong: false,
+      fallbackTtlSeconds: 300,
+      costRatesOf: (ctx, tokens) =>
+        ctx?.model?.provider === "openrouter" && ctx.model.id
+          ? { input: tokens ?? 0, cacheRead: 0.1, cacheWrite: 0.2 }
+          : undefined,
+    },
+    sources(),
+  );
+  const live = s.costRates(
+    { model: { provider: "openrouter", id: "m", cost: { input: 9, cacheRead: 9 } } },
+    42,
+  );
+  assertEq(live?.input, 42, "the live token count reaches the source");
+  assertEq(live?.cacheRead, 0.1);
+  const pi = s.costRates({ model: { provider: "anthropic", cost: { input: 3, cacheRead: 0.3 } } });
+  assertEq(pi?.input, 3, "non-OpenRouter defers to pi");
+  assertEq(s.costRates({ model: { provider: "openrouter" } }), undefined, "no live rates, no rates");
+});
+
 test("signals: the resolver-backed fallback precedes the static fallback", () => {
   const resolved = new SessionSignals(
     {
