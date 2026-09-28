@@ -17,7 +17,7 @@ import {
   waitFor,
 } from "./harness.ts";
 import { join } from "node:path";
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { FAST_BRANCH_STUB, FAST_SUMMARY_STUB } from "../src/fastcompact.ts";
 import { buildSessionProjection } from "@earendil-works/pi-coding-agent";
 
@@ -582,6 +582,28 @@ test("extension: idle trigger fires at TTL expiry", async () => {
     await pi.emit("agent_settled", {}, ctx);
     assertEq(compactCalls.length, 0, "warm settle does not compact");
     await waitFor(() => compactCalls.length >= 1, "idle TTL compaction fired", 2500);
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
+test("extension: startup sweeps a stale model-params atomic temp", async () => {
+  const root = join(scratchDir(), "gc-params");
+  mkdirSync(root, { recursive: true });
+  // The default model-params path sits beside the ledger, so this temp is
+  // the one an interrupted pull would leave behind.
+  const stale = join(root, "model-params.json.999.tmp");
+  writeFileSync(stale, "{}");
+  const old = new Date(0);
+  utimesSync(stale, old, old);
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    factory(new MockPi() as never);
+    assertEq(existsSync(stale), false, "stale params temp swept at startup");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
