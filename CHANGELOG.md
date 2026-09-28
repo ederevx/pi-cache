@@ -3,6 +3,29 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.11.0] - 2026-09-28
+
+### Added
+
+- Midterm compaction trigger at the `turn_end` boundary, behind
+  `PI_CACHE_MIDTERM` (default on) with a `/cache-settings` row. It fires
+  only when the compaction pressure is saturated (probability 1) and the
+  window is at least half full, so a long agentic run compacts without
+  waiting to settle; `AutocompactController.midtermEligible()` is the
+  pure gate. The cut is planned with pi's exported `findCutPoint`
+  (`src/midterm-cut.ts`), so it never lands on a tool result.
+
+### Changed
+
+- Midterm compaction no longer aborts the run. pi-cache returns pi's
+  boundary compaction draft plus `continue: true`, so pi applies the
+  compaction and resumes the run; the draft reuses the fast-compaction
+  summary (`src/midterm.ts`), which keeps the mid-run rewrite
+  cache-neutral. A turn with no tool results still commits the draft but
+  asks for no continuation. Without fast compaction the point keeps the
+  aborting `ctx.compact()` fallback, because pi does not export the
+  split-turn summary helpers a non-fast draft would need.
+
 ## [0.10.4] - 2026-09-25
 
 ### Added
