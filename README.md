@@ -26,8 +26,10 @@ Cache-aware compaction has two layers, both on by default.
   prompt until compaction finishes, `PI_CACHE_BEFORE_TURN`). A fourth,
   mid-run point fires at a turn boundary (`turn_end`) only when the
   pressure is saturated (probability 1) and the window is at least half
-  full, so a long agentic run compacts without waiting to settle
-  (`PI_CACHE_MIDTERM`; `ctx.compact()` aborts the live run by design).
+  full, so a long agentic run compacts without waiting to settle; it
+  proposes a boundary compaction and asks pi to continue the run
+  (`PI_CACHE_MIDTERM`, using the fast summary; without fast compaction it
+  falls back to the aborting `ctx.compact()`).
   With fast compaction on, the cache-window gate is relaxed because the
   override is prefix-stable; with it off, compaction stays inside
   cold/churned windows.
