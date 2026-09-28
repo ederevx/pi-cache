@@ -73,6 +73,9 @@ export interface AutocompactOptions {
   /** Minimum live context tokens before economics pressure may fire;
    *  0 or negative disables the floor. */
   minTokens?: number;
+  /** Allow the mid-run trigger when the pressure is saturated and the
+   *  window is at least half full (default off; wired from options). */
+  midterm?: boolean;
   /** Probabilistic pressure model; absent = fixed percent threshold. */
   pressure?: CompactionPressure;
 }
@@ -94,6 +97,8 @@ export class AutocompactController {
   private static readonly WARM_SHARE = 0.5;
   /** getContextUsage().percent at or above this is required to trigger. */
   private static readonly MIN_CONTEXT_PERCENT = 60;
+  /** Window occupancy at/above which a saturated-pressure midterm fire is allowed. */
+  private static readonly MIDTERM_MIN_CONTEXT_PERCENT = 50;
   /** Minimum turns between automatic compactions. */
   private static readonly COOLDOWN_TURNS = 5;
   /** Default coldness floor below which a warm cache is never compacted. */
@@ -109,10 +114,12 @@ export class AutocompactController {
 
   private readonly opts: AutocompactOptions;
   private cacheNeutral: boolean;
+  private midterm: boolean;
 
   constructor(opts: AutocompactOptions) {
     this.opts = opts;
     this.cacheNeutral = opts.cacheNeutral ?? false;
+    this.midterm = opts.midterm ?? false;
   }
 
   /** Turn bookkeeping: called from turn_end so agent_settled can evaluate. */
@@ -123,6 +130,16 @@ export class AutocompactController {
   /** Live switch: fast compaction changed from /cache-settings. */
   setCacheNeutral(cacheNeutral: boolean): void {
     this.cacheNeutral = cacheNeutral;
+  }
+
+  /** The live midterm (in-run) compaction switch. */
+  get midtermEnabled(): boolean {
+    return this.midterm;
+  }
+
+  /** Live switch: midterm compaction changed from /cache-settings. */
+  setMidtermEnabled(midterm: boolean): void {
+    this.midterm = midterm;
   }
 
   /** The live auto-compaction master switch (toggled from /cache-settings). */
@@ -232,6 +249,48 @@ export class AutocompactController {
   private belowMinimum(view: AutocompactView): boolean {
     const floor = this.minTokens();
     return floor > 0 && typeof view.tokens === "number" && view.tokens < floor;
+  }
+
+  /**
+   * Mid-run eligibility: the in-run trigger may fire only when the
+   * pressure is saturated (probability 1) and the window is at least half
+   * full. A pure predicate with no RNG draw, so the caller can gate the
+   * existing trigger without perturbing the probabilistic decision; the
+   * warm-cache floor and cooldown are still applied by the trigger path.
+   */
+  midtermEligible(
+    usageView: ContextUsageLike | undefined,
+    signals: AutocompactSignal,
+  ): boolean {
+    if (!this.opts.enabled || !this.midterm) return false;
+    const usage = signals.lastUsage();
+    if (!usage) return false;
+    const view = this.readContext(usageView);
+    if (!AutocompactController.atLeastPercent(view, AutocompactController.MIDTERM_MIN_CONTEXT_PERCENT)) {
+      return false;
+    }
+    const churned = this.churned(signals);
+    const verdict = this.samplePressure(
+      view,
+      usage,
+      this.coldness(usage, churned, signals),
+      signals.costRates?.(),
+    );
+    if (!verdict || verdict.probability < 1) return false;
+    return this.cooldownElapsed();
+  }
+
+  /** Whether the sampled window has reached `percent` of its context window. */
+  private static atLeastPercent(view: AutocompactView, percent: number): boolean {
+    const pct =
+      typeof view.percent === "number"
+        ? view.percent
+        : typeof view.tokens === "number" &&
+            typeof view.contextWindow === "number" &&
+            view.contextWindow > 0
+          ? (view.tokens / view.contextWindow) * 100
+          : undefined;
+    return typeof pct === "number" && pct >= percent;
   }
 
   /**
