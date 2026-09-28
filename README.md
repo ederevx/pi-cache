@@ -23,10 +23,14 @@ Cache-aware compaction has two layers, both on by default.
   (`agent_settled`), on a session-scoped timer when the provider cache
   TTL expires while pi sits idle (`PI_CACHE_IDLE_TRIGGER`), and when a
   cold prompt arrives before a turn (the `input` handler defers the
-  prompt until compaction finishes, `PI_CACHE_BEFORE_TURN`). With fast
-  compaction on, the cache-window gate is relaxed because the override
-  is prefix-stable; with it off, compaction stays inside cold/churned
-  windows.
+  prompt until compaction finishes, `PI_CACHE_BEFORE_TURN`). A fourth,
+  mid-run point fires at a turn boundary (`turn_end`) only when the
+  pressure is saturated (probability 1) and the window is at least half
+  full, so a long agentic run compacts without waiting to settle
+  (`PI_CACHE_MIDTERM`; `ctx.compact()` aborts the live run by design).
+  With fast compaction on, the cache-window gate is relaxed because the
+  override is prefix-stable; with it off, compaction stays inside
+  cold/churned windows.
 - **Fast compaction override.** When fast compaction is on, pi-cache
   answers `session_before_compact` for *every* compaction reason
   (`manual`/`threshold`/`overflow`) with a byte-stable cache-aware

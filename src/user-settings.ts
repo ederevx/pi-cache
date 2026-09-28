@@ -35,6 +35,8 @@ export interface UserSettings {
   advisory?: boolean;
   /** Cache-aware automatic compaction. */
   autoCompact?: boolean;
+  /** Allow a mid-run compaction at saturated pressure and half-full window. */
+  midterm?: boolean;
   /** Fast cache-aware compaction override (the /cache-settings switch). */
   fastCompaction?: boolean;
   /** Separate switch for the /tree branch-summary overlay. */
@@ -80,6 +82,7 @@ export class UserSettingsStore {
     "forceWarm",
     "advisory",
     "autoCompact",
+    "midterm",
     "fastCompaction",
     "fastBranchSummary",
     "fastDigest",

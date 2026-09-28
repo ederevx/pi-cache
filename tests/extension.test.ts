@@ -88,6 +88,7 @@ const PI_CACHE_KEYS = [
   "PI_CACHE_FORCE_WARM",
   "PI_CACHE_ADVISORY",
   "PI_CACHE_AUTO_COMPACT",
+  "PI_CACHE_MIDTERM",
   "PI_CACHE_IDLE_TRIGGER",
   "PI_CACHE_BEFORE_TURN",
   "PI_CACHE_FAST_COMPACT",
@@ -102,6 +103,53 @@ function assertToolNames(tools: Array<{ name: string }>, expected: string[]): vo
     assertEq(tools[i].name, expected[i], `tool[${i}]`);
   }
 }
+
+test("extension: midterm fires at a turn boundary only at saturated half-full context", async () => {
+  const root = join(scratchDir(), "midterm");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+    PI_CACHE_FAST_COMPACT: "1",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+
+    // A cold turn gives the pressure model its cost basis.
+    await pi.emit(
+      "message_end",
+      {
+        message: {
+          role: "assistant",
+          usage: { input: 1000, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 1001 },
+        },
+      },
+      { model: { id: "m1" } },
+    );
+    await waitFor(() => existsSync(join(root, "ledger.jsonl")), "ledger persisted");
+
+    const costs = { cost: { input: 0.8, cacheRead: 0.2, cacheWrite: 0 } };
+    // Below half full: never eligible, even at saturated pressure.
+    const below = makeCtx({
+      model: costs,
+      getContextUsage: () => ({ percent: 40, tokens: 40_000, contextWindow: 100_000 }),
+    });
+    await pi.emit("turn_end", { turnIndex: 0 }, below.ctx);
+    assertEq(below.compactCalls.length, 0, "below half full does not fire");
+
+    // Half full, cold, economically saturated: fires at the turn boundary.
+    const saturated = makeCtx({
+      model: costs,
+      getContextUsage: () => ({ percent: 50, tokens: 50_000, contextWindow: 100_000 }),
+    });
+    await pi.emit("turn_end", { turnIndex: 1 }, saturated.ctx);
+    assertEq(saturated.compactCalls.length, 1, "saturated half-full turn fires midterm");
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
 
 test("extension: default cold-window auto-compaction lifecycle", async () => {
   const root = join(scratchDir(), "e2e");
