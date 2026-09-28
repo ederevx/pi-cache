@@ -29,22 +29,31 @@ export class RowExtrasBuilder {
 
   /** Build the extras for one assistant row. `warm` is true when the
    *  cache was touched within its effective TTL; an untouched session
-   *  (infinite touch age) records neither the age nor warm. */
+   *  (infinite touch age) records neither the age nor warm. Each field is
+   *  read independently, so one failing signal drops only its own field. */
   build(ctx: SessionContextView | undefined): RecordExtras {
     const extras: RecordExtras = {};
-    try {
-      extras.cacheTtlMs = this.signals.cacheTtlMs(ctx);
-      const piTtl = this.signals.piTtlMs(ctx);
-      if (piTtl !== undefined) extras.piTtlMs = piTtl;
-      extras.retentionLong = this.signals.retentionLong();
-      const touch = this.signals.msSinceCacheTouch();
-      if (Number.isFinite(touch)) {
-        extras.msSinceCacheTouch = touch;
-        extras.warm = touch < extras.cacheTtlMs;
-      }
-    } catch {
-      /* partial extras beat no row */
+    const cacheTtlMs = this.read(() => this.signals.cacheTtlMs(ctx));
+    if (typeof cacheTtlMs === "number") extras.cacheTtlMs = cacheTtlMs;
+    const piTtl = this.read(() => this.signals.piTtlMs(ctx));
+    if (typeof piTtl === "number") extras.piTtlMs = piTtl;
+    const retentionLong = this.read(() => this.signals.retentionLong());
+    if (typeof retentionLong === "boolean") extras.retentionLong = retentionLong;
+    const touch = this.read(() => this.signals.msSinceCacheTouch());
+    if (typeof touch === "number" && Number.isFinite(touch)) {
+      extras.msSinceCacheTouch = touch;
+      if (typeof cacheTtlMs === "number") extras.warm = touch < cacheTtlMs;
     }
     return extras;
+  }
+
+  /** One signal read, degrading to undefined so telemetry never breaks a
+   *  turn and a failure drops only the field that needed the signal. */
+  private read<T>(read: () => T): T | undefined {
+    try {
+      return read();
+    } catch {
+      return undefined;
+    }
   }
 }

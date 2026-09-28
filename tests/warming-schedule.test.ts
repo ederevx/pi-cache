@@ -8,13 +8,19 @@ import { test, assertEq } from "./harness.ts";
 import { SessionSignals } from "../src/signals.ts";
 import { WarmingSchedule } from "../src/warming-schedule.ts";
 
-const signals = new SessionSignals(
-  { cacheRetentionLong: false, fallbackTtlSeconds: 300 },
-  { lastUsage: () => undefined, msSinceLastTurn: () => 0, headChurn: () => 0 },
-);
-
 function schedule(effectiveLong: boolean | undefined): WarmingSchedule {
-  return new WarmingSchedule(signals, { effectiveLong: () => effectiveLong });
+  // Production shares one retention owner: the signals' pi-native TTL view
+  // follows the same effective tier the schedule reads for overrideActive.
+  const tier = { effectiveLong: () => effectiveLong };
+  const signals = new SessionSignals(
+    {
+      cacheRetentionLong: effectiveLong === true,
+      fallbackTtlSeconds: 300,
+      retentionLongOf: () => tier.effectiveLong(),
+    },
+    { lastUsage: () => undefined, msSinceLastTurn: () => 0, headChurn: () => 0 },
+  );
+  return new WarmingSchedule(signals, tier);
 }
 
 test("schedule: short tier uses pi's margin formula", () => {
