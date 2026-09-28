@@ -81,6 +81,12 @@ export class SettingsSwitchBoard {
       },
       advisory: { key: "advisory", label: "advisory", def: true, apply: (on) => this.advisor.setEnabled(on) },
       autoCompact: { key: "autoCompact", label: "auto-compaction", def: true, apply: (on) => this.autocompact.setEnabled(on) },
+      midterm: {
+        key: "midterm",
+        label: "midterm compaction",
+        def: true,
+        apply: (on) => this.autocompact.setMidtermEnabled(on),
+      },
       fastCompaction: {
         key: "fastCompaction",
         label: "fast compaction",
@@ -118,6 +124,7 @@ export class SettingsSwitchBoard {
       missDiagnosis: this.stats.missDiagnosisEnabled,
       advisory: this.advisor.enabled,
       autoCompact: this.autocompact.enabled,
+      midterm: this.autocompact.midtermEnabled,
       fastCompaction: this.fast.enabled,
       fastDigest: this.fast.digestEnabled,
       fastBranchSummary: this.fast.branchEnabled,

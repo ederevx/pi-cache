@@ -127,9 +127,14 @@ compaction is on, makes the compaction itself prefix-stable:
    `CompactionTrigger`: `agent_settled` (a run fully settled), a
    session-scoped TTL timer that fires when the provider cache expires
    while pi sits idle, and the `input` hook when a cold prompt arrives
-   before a turn. A warm-cache coldness floor applies first (a model
-   summarizer must not run mid-warm-cache); fast compaction relaxes that
-   floor because the override is prefix-stable.
+   before a turn. A fourth, mid-run point fires the same trigger at the
+   `turn_end` boundary, but only when the pressure is saturated
+   (probability 1) and the window is at least half full, so a long
+   agentic run can compact without waiting to settle (`PI_CACHE_MIDTERM`;
+   `ctx.compact()` aborts the live run by design). A warm-cache coldness
+   floor applies first (a model summarizer must not run mid-warm-cache);
+   fast compaction relaxes that floor because the override is
+   prefix-stable.
 3. The before-turn path defers the prompt by awaiting compaction inside
    the `input` handler (pi awaits those handlers before building the
    turn, so the prompt then continues against the compacted context; no
@@ -179,12 +184,13 @@ Feasibility confirmed against the pi 0.86 extension API:
 `ctx.compact({customInstructions, onComplete, onError})` is fire-and-forget
 (`void`) but its `onComplete`/`onError` callbacks let an `input` handler
 await it; it aborts a live run, so it is only ever called from an idle
-point. Compaction summaries are cache-transparent
+point or the strictly gated `turn_end` midterm point (saturated pressure
+and a half-full window). Compaction summaries are cache-transparent
 (`cacheRetention:"none"`, fresh routing session), so the trigger only
 times the *next* turn's re-write. Guards in code: `ctx.isIdle()` +
 cooldown (turns/seconds) + `CompactionGate`; opt-in
-`PI_CACHE_AUTO_COMPACT`, with `PI_CACHE_IDLE_TRIGGER` and
-`PI_CACHE_BEFORE_TURN` selecting the timing points.
+`PI_CACHE_AUTO_COMPACT`, with `PI_CACHE_IDLE_TRIGGER`,
+`PI_CACHE_BEFORE_TURN`, and `PI_CACHE_MIDTERM` selecting the timing points.
 
 **Coldness model (implemented 2026-09-20).** `AutocompactController`
 computes `coldness` and feeds it to `CompactionPressure`, where it sets

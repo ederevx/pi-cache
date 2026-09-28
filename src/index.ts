@@ -15,7 +15,9 @@
  *                             system-listing canonicalization, and
  *                             shared OpenAI prompt_cache_key derivation
  *   turn_end                 — reconcile landed warm refreshes + turn
- *                              bookkeeping for auto-compaction
+ *                              bookkeeping for auto-compaction, and fire the
+ *                              gated midterm (in-run) compaction when
+ *                              pressure is saturated and the window is half full
  *   cache_warming_decision   — observe pi's warm intent, reconcile the
  *                              persisted cache_warm entries, and apply the
  *                              forced-warm policy when enabled
@@ -139,6 +141,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     cacheNeutral: opts.fastCompact,
     summaryCost: opts.pressureSummaryCost,
     minTokens: opts.pressureMinTokens,
+    midterm: opts.midterm,
     pressure,
   });
   const settingsStore = new UserSettingsStore(opts.settingsPath);
@@ -318,6 +321,19 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     try {
       warming.reconcile(ctx);
       autocompact.noteTurn(event.turnIndex);
+      // Midterm trigger: a run still in progress may compact at a turn
+      // boundary when the pressure is saturated and the window is at least
+      // half full, instead of waiting for the run to settle. ctx.compact()
+      // aborts the live run by design, so the strict gate bounds how often
+      // that can happen; fast compaction keeps the rewrite cache-neutral.
+      if (
+        autocompact.midtermEligible(
+          ctx.getContextUsage?.(),
+          signals.for(ctx as unknown as SessionContextView),
+        )
+      ) {
+        void compactionTrigger.tryCompact(ctx);
+      }
     } catch {
       /* bookkeeping only */
     }
