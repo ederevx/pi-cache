@@ -15,9 +15,9 @@
  *                             system-listing canonicalization, and
  *                             shared OpenAI prompt_cache_key derivation
  *   turn_end                 — reconcile landed warm refreshes + turn
- *                              bookkeeping for auto-compaction, and fire the
- *                              gated midterm (in-run) compaction when
- *                              pressure is saturated and the window is half full
+ *                              bookkeeping for auto-compaction, and propose a
+ *                              gated midterm compaction draft that lets pi
+ *                              compact in-run and continue (fast compaction)
  *   cache_warming_decision   — observe pi's warm intent, reconcile the
  *                              persisted cache_warm entries, and apply the
  *                              forced-warm policy when enabled
@@ -68,6 +68,7 @@ import { CompactionPressure } from "./pressure.ts";
 import { CacheEconomics } from "./economics.ts";
 import { ContextDegradation } from "./context-degradation.ts";
 import { FastCompactionController } from "./fastcompact.ts";
+import { MidtermCompactor } from "./midterm.ts";
 import { SettingsSwitchBoard } from "./settings-switch.ts";
 import { SessionSignals, type SessionContextView } from "./signals.ts";
 import { CompactionGate } from "./compaction-gate.ts";
@@ -134,6 +135,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     branchEnabled: opts.fastBranchSummary,
     digestEnabled: opts.fastDigest,
   });
+  const midterm = new MidtermCompactor(fastcompact);
   const autocompact = new AutocompactController({
     enabled: opts.autoCompact,
     cooldownSeconds: opts.cooldownSeconds,
@@ -323,16 +325,43 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       autocompact.noteTurn(event.turnIndex);
       // Midterm trigger: a run still in progress may compact at a turn
       // boundary when the pressure is saturated and the window is at least
-      // half full, instead of waiting for the run to settle. ctx.compact()
-      // aborts the live run by design, so the strict gate bounds how often
-      // that can happen; fast compaction keeps the rewrite cache-neutral.
+      // half full. With fast compaction it proposes a boundary draft, so pi
+      // applies the compaction and continues the run instead of aborting it;
+      // without fast compaction it keeps the old aborting request.
+      const usage = ctx.getContextUsage?.();
       if (
         autocompact.midtermEligible(
-          ctx.getContextUsage?.(),
+          usage,
           signals.for(ctx as unknown as SessionContextView),
         )
       ) {
-        void compactionTrigger.tryCompact(ctx);
+        const draft = midterm.draft(ctx, usage?.tokens ?? undefined);
+        if (!draft) {
+          void compactionTrigger.tryCompact(ctx);
+          return;
+        }
+        const key = `${signals.sessionIdOf(ctx)}:${ledger.lastRowId() ?? "none"}`;
+        if (!gate.tryBegin(key)) return;
+        gate.settle(key);
+        autocompact.markCompacted();
+        fastcompact.recordCompaction();
+        // pi does not emit `session_compact` for boundary drafts, so record
+        // the compaction telemetry here (the counters are updated above).
+        try {
+          pi.appendEntry("pi-cache-compaction", {
+            keptEntryId: draft.firstKeptEntryId,
+            tokensBefore: usage?.tokens ?? 0,
+            fromExtension: true,
+          });
+        } catch {
+          /* telemetry only */
+        }
+        // A turn with tool results is mid-run: the compacted tail ends on a
+        // tool result, so pi can run the next assistant request. A turn that
+        // ends the run still commits the draft but asks for no continuation.
+        return (event.toolResults?.length ?? 0) > 0
+          ? { entries: [draft], continue: true }
+          : { entries: [draft] };
       }
     } catch {
       /* bookkeeping only */
