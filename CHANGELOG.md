@@ -3,6 +3,32 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [Unreleased]
+
+### Added
+
+- Fresh OpenRouter model parameters (`src/model-params.ts`): the
+  compaction economics now price prompt-cache rates from a live pull of
+  OpenRouter's public model list for OpenRouter-routed models, converting
+  USD-per-token pricing to per-million and selecting any request-wide
+  override tier by live token count. One pull is attempted per session
+  and again when the snapshot goes stale; the last-good snapshot persists
+  under `.pi-cache/model-params.json` (via `src/params-store.ts`, override
+  with `PI_CACHE_MODEL_PARAMS`) and is used only when OpenRouter is
+  inaccessible. Non-OpenRouter providers keep pi's rates.
+- Provider-aware cache lifetimes (`src/model-ttl.ts`): the coldness ramp,
+  idle timer, and ledger warm flag now measure against the provider's
+  documented lifetime for the model in use (Anthropic 5m/1h, OpenAI 30m,
+  DeepSeek 4h, Gemini 5m, Kimi 5m/1h, GLM ~2m) before the static
+  `PI_CACHE_TTL_SECONDS` fallback.
+
+### Changed
+
+- The expected-cost horizon now accounts for the last cache touch: the
+  current request always counts, and each further expected request counts
+  only while the cache is still warm, so a prefix near TTL expiry is
+  amortized over a shorter horizon than a freshly touched one.
+
 ## [0.11.0] - 2026-09-28
 
 ### Added

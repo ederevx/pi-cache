@@ -71,6 +71,9 @@ import { FastCompactionController } from "./fastcompact.ts";
 import { MidtermCompactor } from "./midterm.ts";
 import { SettingsSwitchBoard } from "./settings-switch.ts";
 import { SessionSignals, type SessionContextView } from "./signals.ts";
+import { OpenRouterModelParams } from "./model-params.ts";
+import { ParamsStore } from "./params-store.ts";
+import { ModelTtl } from "./model-ttl.ts";
 import { CompactionGate } from "./compaction-gate.ts";
 import { CompactionRequest } from "./compaction-request.ts";
 import { CompactionTrigger } from "./compaction-trigger.ts";
@@ -176,6 +179,16 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     },
   });
 
+  // Fresh OpenRouter model parameters: a live pull plus last-good disk
+  // fallback, so the economics read rates follow the model in use rather
+  // than pi's possibly-stale catalog entry. Non-OpenRouter providers defer
+  // to pi's own rates. The provider TTL resolver is the fallback the
+  // signals consult when pi declares no `promptCache` tier.
+  const modelParams = new OpenRouterModelParams({
+    store: new ParamsStore(opts.modelParamsPath),
+  });
+  const modelTtl = new ModelTtl();
+
   const signals = new SessionSignals(
     {
       cacheRetentionLong: opts.cacheRetentionLong,
@@ -183,6 +196,12 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       // The per-request retention rewrite wins over the static env mirror
       // so TTL-tier decisions follow the wire.
       retentionLongOf: () => retention.effectiveLong(),
+      costRatesOf: (ctx, tokens) =>
+        ctx?.model?.provider === "openrouter"
+          ? modelParams.ratesFor(ctx.model.id ?? "", tokens)
+          : undefined,
+      fallbackTtlSecondsOf: (ctx) =>
+        modelTtl.secondsFor(ctx?.model?.provider, ctx?.model?.id, retention.effectiveLong()),
     },
     {
       lastUsage: () => ledger.lastUsage(),
@@ -259,6 +278,11 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       warming.reconcile(ctx);
       ledger.useSession(signals.sessionIdOf(ctx));
       missClassifier.useSession(signals.sessionIdOf(ctx));
+      // Always attempt a fresh pull of the live model parameters; the
+      // background refresh leaves last-good in place when OpenRouter is
+      // unreachable. Only OpenRouter-routed models have fetched rates.
+      const model = (ctx as SessionContextView | undefined)?.model;
+      if (model?.provider === "openrouter") void modelParams.refresh();
       idleTrigger.arm(ctx);
     } catch {
       /* telemetry only */

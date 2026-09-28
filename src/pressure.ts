@@ -9,9 +9,13 @@
  * The pressure is NOT a context-window occupancy ramp. Economics cancels
  * occupancy out of the comparison (see economics.ts), so a warm prefix with
  * few expected requests stays at zero even when large, while a cold prefix
- * or one past the degradation onset rises. The two reasons are combined by
- * inclusion-exclusion (either suffices). The draw uses an injected RNG so
- * callers stay deterministic in tests.
+ * or one past the degradation onset rises. The economics horizon itself is
+ * discounted by the time since the cache was last touched against the
+ * model's TTL, so a near-expiry prefix is compared over fewer warm
+ * requests. Rates and TTL come from the model in use — pi's catalog, or a
+ * freshly pulled OpenRouter snapshot for OpenRouter-routed models. The two
+ * reasons are combined by inclusion-exclusion (either suffices). The draw
+ * uses an injected RNG so callers stay deterministic in tests.
  */
 
 import { CacheEconomics, type CostRates } from "./economics.ts";
@@ -44,6 +48,11 @@ export interface PressureSample {
   /** Fallback warmth inputs when `coldness` is absent. */
   cacheRead?: number;
   input?: number;
+  /** Provider cache lifetime (ms), with the touch age, to shrink the
+   *  economics horizon toward expiry. */
+  ttlMs?: number;
+  /** Age (ms) of the last confirmed cache touch. */
+  msSinceCacheTouch?: number;
 }
 
 export interface PressureVerdict {
@@ -99,6 +108,8 @@ export class CompactionPressure {
       tokens: input.tokens,
       coldness: this.coldness(input),
       summaryCost: Math.max(0, input.summaryCost ?? 0),
+      ttlMs: input.ttlMs,
+      msSinceCacheTouch: input.msSinceCacheTouch,
     });
   }
 

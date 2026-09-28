@@ -40,8 +40,16 @@ export interface AutocompactSignal {
   headChurn(): number;
   /** Provider cache lifetime in ms when known (model.promptCache tier). */
   cacheTtlMs?(): number | undefined;
-  /** Model cache cost rates; absent means economics is unavailable. */
-  costRates?(): CostRates | undefined;
+  /** Model cache cost rates; absent means economics is unavailable. The
+   *  live token count selects a request-wide pricing tier when the model
+   *  in use has one. */
+  costRates?(tokens?: number): CostRates | undefined;
+}
+
+/** The cache-timing pair the economics horizon needs (both or neither). */
+interface CacheTiming {
+  ttlMs?: number;
+  msSinceCacheTouch?: number;
 }
 
 /** The context-usage fields the controller reads (pi's `ContextUsage`). */
@@ -181,7 +189,13 @@ export class AutocompactController {
     coldness: number,
     churned: boolean,
   ): AutocompactVerdict {
-    const gate = this.contextGate(view, usage, coldness, signals.costRates?.());
+    const gate = this.contextGate(
+      view,
+      usage,
+      coldness,
+      signals.costRates?.(view.tokens),
+      this.cacheTiming(signals),
+    );
     const base = { pressure: gate.pressure, probability: gate.probability, coldness };
     if (!gate.allowed) {
       return { shouldCompact: false, reason: gate.reason, ...base };
@@ -274,7 +288,8 @@ export class AutocompactController {
       view,
       usage,
       this.coldness(usage, churned, signals),
-      signals.costRates?.(),
+      signals.costRates?.(view.tokens),
+      this.cacheTiming(signals),
     );
     if (!verdict || verdict.probability < 1) return false;
     return this.cooldownElapsed();
@@ -305,7 +320,14 @@ export class AutocompactController {
     if (!usage) return undefined;
     const churned = signals !== undefined && this.churned(signals);
     const coldness = this.coldness(usage, churned, signals);
-    return this.samplePressure(this.readContext(usageView), usage, coldness, signals?.costRates?.());
+    const view = this.readContext(usageView);
+    return this.samplePressure(
+      view,
+      usage,
+      coldness,
+      signals?.costRates?.(view.tokens),
+      this.cacheTiming(signals),
+    );
   }
 
   /**
@@ -317,6 +339,7 @@ export class AutocompactController {
     usage: { input: number; cacheRead: number; cacheWrite: number },
     coldness: number,
     rates: CostRates | undefined,
+    timing: CacheTiming,
   ): {
     allowed: boolean;
     reason?: string;
@@ -324,7 +347,7 @@ export class AutocompactController {
     probability?: number;
     fromPressure: boolean;
   } {
-    const verdict = this.samplePressure(view, usage, coldness, rates);
+    const verdict = this.samplePressure(view, usage, coldness, rates, timing);
     if (verdict) {
       // The expected-cost term is flat in token count, so without a floor it
       // fires on a trivially small context that pi refuses to compact.
@@ -360,6 +383,7 @@ export class AutocompactController {
     usage: { input: number; cacheRead: number; cacheWrite: number },
     coldness: number,
     rates: CostRates | undefined,
+    timing: CacheTiming,
   ): PressureVerdict | undefined {
     if (
       !this.opts.pressure ||
@@ -377,7 +401,20 @@ export class AutocompactController {
       summaryCost: this.cacheNeutral ? 0 : Math.max(0, this.opts.summaryCost ?? 0),
       cacheRead: usage.cacheRead,
       input: usage.input,
+      ttlMs: timing.ttlMs,
+      msSinceCacheTouch: timing.msSinceCacheTouch,
     });
+  }
+
+  /** The positive TTL and finite touch age the horizon may decay against. */
+  private cacheTiming(signals?: AutocompactSignal): CacheTiming {
+    const ttlMs = signals?.cacheTtlMs?.();
+    const touch = signals?.msSinceCacheTouch?.() ?? signals?.msSinceLastTurn();
+    return {
+      ttlMs: typeof ttlMs === "number" && ttlMs > 0 ? ttlMs : undefined,
+      msSinceCacheTouch:
+        typeof touch === "number" && Number.isFinite(touch) ? touch : undefined,
+    };
   }
 
   /** Whether the seconds/turns cooldown since the last compaction elapsed. */
