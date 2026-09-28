@@ -205,3 +205,34 @@ test("autocompact: fast compaction triggers on warm token pressure", () => {
   assertEq(verdict.reason, "compaction pressure");
   assert(verdict.probability === 1, "neutral pressure saturates");
 });
+
+test("autocompact: midterm needs a saturated pressure at a half-full window", () => {
+  const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
+  const pressure = new CompactionPressure({ random: () => 0.99 });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: true });
+  c.noteTurn(0);
+  // Cold economics at the degradation onset saturate the pressure, so the
+  // midterm predicate holds even though the draw would decline it.
+  assertEq(
+    c.midtermEligible({ tokens: 100_000, contextWindow: 200_000, percent: 50 }, signals({ costRates })),
+    true,
+    "half full + saturated pressure is eligible",
+  );
+  assertEq(
+    c.midtermEligible({ tokens: 80_000, contextWindow: 200_000, percent: 40 }, signals({ costRates })),
+    false,
+    "below half full is never eligible",
+  );
+  assertEq(
+    c.midtermEligible({ tokens: 100_000, contextWindow: 200_000, percent: 50 }, signals()),
+    false,
+    "without cost rates the pressure never saturates",
+  );
+  const off = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: false });
+  off.noteTurn(0);
+  assertEq(
+    off.midtermEligible({ tokens: 100_000, contextWindow: 200_000, percent: 50 }, signals({ costRates })),
+    false,
+    "the midterm switch gates the predicate",
+  );
+});
