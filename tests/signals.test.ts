@@ -62,6 +62,20 @@ test("signals: the signal set reads the injected collaborator seam", () => {
   assertEq(signal.headChurn(), 2);
   assertEq(signal.cacheTtlMs?.(), 10_000);
   assert(signal.costRates?.() === undefined, "no cost declared");
+  assertEq(signal.lastRequestUsage?.(), undefined, "no request usage wired");
+});
+
+test("signals: the signal set exposes the freshest request usage", () => {
+  const s = new SessionSignals(
+    opts,
+    sources({
+      lastUsage: () => ({ input: 10, cacheRead: 0, cacheWrite: 0 }),
+      lastRequestUsage: () => ({ input: 1, cacheRead: 99, cacheWrite: 0 }),
+    }),
+  );
+  const signal = s.for(undefined);
+  assertEq(signal.lastUsage()?.cacheRead, 0, "turn view stays turn-scoped");
+  assertEq(signal.lastRequestUsage?.()?.cacheRead, 99, "request view sees the warm row");
 });
 test("signals: the cache touch uses the most recent warm", () => {
   const warmed = new SessionSignals(opts, sources({ msSinceLastWarm: () => 1000 }));

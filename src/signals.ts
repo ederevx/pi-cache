@@ -61,6 +61,8 @@ export interface SessionSignalsOptions {
 /** The collaborator state the signals read, owned by their own classes. */
 export interface SignalSources {
   lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined;
+  /** Newest request usage of any kind, warm refreshes included. */
+  lastRequestUsage?(): { input: number; cacheRead: number; cacheWrite: number } | undefined;
   msSinceLastTurn(): number;
   headChurn(): number;
   /** Milliseconds since pi last warmed the cache, when observed. */
@@ -143,6 +145,7 @@ export class SessionSignals {
   for(ctx: SessionContextView | undefined): AutocompactSignal {
     return {
       lastUsage: () => this.sources.lastUsage(),
+      lastRequestUsage: () => this.sources.lastRequestUsage?.(),
       msSinceLastTurn: () => this.sources.msSinceLastTurn(),
       msSinceCacheTouch: () => this.msSinceCacheTouch(),
       headChurn: () => this.sources.headChurn(),

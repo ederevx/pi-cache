@@ -20,6 +20,10 @@ function baseSignals() {
     msSinceLastTurn: () => 300_000,
     /** Absent by default so the idle ramp falls back to the last turn. */
     msSinceCacheTouch: undefined as (() => number) | undefined,
+    /** Absent by default so the freshest request falls back to the turn. */
+    lastRequestUsage: undefined as
+      | (() => { input: number; cacheRead: number; cacheWrite: number } | undefined)
+      | undefined,
     headChurn: () => 0,
   };
 }
@@ -235,4 +239,36 @@ test("autocompact: midterm needs a saturated pressure at a half-full window", ()
     false,
     "the midterm switch gates the predicate",
   );
+});
+
+test("autocompact: the midterm predicate consumes no RNG draw", () => {
+  let draws = 0;
+  const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
+  const pressure = new CompactionPressure({
+    random: () => {
+      draws++;
+      return 0.99;
+    },
+  });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: true });
+  c.noteTurn(0);
+  assertEq(
+    c.midtermEligible({ tokens: 100_000, contextWindow: 200_000, percent: 50 }, signals({ costRates })),
+    true,
+    "predicate reads the probability, not a draw",
+  );
+  assertEq(draws, 0, "no RNG touched");
+});
+
+test("autocompact: decide reads the freshest request, not just the last turn", () => {
+  const c = new AutocompactController(opts);
+  c.noteTurn(0);
+  // The last real turn missed (cold), but a warm refresh landed after it.
+  const s = signals({
+    lastUsage: () => ({ input: 1000, cacheRead: 0, cacheWrite: 0 }),
+    lastRequestUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }),
+  });
+  const verdict = c.decide(90, s);
+  assertEq(verdict.shouldCompact, false);
+  assertEq(verdict.reason, "cache warm");
 });
