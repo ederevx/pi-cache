@@ -51,6 +51,7 @@ const CLEAN = {
   PI_CACHE_PIN_SESSION: undefined,
   PI_CACHE_ADVISORY: undefined,
   PI_CACHE_AUTO_COMPACT: undefined,
+  PI_CACHE_MIDTERM: undefined,
   PI_CACHE_LEDGER_MAX_ROWS: undefined,
   PI_CACHE_LEDGER_BACKUPS: undefined,
   PI_CACHE_LEDGER_BACKUP_TTL_DAYS: undefined,
@@ -82,6 +83,7 @@ test("constants: default options", () => {
     assertEq(opts.advisory, true);
     // Cold-window auto-compaction is the default path.
     assertEq(opts.autoCompact, true);
+    assertEq(opts.midterm, true, "midterm compaction default");
     // Fast cache-aware compaction is on by default; branch summaries have
     // their own independently-defaulted switch.
     assertEq(opts.fastCompact, true);
@@ -125,6 +127,7 @@ test("constants: boolean env parsing", () => {
       PI_CACHE_FORCE_WARM: "yes",
       PI_CACHE_ADVISORY: "false",
       PI_CACHE_AUTO_COMPACT: "no",
+      PI_CACHE_MIDTERM: "0",
       PI_CACHE_FAST_COMPACT: "off",
       PI_CACHE_FAST_BRANCH_SUMMARY: "0",
       PI_CACHE_SETTINGS: settingsPath("bool"),
@@ -140,6 +143,7 @@ test("constants: boolean env parsing", () => {
       assertEq(opts.forceWarm, true);
       assertEq(opts.advisory, false);
       assertEq(opts.autoCompact, false);
+      assertEq(opts.midterm, false);
       assertEq(opts.fastCompact, false);
       assertEq(opts.fastBranchSummary, false);
     },

@@ -51,7 +51,7 @@ function board(pinned: string[] = []) {
   const cacheKey = new CacheKeySharer(false);
   const warmingPolicy = new WarmingPolicy(false);
   const advisor = new CompactionAdvisor({ enabled: true });
-  const autocompact = new AutocompactController({ enabled: true, cooldownSeconds: 0 });
+  const autocompact = new AutocompactController({ enabled: true, cooldownSeconds: 0, midterm: true });
   const fast = new FastCompactionController({ enabled: true, branchEnabled: true });
   const stats = new SettingsPresenter();
   const store = new UserSettingsStore(file);
@@ -178,6 +178,7 @@ test("settings-switch: snapshot reflects every current value", () => {
   const before = b.snapshot();
   assertEq(before.telemetry, true);
   assertEq(before.fastBranchSummary, true);
+  assertEq(before.midterm, true);
   b.set("dedupTools", "off");
   b.set("fastCompaction", "off");
   const after = b.snapshot();
@@ -231,6 +232,7 @@ test("settings-switch: restoreDefaults returns every option to its default", () 
   b.set("missDiagnosis", "off");
   b.set("advisory", "off");
   b.set("autoCompact", "off");
+  b.set("midterm", "off");
   b.set("fastCompaction", "off");
   b.set("fastDigest", "off");
   b.set("fastBranchSummary", "off");
@@ -247,6 +249,7 @@ test("settings-switch: restoreDefaults returns every option to its default", () 
   assertEq(stats.missDiagnosisEnabled, true);
   assertEq(advisor.enabled, true);
   assertEq(autocompact.enabled, true);
+  assertEq(autocompact.midtermEnabled, true);
   assertEq(fast.enabled, true);
   assertEq(fast.digestEnabled, true);
   assertEq(fast.branchEnabled, true);

@@ -56,6 +56,9 @@ export interface PiCacheOptions {
   idleTrigger: boolean;
   /** Defer a cold prompt to compact before the turn starts (default on). */
   beforeTurn: boolean;
+  /** Allow a mid-run compaction when pressure is saturated and the
+   *  window is at least half full (default on). */
+  midterm: boolean;
   /** Minimum seconds between automatic compactions. */
   cooldownSeconds: number;
   /** Coldness at/below which a non-churned cache is warm (0..1). */
@@ -114,6 +117,7 @@ export class OptionsLoader {
       autoCompact: this.envBool("PI_CACHE_AUTO_COMPACT", stored.autoCompact ?? true),
       idleTrigger: this.envBool("PI_CACHE_IDLE_TRIGGER", true),
       beforeTurn: this.envBool("PI_CACHE_BEFORE_TURN", true),
+      midterm: this.envBool("PI_CACHE_MIDTERM", stored.midterm ?? true),
       cooldownSeconds: this.envFloat("PI_CACHE_COOLDOWN_SECONDS", 600),
       pressureColdFloor: this.envFloat("PI_CACHE_PRESSURE_COLD_FLOOR", 0.2),
       cacheTtlSeconds: this.envFloat("PI_CACHE_TTL_SECONDS", 300),
@@ -168,6 +172,7 @@ export class OptionsLoader {
       ["missDiagnosis", "PI_CACHE_MISS_DIAGNOSIS"],
       ["advisory", "PI_CACHE_ADVISORY"],
       ["autoCompact", "PI_CACHE_AUTO_COMPACT"],
+      ["midterm", "PI_CACHE_MIDTERM"],
       ["fastCompaction", "PI_CACHE_FAST_COMPACT"],
       ["fastBranchSummary", "PI_CACHE_FAST_BRANCH_SUMMARY"],
       ["fastDigest", "PI_CACHE_FAST_DIGEST"],
