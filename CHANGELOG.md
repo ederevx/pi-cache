@@ -27,6 +27,19 @@ git tag, and the `version` in `package.json` matches the newest tag.
 - The startup temp sweep now covers the model-parameters directory, so an
   interrupted OpenRouter pull cannot leave a stale atomic temp beside the
   last-good snapshot.
+- An unconfirmed warm decision no longer counts as a cache touch: only a
+  landed `cache_warm` refresh resets the age the coldness ramp and idle
+  clock measure, so a refresh that never lands cannot delay compaction.
+- The midterm gate is genuinely RNG-free: `CompactionPressure.probability()`
+  composes the pressure without drawing, so `midtermEligible()` no longer
+  perturbs the probabilistic decision it reads.
+- The miss classifier uses each ledger row's recorded cache TTL, so the
+  `/cache-stats` diagnosis shares the idle ramp's lifetime model instead
+  of falling back to the static default.
+- `RowExtrasBuilder` degrades field-by-field as documented; one failing
+  signal no longer drops the fields that follow it.
+- The `miss-classifier`, `row-extras`, and `warming-schedule` suites are
+  now imported by the test runner; they were committed but never run.
 
 ### Changed
 
@@ -34,6 +47,9 @@ git tag, and the `version` in `package.json` matches the newest tag.
   current request always counts, and each further expected request counts
   only while the cache is still warm, so a prefix near TTL expiry is
   amortized over a shorter horizon than a freshly touched one.
+- The compaction decision and the `/cache-stats` preview both read the
+  freshest request of any kind (warm refreshes included) as the warmth
+  measurement, so a just-landed refresh is reflected consistently.
 
 ## [0.11.0] - 2026-09-28
 
