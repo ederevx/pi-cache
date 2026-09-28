@@ -115,11 +115,18 @@ compaction is on, makes the compaction itself prefix-stable:
      cost compaction avoids. Occupancy cancels out of the ratio, so this
      part is flat in token count: a warm prefix with few expected requests
      stays at zero even when large, while a cold prefix rises.
+     The horizon itself is discounted by the time since the last cache
+     touch: the current request always counts, and each further expected
+     request counts only while the cache is still warm (`1 - age/ttl`),
+     so a prefix seconds from expiry is amortized over a shorter horizon
+     than a freshly touched one. Costs come from `ctx.model.cost`
+     per-million rates, or — for OpenRouter-routed models — from a
+     freshly pulled OpenRouter snapshot (`src/model-params.ts`) with
+     per-request override tiers selected by live token count; absent
+     rates leave economics at 0, so the degradation onset gates alone.
    The two combine by inclusion-exclusion (`1-(1-d)(1-e)`), then a
    `start=0.1`/`full=0.6`/`gamma=2` ramp yields the Bernoulli probability;
-   the draw uses an injected RNG. Costs come from `ctx.model.cost`
-   per-million rates; absent rates leave economics at 0, so the
-   degradation onset gates alone. Because economics is flat in token
+   the draw uses an injected RNG. Because economics is flat in token
    count, the pressure path is additionally floored on a minimum live
    context (`PI_CACHE_PRESSURE_MIN_TOKENS`, default 50 000) so a trivially
    small, still-cold prefix cannot request a compaction pi then refuses.
@@ -210,8 +217,11 @@ cache-read rate):
    touched (the last turn, or a pi warm refresh recorded from the
    `cache_warming_decision` intent and confirmed by the persisted
    `cache_warm` usage entry, whichever is newer) approaches the provider
-   cache lifetime from `ctx.model.promptCache` (fallback
-   `PI_CACHE_TTL_SECONDS`), combined by their maximum. The warm observer
+   cache lifetime from `ctx.model.promptCache` when the model declares a
+   tier, else the provider-aware profile for the model in use
+   (`src/model-ttl.ts`: Anthropic 5m/1h, OpenAI 30m, DeepSeek 4h, Gemini
+   5m, Kimi 5m/1h, GLM ~2m), else `PI_CACHE_TTL_SECONDS`, combined by
+   their maximum. The warm observer
    keeps the idle trigger from compacting a cache pi just rewarmed, and
    the idle fire defers past an unelapsed warm refresh margin so a
    just-decided warm lands first (the warm-vs-compact race).
@@ -233,8 +243,10 @@ undefined exactly when pi's warmer schedules nothing — and it is the
 authority for anything that must match pi's warming behavior
 (`WarmingSchedule.refreshMarginMs`). `SessionSignals.cacheTtlMs` is
 pi-cache's coldness-ramp input: when the model declares no tier it
-falls back to the resolver and then `PI_CACHE_TTL_SECONDS`, so the
-idle ramp still fires for providers pi has no tier for. The miss
+falls back to the provider-aware profile (`src/model-ttl.ts`) and then
+`PI_CACHE_TTL_SECONDS`, so the idle ramp still fires for providers pi
+has no tier for and measures the model's real lifetime where one is
+documented. The miss
 taxonomy (`src/miss-classifier.ts`) binds the unified `cacheTtlMs`
 view and feeds the /cache-stats miss line
 (`PI_CACHE_MISS_DIAGNOSIS`, default on).
@@ -272,11 +284,14 @@ activity.
 
 ### 6. Removed: affinity observation
 
-Header-affinity observation and the provider-TTL learner/resolver were
-removed: pi 0.87 providers key affinity on content (prompt_cache_key,
-or the sticky-routing headers pi-ai already emits), so the observed
-headers were inert, and the learned TTL knee never beat the documented
-provider profile.
+Header-affinity observation and the provider-TTL learner were removed
+(2026-09-22): pi 0.87 providers key affinity on content
+(prompt_cache_key, or the sticky-routing headers pi-ai already emits),
+so the observed headers were inert, and the learned TTL knee never beat
+the documented provider profile. The documented profiles returned
+(2026-09-28) as the static `ModelTtl` fallback (`src/model-ttl.ts`),
+without the learner, because the single static default mis-timed every
+non-Anthropic provider.
 
 ## Config surface
 

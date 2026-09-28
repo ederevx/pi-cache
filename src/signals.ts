@@ -44,6 +44,14 @@ export interface SessionSignalsOptions {
    *  `fallbackTtlSeconds` (provider-aware TTLs); returning undefined keeps
    *  the old static fallback, so callers without a resolver are unchanged. */
   fallbackTtlSecondsOf?: (ctx: SessionContextView | undefined) => number | undefined;
+  /** Optional live model-parameter source consulted before pi's own
+   *  `ctx.model.cost` (a freshly pulled OpenRouter snapshot); returning
+   *  undefined defers to pi's rates, so other providers are unchanged. The
+   *  live token count selects a request-wide pricing tier when one exists. */
+  costRatesOf?: (
+    ctx: SessionContextView | undefined,
+    tokens?: number,
+  ) => CostRates | undefined;
   /** Whether the last applied request ran on the long retention tier;
    *  consulted before the static env-mirror flag so TTL-tier selection
    *  follows the wire when a per-request override is active. */
@@ -102,8 +110,14 @@ export class SessionSignals {
     return ctx?.model?.promptCache?.[effective ? "long" : "short"];
   }
 
-  /** Model cache cost rates (per million tokens), when the model declares them. */
-  costRates(ctx: SessionContextView | undefined): CostRates | undefined {
+  /**
+   * Model cache cost rates (per million tokens). The injected live source
+   * (a fresh OpenRouter snapshot) wins when it has the model; otherwise
+   * pi's own declared rates are used, and undefined when neither does.
+   */
+  costRates(ctx: SessionContextView | undefined, tokens?: number): CostRates | undefined {
+    const fetched = this.opts.costRatesOf?.(ctx, tokens);
+    if (fetched) return fetched;
     const cost = ctx?.model?.cost;
     if (typeof cost?.input !== "number" || typeof cost?.cacheRead !== "number") {
       return undefined;
@@ -133,7 +147,7 @@ export class SessionSignals {
       msSinceCacheTouch: () => this.msSinceCacheTouch(),
       headChurn: () => this.sources.headChurn(),
       cacheTtlMs: () => this.cacheTtlMs(ctx),
-      costRates: () => this.costRates(ctx),
+      costRates: (tokens?: number) => this.costRates(ctx, tokens),
     };
   }
 
