@@ -1,9 +1,9 @@
 /**
  * pi-cache — `pre_cache` onboarding tool tests.
- * Drives PreCacheTool against a fake pi and theme: the catalog contract,
- * tool registration, the first-call gate on owned tools (and only owned
- * tools), the session_start reset + collapse default, and the
- * collapsed-by-default renderResult.
+ * Drives PreCacheTool against a fake pi: the catalog contract, tool
+ * registration, the first-call gate on owned tools (and only owned
+ * tools), and the session_start reset. The tool defines no custom
+ * renderer, so pi's native collapsed rendering applies.
  */
 
 import { test, assert, assertEq, assertMatches } from "./harness.ts";
@@ -34,24 +34,6 @@ class FakePi {
   }
 }
 
-const fakeTheme = {
-  fg: (_tag: string, text: string) => text,
-  bold: (text: string) => text,
-};
-
-function render(
-  tool: Record<string, unknown>,
-  result: unknown,
-  expanded: boolean,
-): string {
-  const renderResult = tool.renderResult as (
-    r: unknown,
-    options: { expanded: boolean },
-    theme: typeof fakeTheme,
-  ) => { render(width: number): string[] };
-  return renderResult(result, { expanded }, fakeTheme).render(200).join("\n");
-}
-
 test("pre-cache: catalog states tools, conventions, and features", () => {
   const catalog = new PreCacheTool().catalog();
   assertMatches(catalog, /Model-callable tools: none/, "declares no model tools");
@@ -63,7 +45,7 @@ test("pre-cache: catalog states tools, conventions, and features", () => {
   assertMatches(catalog, /warming/i, "names warming");
 });
 
-test("pre-cache: registers the tool, the gate, and the collapse hook", () => {
+test("pre-cache: registers the tool and the gate", () => {
   const pi = new FakePi();
   new PreCacheTool().register(pi as never);
   assert(pi.tool !== undefined, "pre_cache tool registered");
@@ -99,35 +81,20 @@ test("pre-cache: gate stays open when the extension owns no tools", async () => 
   assertEq(result, undefined, "unknown owned tool is not blocked");
 });
 
-test("pre-cache: session_start resets the gate and collapses tools", async () => {
+test("pre-cache: session_start resets the gate", async () => {
   const pi = new FakePi();
   const tool = new PreCacheTool(["cache_probe"]);
   tool.register(pi as never);
   await pi.emit("tool_call", { toolName: "pre_cache" });
 
-  const calls: boolean[] = [];
-  await pi.emit(
-    "session_start",
-    { reason: "new" },
-    { hasUI: true, ui: { setToolsExpanded: (value: boolean) => calls.push(value) } },
-  );
-  assertEq(calls.length, 1, "collapse default applied once");
-  assertEq(calls[0], false, "tools collapsed by default");
-
+  await pi.emit("session_start", { reason: "new" });
   const [blocked] = (await pi.emit("tool_call", { toolName: "cache_probe" })) as Array<{
     block?: boolean;
   }>;
   assertEq(blocked?.block, true, "gate closed again for the new session");
 });
 
-test("pre-cache: session_start with no UI skips the collapse call", async () => {
-  const pi = new FakePi();
-  new PreCacheTool().register(pi as never);
-  await pi.emit("session_start", { reason: "new" }, { hasUI: false, ui: {} });
-  assertEq(pi.handlers.get("session_start")?.length, 1, "hook ran without throwing");
-});
-
-test("pre-cache: execute returns the catalog and renderResult collapses", async () => {
+test("pre-cache: execute returns the catalog and defines no custom renderer", async () => {
   const pi = new FakePi();
   new PreCacheTool().register(pi as never);
   const tool = pi.tool as Record<string, unknown>;
@@ -142,9 +109,6 @@ test("pre-cache: execute returns the catalog and renderResult collapses", async 
   assert("conventions" in result.details, "details carry conventions");
   assert("features" in result.details, "details carry features");
 
-  const collapsed = render(tool, result, false);
-  assertMatches(collapsed, /Ctrl\+O to expand/, "collapsed shows the expand hint");
-  assert(!collapsed.includes("pi-cache catalog"), "collapsed hides the catalog");
-  const expanded = render(tool, result, true);
-  assertMatches(expanded, /pi-cache catalog/, "expanded shows the catalog");
+  assertEq(tool.renderResult, undefined, "no custom result renderer");
+  assertEq(tool.renderCall, undefined, "no custom call renderer");
 });
