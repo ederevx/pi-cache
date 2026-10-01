@@ -3,6 +3,15 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.13.0] - 2026-10-01
+
+### Added
+
+- `pre_cache` onboarding tool (`src/pre-cache.ts`): one call returns
+  pi-cache's tool catalog, conventions, and feature summary. The first
+  call of any pi-cache-owned tool in a session is gated until it runs,
+  and tool output uses pi's native collapsed rendering.
+
 ## [0.12.0] - 2026-09-28
 
 ### Added
