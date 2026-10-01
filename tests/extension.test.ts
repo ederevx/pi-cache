@@ -69,6 +69,7 @@ class MockPi {
   readonly handlers = new Map<string, Handler[]>();
   readonly entries: Array<{ kind: string; data: unknown }> = [];
   readonly commands = new Map<string, { description: string; handler: Handler }>();
+  readonly tools = new Map<string, Record<string, unknown>>();
 
   on(name: string, handler: Handler): void {
     const list = this.handlers.get(name) ?? [];
@@ -85,6 +86,10 @@ class MockPi {
     def: { description: string; handler: Handler },
   ): void {
     this.commands.set(name, def);
+  }
+
+  registerTool(def: { name: string } & Record<string, unknown>): void {
+    this.tools.set(def.name, def);
   }
 
   /** Run every handler for `name` in order; returns their results. */
