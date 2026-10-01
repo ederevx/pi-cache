@@ -38,6 +38,11 @@
  *   session_tree             — branch-summary telemetry
  *   session_shutdown         — flush appends, then bound the ledger
  *
+ * Tools:
+ *   pre_cache                — onboarding catalog; the first-call gate over
+ *                              pi-cache's own tools (none today — hooks only)
+ *                              and the collapsed-by-default tool display
+ *
  * Commands:
  *   /cache-stats             — global + session cache stats, live pressure,
  *                              churn, compactions
@@ -49,6 +54,7 @@
  */
 
 import { OptionsLoader } from "./constants.ts";
+import { PreCacheTool } from "./pre-cache.ts";
 import { CacheLedger } from "./ledger.ts";
 import { RowExtrasBuilder } from "./row-extras.ts";
 import { FileRecordSink } from "./sink.ts";
@@ -89,6 +95,12 @@ import { dirname } from "node:path";
 export default function piCacheExtension(pi: ExtensionAPI): void {
   const loader = new OptionsLoader();
   const opts = loader.load();
+  // Onboarding: one `pre_cache` catalog call gates pi-cache's own
+  // model-callable tools and makes every tool row collapse by default
+  // (Ctrl+O expands). The list is empty: pi-cache is hook-driven and
+  // registers no tools, so the gate stays open and the catalog says so.
+  const preCache = new PreCacheTool([]);
+  preCache.register(pi);
   // Sweep stale atomic-write temp files before the ledger/settings/params
   // are read. Any of the three files may live outside the default dir
   // (PI_CACHE_SETTINGS / PI_CACHE_MODEL_PARAMS / PI_CACHE_LEDGER), so each
