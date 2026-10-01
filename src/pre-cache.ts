@@ -1,9 +1,10 @@
 /**
  * pi-cache — `pre_cache` onboarding tool.
  *
- * One responsibility: register the single `pre_cache` catalog tool, hold
- * the per-session first-call gate over pi-cache's own model-callable
- * tools, and collapse tool output by default. The catalog is the only
+ * One responsibility: register the single `pre_cache` catalog tool and
+ * hold the per-session first-call gate over pi-cache's own model-callable
+ * tools. Tool rows use pi's native collapsed rendering, so the extension
+ * blends in; Ctrl+O expands. The catalog is the only
  * model-facing summary of pi-cache; feature and tool lists live here
  * rather than in prompt snippets or long tool descriptions. pi-cache is
  * hook-driven and today registers no model-callable tools, so the gate
@@ -11,7 +12,6 @@
  */
 
 import { Type } from "@earendil-works/pi-ai";
-import { Text } from "@earendil-works/pi-tui";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export class PreCacheTool {
@@ -40,7 +40,7 @@ export class PreCacheTool {
     ];
   }
 
-  /** Register the tool, the first-call gate, and the collapse default. */
+  /** Register the tool and the first-call gate. */
   register(pi: ExtensionAPI): void {
     pi.registerTool({
       name: "pre_cache",
@@ -50,27 +50,6 @@ export class PreCacheTool {
         "Returns the pi-cache tool catalog, conventions, and feature summary.",
       parameters: Type.Object({}),
       annotations: { readOnlyHint: true },
-      renderCall: (_args, theme) =>
-        new Text(
-          theme.fg("toolTitle", theme.bold("pre_cache")) +
-            theme.fg("muted", " catalog"),
-          0,
-          0,
-        ),
-      renderResult: (result, { expanded }, theme) => {
-        if (!expanded) {
-          return new Text(
-            theme.fg("muted", "pre_cache catalog (Ctrl+O to expand)"),
-            0,
-            0,
-          );
-        }
-        const text = result.content
-          .filter((content) => content.type === "text")
-          .map((content) => content.text)
-          .join("\n");
-        return new Text(text, 0, 0);
-      },
       execute: async () => {
         this.acknowledged = true;
         return {
@@ -84,9 +63,8 @@ export class PreCacheTool {
       },
     });
 
-    pi.on("session_start", async (_event, ctx) => {
+    pi.on("session_start", async () => {
       this.acknowledged = false;
-      if (ctx?.hasUI) ctx.ui.setToolsExpanded(false);
     });
 
     pi.on("tool_call", async (event) => {
