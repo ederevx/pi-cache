@@ -7,6 +7,10 @@
  * held until compaction finishes and then continues with the compacted
  * context — no re-send, so a deferred prompt can never be lost in print
  * mode.
+ *
+ * The trigger never decides for itself: `compact` owns the decision (through
+ * the shared compaction trigger), so the probabilistic draw happens exactly
+ * once per input instead of once in a pre-check and again in the request.
  */
 
 export interface BeforeTurnTriggerOptions<Ctx, Event> {
@@ -15,9 +19,8 @@ export interface BeforeTurnTriggerOptions<Ctx, Event> {
   isEnabled(): boolean;
   /** Whether this input starts an idle turn the trigger may defer. */
   eligible(event: Event): boolean;
-  /** Pure decision from the shared compaction trigger. */
-  shouldCompact(ctx: Ctx): boolean;
-  /** Defer the prompt until compaction completes. */
+  /** Defer the prompt until compaction completes. Called once per eligible
+   *  input; the returned promise resolves whether or not a compaction ran. */
   compact(ctx: Ctx): Promise<boolean>;
   /** A new turn means any idle timer is stale. */
   disarmIdle(): void;
@@ -33,7 +36,6 @@ export class BeforeTurnTrigger<Ctx, Event> {
     this.opts.disarmIdle();
     if (!this.opts.isEnabled()) return;
     if (!this.opts.eligible(event)) return;
-    if (!this.opts.shouldCompact(ctx)) return;
     try {
       await this.opts.compact(ctx);
     } catch {
