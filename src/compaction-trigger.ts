@@ -23,7 +23,7 @@ export class CompactionTrigger<Ctx extends CompactableContext> {
   constructor(private readonly opts: CompactionTriggerOptions<Ctx>) {}
 
   /** Whether a compaction would fire (no side effects). */
-  shouldCompact(ctx: Ctx): boolean {
+  private decide(ctx: Ctx): boolean {
     try {
       return this.opts.shouldCompact(ctx);
     } catch {
@@ -33,7 +33,7 @@ export class CompactionTrigger<Ctx extends CompactableContext> {
 
   /** Claim, compact, and settle; false when declined, gated, or failed. */
   async tryCompact(ctx: Ctx): Promise<boolean> {
-    if (!this.shouldCompact(ctx)) return false;
+    if (!this.decide(ctx)) return false;
     const key = this.opts.keyOf(ctx);
     if (!this.opts.gate.tryBegin(key)) return false;
     let completed = false;
