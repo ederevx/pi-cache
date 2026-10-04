@@ -269,14 +269,14 @@ test("idle-trigger: disarm clears the timer and disabled never arms", () => {
 test("before-turn-trigger: defers only an eligible cold idle prompt", async () => {
   let compactions = 0;
   let disarms = 0;
-  let shouldCompact = true;
   const trigger = new BeforeTurnTrigger<
     FakeCtx,
     { streamingBehavior?: string; source?: string }
   >({
     isEnabled: () => true,
     eligible: (event) => event.streamingBehavior === undefined && event.source !== "extension",
-    shouldCompact: () => shouldCompact,
+    // The compact call owns the decision: one invocation per eligible input,
+    // never a pre-check followed by a re-decided request.
     compact: async () => {
       compactions++;
       return true;
@@ -292,9 +292,6 @@ test("before-turn-trigger: defers only an eligible cold idle prompt", async () =
   await trigger.handle({ source: "extension" }, {});
   assertEq(compactions, 1, "our own re-sent prompt is not intercepted");
   assertEq(disarms, 3, "an extension-source input still disarms the idle timer");
-  shouldCompact = false;
-  await trigger.handle({ source: "interactive" }, {});
-  assertEq(compactions, 1, "a warm prompt is not deferred");
 });
 
 test("before-turn-trigger: disarm happens even when disabled", async () => {
@@ -302,7 +299,6 @@ test("before-turn-trigger: disarm happens even when disabled", async () => {
   const trigger = new BeforeTurnTrigger<FakeCtx, { source?: string }>({
     isEnabled: () => false,
     eligible: () => true,
-    shouldCompact: () => true,
     compact: async () => true,
     disarmIdle: () => disarms++,
   });
@@ -314,7 +310,6 @@ test("before-turn-trigger: a failing compaction still lets the prompt through", 
   const trigger = new BeforeTurnTrigger<FakeCtx, { source?: string }>({
     isEnabled: () => true,
     eligible: () => true,
-    shouldCompact: () => true,
     compact: async () => {
       throw new Error("compaction failed");
     },
