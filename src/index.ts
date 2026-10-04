@@ -282,7 +282,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   >({
     isEnabled: () => autocompact.enabled && opts.beforeTurn,
     eligible: (event) => event?.streamingBehavior === undefined && event?.source !== "extension",
-    shouldCompact: (ctx) => compactionTrigger.shouldCompact(ctx),
+    // The trigger owns the single decision; this path only awaits it.
     compact: (ctx) => compactionTrigger.tryCompact(ctx),
     disarmIdle: () => idleTrigger.disarm(),
   });
@@ -362,7 +362,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   pi.on("turn_end", async (event, ctx) => {
     try {
       warming.reconcile(ctx);
-      autocompact.noteTurn(event.turnIndex);
+      autocompact.noteTurn();
       // Midterm trigger: a run still in progress may compact at a turn
       // boundary when the pressure is saturated and the window is at least
       // half full. With fast compaction it proposes a boundary draft, so pi
