@@ -3,6 +3,25 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.13.1] - 2026-10-04
+
+### Fixed
+
+- Auto-compaction no longer stalls on the session-turn half of its
+  cooldown. It differenced pi's per-run `turnIndex`, which resets to 0 on
+  every new prompt, so once a compaction recorded an index no later short
+  run could advance past it and the cooldown never elapsed again for the
+  rest of the session. `AutocompactController` now owns a monotonic
+  session-turn counter.
+
+### Changed
+
+- The auto-compaction decision is centralized on one shared evaluation:
+  `decide`, the midterm predicate, and the `/cache-stats` preview read the
+  same draw-free sample, and only `decide` consumes the pressure draw. The
+  before-turn trigger no longer pre-decides before the compaction request,
+  removing a duplicate RNG draw.
+
 ## [0.13.0] - 2026-10-01
 
 ### Added
