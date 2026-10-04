@@ -17,6 +17,13 @@
  * economics read rate rather than a raw utilization ramp (the pressure
  * model owns the probability math and the draw).
  *
+ * Every predicate (`decide`, `midtermEligible`, the /cache-stats
+ * `currentPressure` preview) reads the SAME evaluated sample: the last
+ * completed turn gates that a turn happened, the freshest request of any
+ * kind measures warmth, and the normalized view supplies the tokens and
+ * window. Only `decide` consumes the RNG draw; the midterm predicate reads
+ * the draw-free probability, so it cannot perturb the decision.
+ *
  * `cacheNeutral` (fast compaction on) relaxes the warm-cache floor, because
  * the fast override makes the compaction itself prefix-stable.
  *
@@ -69,6 +76,20 @@ interface AutocompactView {
   contextWindow?: number;
 }
 
+interface AutocompactUsage {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** One evaluated pressure sample for a live context view. */
+interface Evaluation {
+  churned: boolean;
+  coldness: number;
+  /** Absent when the model/window cannot produce a pressure sample. */
+  sample?: PressureSample;
+}
+
 export interface AutocompactOptions {
   enabled: boolean;
   /** Minimum seconds between automatic compactions. */
@@ -117,9 +138,15 @@ export class AutocompactController {
   /** Default minimum live context before economics pressure may fire. */
   private static readonly DEFAULT_MIN_TOKENS = 50_000;
 
-  private lastCompactedAt = 0;
-  private lastCompactedTurn = -1;
-  private lastTurnIndex = 0;
+  /** Session turns seen, counted here rather than read from pi's per-run
+   *  `turnIndex` (which resets to 0 on every `agent_start`), so the turn
+   *  cooldown is monotonic across runs. */
+  private turnsSeen = 0;
+  /** Whether any compaction completed this session. */
+  private hasCompacted = false;
+  /** Wall clock and session-turn count of the last completed compaction. */
+  private compactedAt = 0;
+  private compactedTurn = 0;
   /** Successful compactions this session (telemetry for /cache-stats). */
   private compactions = 0;
 
@@ -133,9 +160,10 @@ export class AutocompactController {
     this.midterm = opts.midterm ?? false;
   }
 
-  /** Turn bookkeeping: called from turn_end so agent_settled can evaluate. */
-  noteTurn(turnIndex: number): void {
-    this.lastTurnIndex = turnIndex;
+  /** Turn bookkeeping: one call per completed turn (turn_end), so the
+   *  cooldown counts real turns across every run in the session. */
+  noteTurn(): void {
+    this.turnsSeen++;
   }
 
   /** Live switch: fast compaction changed from /cache-settings. */
@@ -169,49 +197,122 @@ export class AutocompactController {
     signals: AutocompactSignal,
   ): AutocompactVerdict {
     if (!this.opts.enabled) return { shouldCompact: false, reason: undefined };
-    const turnUsage = signals.lastUsage();
-    if (!turnUsage) return { shouldCompact: false, reason: "no usage yet" };
-    // The freshest request of any kind measures warmth best: a warm refresh
-    // re-reads the whole prefix, so its cached share tracks the live cache
-    // better than the last real turn. The turn usage still gates "has a turn
-    // happened yet" and keeps a lone warm row from driving the decision.
-    const usage = signals.lastRequestUsage?.() ?? turnUsage;
+    const usage = this.liveUsage(signals);
+    if (!usage) return { shouldCompact: false, reason: "no usage yet" };
 
     const view = this.readContext(usageOrPercent);
-    const churned = this.churned(signals);
-    const coldness = this.coldness(usage, churned, signals);
+    const { churned, coldness, sample } = this.evaluate(view, usage, signals);
     // A warm, non-churned cache is never compacted without fast compaction:
     // the summarizer plus a full prefix re-write would be charged fresh.
     if (!churned && !this.cacheNeutral && coldness < this.coldFloor()) {
       return { shouldCompact: false, reason: "cache warm", coldness };
     }
 
-    return this.verdict(view, usage, signals, coldness, churned);
-  }
-
-  /** Gate then cooldown, then assemble the compact verdict. */
-  private verdict(
-    view: AutocompactView,
-    usage: { input: number; cacheRead: number; cacheWrite: number },
-    signals: AutocompactSignal,
-    coldness: number,
-    churned: boolean,
-  ): AutocompactVerdict {
-    const gate = this.contextGate(
-      view,
-      usage,
-      coldness,
-      signals.costRates?.(view.tokens),
-      this.cacheTiming(signals),
-    );
-    const base = { pressure: gate.pressure, probability: gate.probability, coldness };
-    if (!gate.allowed) {
-      return { shouldCompact: false, reason: gate.reason, ...base };
+    const verdict = sample ? this.opts.pressure?.sample(sample) : undefined;
+    const base = { pressure: verdict?.pressure, probability: verdict?.probability, coldness };
+    if (verdict) {
+      // The expected-cost term is flat in token count, so without a floor it
+      // fires on a trivially small context that pi refuses to compact.
+      if (this.belowMinimum(view)) {
+        return { shouldCompact: false, reason: "context below minimum", ...base };
+      }
+      if (!verdict.fire) {
+        return { shouldCompact: false, reason: "pressure below draw", ...base };
+      }
+    } else if (!AutocompactController.atLeastPercent(view, AutocompactController.MIN_CONTEXT_PERCENT)) {
+      return { shouldCompact: false, reason: "context below threshold", ...base };
     }
     if (!this.cooldownElapsed()) {
       return { shouldCompact: false, reason: "cooldown", ...base };
     }
-    return { shouldCompact: true, reason: this.reason(churned, gate.fromPressure), ...base };
+    return { shouldCompact: true, reason: this.reason(churned, verdict !== undefined), ...base };
+  }
+
+  /**
+   * Mid-run eligibility: the in-run trigger may fire only when the
+   * pressure is saturated (probability 1) and the window is at least half
+   * full. A pure predicate with no RNG draw, so the caller can gate the
+   * existing trigger without perturbing the probabilistic decision; the
+   * warm-cache floor and cooldown are still applied by the trigger path.
+   */
+  midtermEligible(
+    usageView: ContextUsageLike | undefined,
+    signals: AutocompactSignal,
+  ): boolean {
+    if (!this.opts.enabled || !this.midterm) return false;
+    const usage = this.liveUsage(signals);
+    if (!usage) return false;
+    const view = this.readContext(usageView);
+    if (!AutocompactController.atLeastPercent(view, AutocompactController.MIDTERM_MIN_CONTEXT_PERCENT)) {
+      return false;
+    }
+    const { sample } = this.evaluate(view, usage, signals);
+    const probability = sample ? this.opts.pressure?.probability(sample) : undefined;
+    if (probability === undefined || probability < 1) return false;
+    return this.cooldownElapsed();
+  }
+
+  /** Whether the sampled window has reached `percent` of its context window. */
+  private static atLeastPercent(view: AutocompactView, percent: number): boolean {
+    const pct =
+      typeof view.percent === "number"
+        ? view.percent
+        : typeof view.tokens === "number" &&
+            typeof view.contextWindow === "number" &&
+            view.contextWindow > 0
+          ? (view.tokens / view.contextWindow) * 100
+          : undefined;
+    return typeof pct === "number" && pct >= percent;
+  }
+
+  /**
+   * Public preview for /cache-stats: the current pressure verdict for a
+   * live context sample, or undefined when it cannot be sampled.
+   */
+  currentPressure(
+    usageView: ContextUsageLike | undefined,
+    usage: AutocompactUsage | undefined,
+    signals?: AutocompactSignal,
+  ): PressureVerdict | undefined {
+    if (!usage) return undefined;
+    const { sample } = this.evaluate(this.readContext(usageView), usage, signals);
+    return sample ? this.opts.pressure?.sample(sample) : undefined;
+  }
+
+  /**
+   * Evaluate one context view: churn, coldness, and the pressure sample
+   * every predicate shares. Draws nothing, so the caller chooses whether to
+   * consume `sample` (the decision) or read its draw-free `probability`
+   * (the midterm gate).
+   */
+  private evaluate(
+    view: AutocompactView,
+    usage: AutocompactUsage,
+    signals?: AutocompactSignal,
+  ): Evaluation {
+    const churned = signals !== undefined && this.churned(signals);
+    const coldness = this.coldness(usage, churned, signals);
+    return {
+      churned,
+      coldness,
+      sample: this.pressureInput(
+        view,
+        usage,
+        coldness,
+        signals?.costRates?.(view.tokens),
+        this.cacheTiming(signals),
+      ),
+    };
+  }
+
+  /**
+   * The turn-gated usage every predicate starts from: a completed turn must
+   * exist, and the freshest request of any kind then measures warmth.
+   */
+  private liveUsage(signals: AutocompactSignal): AutocompactUsage | undefined {
+    const turnUsage = signals.lastUsage();
+    if (!turnUsage) return undefined;
+    return signals.lastRequestUsage?.() ?? turnUsage;
   }
 
   /** Normalize the caller's number/ContextUsage into a plain view. */
@@ -235,7 +336,7 @@ export class AutocompactController {
    * maximum so the cache never looks warmer than either signal.
    */
   private coldness(
-    usage: { input: number; cacheRead: number; cacheWrite: number },
+    usage: AutocompactUsage,
     churned: boolean,
     signals?: AutocompactSignal,
   ): number {
@@ -273,148 +374,11 @@ export class AutocompactController {
     return floor > 0 && typeof view.tokens === "number" && view.tokens < floor;
   }
 
-  /**
-   * Mid-run eligibility: the in-run trigger may fire only when the
-   * pressure is saturated (probability 1) and the window is at least half
-   * full. A pure predicate with no RNG draw, so the caller can gate the
-   * existing trigger without perturbing the probabilistic decision; the
-   * warm-cache floor and cooldown are still applied by the trigger path.
-   */
-  midtermEligible(
-    usageView: ContextUsageLike | undefined,
-    signals: AutocompactSignal,
-  ): boolean {
-    if (!this.opts.enabled || !this.midterm) return false;
-    const turnUsage = signals.lastUsage();
-    if (!turnUsage) return false;
-    const usage = signals.lastRequestUsage?.() ?? turnUsage;
-    const view = this.readContext(usageView);
-    if (!AutocompactController.atLeastPercent(view, AutocompactController.MIDTERM_MIN_CONTEXT_PERCENT)) {
-      return false;
-    }
-    const churned = this.churned(signals);
-    const probability = this.pressureProbability(
-      view,
-      usage,
-      this.coldness(usage, churned, signals),
-      signals.costRates?.(view.tokens),
-      this.cacheTiming(signals),
-    );
-    if (probability === undefined || probability < 1) return false;
-    return this.cooldownElapsed();
-  }
-
-  /** Whether the sampled window has reached `percent` of its context window. */
-  private static atLeastPercent(view: AutocompactView, percent: number): boolean {
-    const pct =
-      typeof view.percent === "number"
-        ? view.percent
-        : typeof view.tokens === "number" &&
-            typeof view.contextWindow === "number" &&
-            view.contextWindow > 0
-          ? (view.tokens / view.contextWindow) * 100
-          : undefined;
-    return typeof pct === "number" && pct >= percent;
-  }
-
-  /**
-   * Public preview for /cache-stats: the current pressure verdict for a
-   * live context sample, or undefined when it cannot be sampled.
-   */
-  currentPressure(
-    usageView: ContextUsageLike | undefined,
-    usage: { input: number; cacheRead: number; cacheWrite: number } | undefined,
-    signals?: AutocompactSignal,
-  ): PressureVerdict | undefined {
-    if (!usage) return undefined;
-    const churned = signals !== undefined && this.churned(signals);
-    const coldness = this.coldness(usage, churned, signals);
-    const view = this.readContext(usageView);
-    return this.samplePressure(
-      view,
-      usage,
-      coldness,
-      signals?.costRates?.(view.tokens),
-      this.cacheTiming(signals),
-    );
-  }
-
-  /**
-   * Context gate: a probabilistic pressure draw when the model and a token
-   * count exist, else the fixed percent threshold.
-   */
-  private contextGate(
-    view: AutocompactView,
-    usage: { input: number; cacheRead: number; cacheWrite: number },
-    coldness: number,
-    rates: CostRates | undefined,
-    timing: CacheTiming,
-  ): {
-    allowed: boolean;
-    reason?: string;
-    pressure?: number;
-    probability?: number;
-    fromPressure: boolean;
-  } {
-    const verdict = this.samplePressure(view, usage, coldness, rates, timing);
-    if (verdict) {
-      // The expected-cost term is flat in token count, so without a floor it
-      // fires on a trivially small context that pi refuses to compact.
-      if (this.belowMinimum(view)) {
-        return {
-          allowed: false,
-          reason: "context below minimum",
-          pressure: verdict.pressure,
-          probability: verdict.probability,
-          fromPressure: true,
-        };
-      }
-      return {
-        allowed: verdict.fire,
-        reason: verdict.fire ? undefined : "pressure below draw",
-        pressure: verdict.pressure,
-        probability: verdict.probability,
-        fromPressure: true,
-      };
-    }
-    if (
-      typeof view.percent !== "number" ||
-      view.percent < AutocompactController.MIN_CONTEXT_PERCENT
-    ) {
-      return { allowed: false, reason: "context below threshold", fromPressure: false };
-    }
-    return { allowed: true, fromPressure: false };
-  }
-
-  /** Sample the pressure model, or undefined without tokens + window. */
-  private samplePressure(
-    view: AutocompactView,
-    usage: { input: number; cacheRead: number; cacheWrite: number },
-    coldness: number,
-    rates: CostRates | undefined,
-    timing: CacheTiming,
-  ): PressureVerdict | undefined {
-    const input = this.pressureInput(view, usage, coldness, rates, timing);
-    return input === undefined ? undefined : this.opts.pressure?.sample(input);
-  }
-
-  /** The draw-free probability for the same sample the trigger would draw. */
-  private pressureProbability(
-    view: AutocompactView,
-    usage: { input: number; cacheRead: number; cacheWrite: number },
-    coldness: number,
-    rates: CostRates | undefined,
-    timing: CacheTiming,
-  ): number | undefined {
-    const input = this.pressureInput(view, usage, coldness, rates, timing);
-    return input === undefined ? undefined : this.opts.pressure?.probability(input);
-  }
-
   /** The pressure sample for a live context view, or undefined without the
    *  model, a token count, or a window. */
   private pressureInput(
     view: AutocompactView,
-    usage: { input: number; cacheRead: number; cacheWrite: number },
+    usage: AutocompactUsage,
     coldness: number,
     rates: CostRates | undefined,
     timing: CacheTiming,
@@ -453,12 +417,10 @@ export class AutocompactController {
 
   /** Whether the seconds/turns cooldown since the last compaction elapsed. */
   private cooldownElapsed(): boolean {
-    const neverCompacted = this.lastCompactedTurn < 0;
+    if (!this.hasCompacted) return true;
     return (
-      (neverCompacted ||
-        Date.now() - this.lastCompactedAt >= this.opts.cooldownSeconds * 1000) &&
-      (neverCompacted ||
-        this.lastTurnIndex - this.lastCompactedTurn >= AutocompactController.COOLDOWN_TURNS)
+      Date.now() - this.compactedAt >= this.opts.cooldownSeconds * 1000 &&
+      this.turnsSeen - this.compactedTurn >= AutocompactController.COOLDOWN_TURNS
     );
   }
 
@@ -469,8 +431,9 @@ export class AutocompactController {
 
   /** Record a successful compaction: reset cooldowns and count it. */
   markCompacted(): void {
-    this.lastCompactedAt = Date.now();
-    this.lastCompactedTurn = this.lastTurnIndex;
+    this.compactedAt = Date.now();
+    this.compactedTurn = this.turnsSeen;
+    this.hasCompacted = true;
     this.compactions++;
   }
 

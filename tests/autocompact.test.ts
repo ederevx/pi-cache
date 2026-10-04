@@ -35,7 +35,7 @@ test("autocompact: disabled never compacts", () => {
 
 test("autocompact: no usage yet blocks", () => {
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   const verdict = c.decide(90, signals({ lastUsage: () => undefined }));
   assertEq(verdict.shouldCompact, false);
   assertEq(verdict.reason, "no usage yet");
@@ -43,7 +43,7 @@ test("autocompact: no usage yet blocks", () => {
 
 test("autocompact: warm cache blocks", () => {
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   const verdict = c.decide(90, signals({ lastUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }) }));
   assertEq(verdict.shouldCompact, false);
   assertEq(verdict.reason, "cache warm");
@@ -52,7 +52,7 @@ test("autocompact: warm cache blocks", () => {
 
 test("autocompact: cold but context below threshold blocks", () => {
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   const verdict = c.decide(50, signals());
   assertEq(verdict.shouldCompact, false);
   assertEq(verdict.reason, "context below threshold");
@@ -61,7 +61,7 @@ test("autocompact: cold but context below threshold blocks", () => {
 
 test("autocompact: cold + high context compacts", () => {
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   const verdict = c.decide(85, signals());
   assertEq(verdict.shouldCompact, true);
   assertEq(verdict.reason, "cold window + context threshold");
@@ -70,7 +70,7 @@ test("autocompact: cold + high context compacts", () => {
 test("autocompact: the TTL idle ramp raises coldness", () => {
   const warm = () => ({ input: 100, cacheRead: 900, cacheWrite: 0 });
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   // 10% of a 300 s TTL is below the 0.2 floor: still warm.
   const early = c.decide(
     85,
@@ -90,7 +90,7 @@ test("autocompact: the TTL idle ramp raises coldness", () => {
 test("autocompact: the cache-touch ramp uses the most recent warm", () => {
   const warm = () => ({ input: 100, cacheRead: 900, cacheWrite: 0 });
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   // A warm cache whose last turn was long ago but which pi warmed recently
   // must not be treated as cold by the idle ramp.
   const recent = c.decide(
@@ -107,30 +107,32 @@ test("autocompact: the cache-touch ramp uses the most recent warm", () => {
 
 test("autocompact: churned prefix is cold", () => {
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   const verdict = c.decide(85, signals({ headChurn: () => 2 }));
   assertEq(verdict.shouldCompact, true);
   assertEq(verdict.reason, "churned prefix + context threshold");
   assertEq(verdict.coldness, 1);
 });
 
-test("autocompact: cooldown turns gate repeated compaction", () => {
+test("autocompact: cooldown counts session turns across runs", () => {
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   assertEq(c.decide(85, signals()).shouldCompact, true, "first compaction fires");
   c.markCompacted();
-  c.noteTurn(1);
+  c.noteTurn();
   const blocked = c.decide(85, signals());
   assertEq(blocked.shouldCompact, false, "inside turn cooldown");
   assertEq(blocked.reason, "cooldown");
-  c.noteTurn(6);
+  // The cooldown counts session turns, so it elapses after five more turns
+  // regardless of how pi indexes turns within a run.
+  for (let i = 0; i < 5; i++) c.noteTurn();
   assertEq(c.decide(85, signals()).shouldCompact, true, "cooldown turns elapsed");
 });
 
 test("autocompact: pressure draw fires at high tokens", () => {
   const pressure = new CompactionPressure({ random: () => 0 });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure });
-  c.noteTurn(0);
+  c.noteTurn();
   const verdict = c.decide({ tokens: 180_000, contextWindow: 200_000, percent: 90 }, signals());
   assertEq(verdict.shouldCompact, true);
   assertEq(verdict.reason, "compaction pressure");
@@ -141,7 +143,7 @@ test("autocompact: pressure does not fire below the minimum context", () => {
   const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
   const pressure = new CompactionPressure({ random: () => 0 });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, minTokens: 50_000 });
-  c.noteTurn(0);
+  c.noteTurn();
   const tiny = c.decide({ tokens: 470, contextWindow: 1_048_576, percent: 0.045 }, signals({ costRates }));
   assertEq(tiny.shouldCompact, false);
   assertEq(tiny.reason, "context below minimum");
@@ -153,7 +155,7 @@ test("autocompact: a non-positive minimum context disables the floor", () => {
   const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
   const pressure = new CompactionPressure({ random: () => 0 });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, minTokens: 0 });
-  c.noteTurn(0);
+  c.noteTurn();
   const verdict = c.decide({ tokens: 470, contextWindow: 1_048_576, percent: 0.045 }, signals({ costRates }));
   assertEq(verdict.shouldCompact, true);
 });
@@ -161,7 +163,7 @@ test("autocompact: a non-positive minimum context disables the floor", () => {
 test("autocompact: pressure draw can decline below the ramp", () => {
   const pressure = new CompactionPressure({ random: () => 0.999999 });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure });
-  c.noteTurn(0);
+  c.noteTurn();
   const verdict = c.decide({ tokens: 120_000, contextWindow: 200_000, percent: 60 }, signals());
   assertEq(verdict.shouldCompact, false);
   assertEq(verdict.reason, "pressure below draw");
@@ -170,10 +172,10 @@ test("autocompact: pressure draw can decline below the ramp", () => {
 test("autocompact: cache-neutral fast compaction relaxes the warm gate", () => {
   const warm = signals({ lastUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }) });
   const plain = new AutocompactController(opts);
-  plain.noteTurn(0);
+  plain.noteTurn();
   assertEq(plain.decide(90, warm).shouldCompact, false, "warm block without fast compaction");
   const neutral = new AutocompactController({ ...opts, cacheNeutral: true });
-  neutral.noteTurn(0);
+  neutral.noteTurn();
   assertEq(neutral.decide(90, warm).shouldCompact, true, "warm allowed when cache-neutral");
 });
 
@@ -202,7 +204,7 @@ test("autocompact: currentPressure previews the live sample", () => {
 test("autocompact: fast compaction triggers on warm token pressure", () => {
   const pressure = new CompactionPressure({ random: () => 0 });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure });
-  c.noteTurn(0);
+  c.noteTurn();
   const warm = signals({ lastUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }) });
   const verdict = c.decide({ tokens: 180_000, contextWindow: 200_000, percent: 90 }, warm);
   assertEq(verdict.shouldCompact, true);
@@ -214,7 +216,7 @@ test("autocompact: midterm needs a saturated pressure at a half-full window", ()
   const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
   const pressure = new CompactionPressure({ random: () => 0.99 });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: true });
-  c.noteTurn(0);
+  c.noteTurn();
   // Cold economics at the degradation onset saturate the pressure, so the
   // midterm predicate holds even though the draw would decline it.
   assertEq(
@@ -233,7 +235,7 @@ test("autocompact: midterm needs a saturated pressure at a half-full window", ()
     "without cost rates the pressure never saturates",
   );
   const off = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: false });
-  off.noteTurn(0);
+  off.noteTurn();
   assertEq(
     off.midtermEligible({ tokens: 100_000, contextWindow: 200_000, percent: 50 }, signals({ costRates })),
     false,
@@ -251,7 +253,7 @@ test("autocompact: the midterm predicate consumes no RNG draw", () => {
     },
   });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: true });
-  c.noteTurn(0);
+  c.noteTurn();
   assertEq(
     c.midtermEligible({ tokens: 100_000, contextWindow: 200_000, percent: 50 }, signals({ costRates })),
     true,
@@ -262,7 +264,7 @@ test("autocompact: the midterm predicate consumes no RNG draw", () => {
 
 test("autocompact: decide reads the freshest request, not just the last turn", () => {
   const c = new AutocompactController(opts);
-  c.noteTurn(0);
+  c.noteTurn();
   // The last real turn missed (cold), but a warm refresh landed after it.
   const s = signals({
     lastUsage: () => ({ input: 1000, cacheRead: 0, cacheWrite: 0 }),
