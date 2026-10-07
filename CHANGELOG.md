@@ -3,6 +3,24 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.13.2] - 2026-10-07
+
+### Fixed
+
+- Fast compaction now bounds the verbatim window it keeps
+  (`src/kept-window.ts`). pi's own cut walks back to roughly
+  `keepRecentTokens`, but one context-visible entry larger than that
+  budget (a many-hundred-KB tool result) forced the cut to the turn
+  boundary before it, so the oversized entry stayed in the window and
+  the post-compaction request could still exceed the provider context;
+  the overflow retry then kept it again. When the retained window
+  exceeds `PI_CACHE_FAST_KEEP_RATIO` (default 4) times
+  `keepRecentTokens`, the cut advances to the next safe boundary whose
+  window fits, the additionally dropped messages join the digest span,
+  and when even the tail is one oversized entry the summary is kept
+  alone. The dropped bytes stay in the session file the transcript
+  pointer names.
+
 ## [0.13.1] - 2026-10-04
 
 ### Fixed
