@@ -150,6 +150,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     enabled: opts.fastCompact,
     branchEnabled: opts.fastBranchSummary,
     digestEnabled: opts.fastDigest,
+    keepRatio: opts.fastKeepRatio,
   });
   const midterm = new MidtermCompactor(fastcompact);
   const autocompact = new AutocompactController({
@@ -488,6 +489,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       const proposal = fastcompact.propose(
         preparation,
         ctx?.sessionManager?.getSessionFile?.(),
+        ctx?.sessionManager?.buildSessionProjection?.()?.entries,
       );
       if (!proposal) return;
       return { compaction: proposal };

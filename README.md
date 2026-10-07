@@ -47,7 +47,13 @@ Cache-aware compaction has two layers, both on by default.
   Turn it off with the `/cache-settings` switch or
   `PI_CACHE_FAST_COMPACT=off`; branch summaries have their own
   `PI_CACHE_FAST_BRANCH_SUMMARY` switch, and pi's own normal summarizer
-  runs for whichever is off.
+  runs for whichever is off. pi-cache also bounds the verbatim window
+  pi's cut keeps: when a single recent entry dwarfs pi's keep-recent
+  budget (a many-hundred-KB tool result), pi's cut lands before it and
+  would keep it in every retry, so pi-cache advances the cut past the
+  oversized content (or keeps the summary alone) instead of overflowing
+  the provider context. Tune the retained-window multiple with
+  `PI_CACHE_FAST_KEEP_RATIO` (default 4).
 - **Dropped-span digest.** The fast stub alone discards the summarized
   span's content; with the digest on (default), pi-cache appends a
   deterministic, bounded extractive record after the stub — modified
@@ -225,7 +231,7 @@ temp files.
   `canonicalizer.ts`, `cache-key.ts`, `warming-policy.ts`,
   `autocompact.ts`, `pressure.ts`, `economics.ts`,
   `context-degradation.ts`, `model-params.ts`, `model-ttl.ts`,
-  `params-store.ts`, `fastcompact.ts`, `fast-switch.ts`,
+  `params-store.ts`, `fastcompact.ts`, `kept-window.ts`,
   `feature-switch.ts`, `user-settings.ts`, `settings.ts`,
   `settings-view.ts`, `stats.ts`, `temp-sweep.ts`, `constants.ts`)
 - `tests/` — zero-dependency validation + OOP/format lint suite

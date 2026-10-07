@@ -61,6 +61,7 @@ import "./economics.test.ts";
 import "./context-degradation.test.ts";
 import "./pressure.test.ts";
 import "./fastcompact.test.ts";
+import "./kept-window.test.ts";
 import "./midterm.test.ts";
 import "./miss-classifier.test.ts";
 import "./settings.test.ts";
