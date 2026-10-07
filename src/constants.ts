@@ -75,6 +75,10 @@ export interface PiCacheOptions {
   fastBranchSummary: boolean;
   /** Append a deterministic dropped-span digest after the fast stub (default on). */
   fastDigest: boolean;
+  /** Fast-compaction kept-window cap as a multiple of pi's keep-recent
+   *  budget (default 4); a lone oversized recent entry otherwise survives
+   *  every compaction and overflows the provider context. */
+  fastKeepRatio: number;
   /** Absolute path of pi-cache's owned user-settings JSON. */
   settingsPath: string;
   /** Probabilistic compaction-pressure model tunables. */
@@ -135,6 +139,7 @@ export class OptionsLoader {
       // The digest keeps the dropped span's file/turn record after the
       // stub; enforced for dropped spans of any size.
       fastDigest: this.envBool("PI_CACHE_FAST_DIGEST", stored.fastDigest ?? true),
+      fastKeepRatio: this.envFloat("PI_CACHE_FAST_KEEP_RATIO", 4),
       settingsPath: this.userSettingsPath(),
       // Compaction pressure: expected-cost economics (write amortization
       // over the expected remaining requests) composed with context

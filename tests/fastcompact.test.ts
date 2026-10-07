@@ -136,6 +136,37 @@ test("fastcompact: digest switch toggles live", () => {
   assert(c.propose(full)!.summary.includes("U: hello"), "digest back on");
 });
 
+test("fastcompact: bounded kept window advances the cut and folds the loss into the digest", () => {
+  const c = digested({ keepRatio: 2 });
+  const entries = [
+    {
+      sourceEntry: { type: "message", id: "e1" },
+      messages: [{ role: "user", content: [{ type: "text", text: "old" }] }],
+    },
+    {
+      sourceEntry: { type: "message", id: "e2" },
+      messages: [{ role: "assistant", content: [{ type: "text", text: "x".repeat(4000) }] }],
+    },
+    {
+      sourceEntry: { type: "message", id: "e3" },
+      messages: [{ role: "user", content: [{ type: "text", text: "next task" }] }],
+    },
+  ];
+  const proposal = c.propose(
+    {
+      ...prep,
+      firstKeptEntryId: "e2",
+      messagesToSummarize: [{ role: "user", content: "earlier" }],
+      settings: { keepRecentTokens: 100 },
+    },
+    undefined,
+    entries as never,
+  );
+  assert(proposal !== undefined, "proposal expected");
+  assertEq(proposal!.firstKeptEntryId, "e3", "cut advanced past the oversized entry");
+  assert(proposal!.summary.includes("earlier"), "original span still digested");
+});
+
 test("fastcompact: malformed preparation fails open", () => {
   const c = new FastCompactionController({ enabled: true, branchEnabled: true });
   assertEq(c.propose(undefined), undefined);

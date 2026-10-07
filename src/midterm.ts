@@ -44,7 +44,11 @@ export class MidtermCompactor {
       tokensBefore,
     );
     if (!preparation) return undefined;
-    const proposal = this.fastcompact.propose(preparation, manager?.getSessionFile?.());
+    const proposal = this.fastcompact.propose(
+      preparation,
+      manager?.getSessionFile?.(),
+      projection.entries as Parameters<FastCompactionController["propose"]>[2],
+    );
     if (!proposal) return undefined;
     return {
       type: "compaction",

@@ -20,6 +20,8 @@
 
 import { FeatureSwitch } from "./feature-switch.ts";
 import { SpanDigest, type SpanFileOps } from "./digest.ts";
+import { KeptWindowLimiter } from "./kept-window.ts";
+import type { ProjectedSessionEntry } from "@earendil-works/pi-coding-agent";
 
 export interface FastCompactOptions {
   enabled: boolean;
@@ -27,6 +29,9 @@ export interface FastCompactOptions {
   branchEnabled: boolean;
   /** Append a deterministic digest of the dropped span after the stub. */
   digestEnabled: boolean;
+  /** Kept-window cap as a multiple of pi's keep-recent budget (default 4).
+   *  A single oversized recent entry otherwise survives every compaction. */
+  keepRatio?: number;
 }
 
 /** The subset of `CompactionPreparation` this controller reads. */
@@ -43,6 +48,8 @@ export interface FastCompactPreparation {
   previousSummary?: string;
   /** File operations pi extracted from the dropped span. */
   fileOps?: SpanFileOps;
+  /** pi's compaction settings (the keep-recent budget bounds the window). */
+  settings?: { keepRecentTokens?: number };
 }
 
 /**
@@ -65,10 +72,14 @@ export const FAST_BRANCH_STUB =
   "compaction). Continue from the selected point below.";
 
 export class FastCompactionController {
+  /** pi's default keep-recent budget when a preparation omits its settings. */
+  private static readonly DEFAULT_KEEP_RECENT_TOKENS = 20_000;
+
   private readonly compaction: FeatureSwitch;
   private readonly branch: FeatureSwitch;
   private readonly digest: FeatureSwitch;
   private readonly spanDigest: SpanDigest;
+  private readonly keptWindow: KeptWindowLimiter;
   private compactions = 0;
 
   constructor(opts: FastCompactOptions) {
@@ -76,6 +87,7 @@ export class FastCompactionController {
     this.branch = new FeatureSwitch(opts.branchEnabled);
     this.digest = new FeatureSwitch(opts.digestEnabled);
     this.spanDigest = new SpanDigest();
+    this.keptWindow = new KeptWindowLimiter(opts.keepRatio ?? 4);
   }
 
   /** The live compaction switch (toggled from /cache-settings). */
@@ -114,6 +126,7 @@ export class FastCompactionController {
   propose(
     preparation: FastCompactPreparation | undefined,
     sessionFile?: string,
+    entries?: readonly ProjectedSessionEntry[],
   ): {
     summary: string;
     firstKeptEntryId: string;
@@ -123,10 +136,43 @@ export class FastCompactionController {
     if (!preparation) return undefined;
     if (typeof preparation.firstKeptEntryId !== "string") return undefined;
     if (typeof preparation.tokensBefore !== "number") return undefined;
+    const bounded = this.boundKeptWindow(preparation, entries);
     return {
-      summary: this.fastSummary(preparation, sessionFile),
-      firstKeptEntryId: preparation.firstKeptEntryId,
-      tokensBefore: preparation.tokensBefore,
+      summary: this.fastSummary(bounded, sessionFile),
+      firstKeptEntryId: bounded.firstKeptEntryId,
+      tokensBefore: bounded.tokensBefore,
+    };
+  }
+
+  /**
+   * Fold away a verbatim recent window pi's cut cannot shrink (one
+   * oversized entry): advance the cut and add the additionally dropped
+   * messages to the digest span so the summary still records the loss.
+   */
+  private boundKeptWindow(
+    preparation: FastCompactPreparation,
+    entries: readonly ProjectedSessionEntry[] | undefined,
+  ): FastCompactPreparation {
+    const keepRecent =
+      preparation.settings?.keepRecentTokens ??
+      FastCompactionController.DEFAULT_KEEP_RECENT_TOKENS;
+    const plan = this.keptWindow.limit(entries, preparation.firstKeptEntryId, keepRecent);
+    if (
+      plan.extraDropped.length === 0 &&
+      plan.firstKeptEntryId === preparation.firstKeptEntryId
+    ) {
+      return preparation;
+    }
+    return {
+      ...preparation,
+      firstKeptEntryId: plan.firstKeptEntryId,
+      messagesToSummarize: [
+        ...(preparation.messagesToSummarize ?? []),
+        ...(preparation.turnPrefixMessages ?? []),
+        ...plan.extraDropped,
+      ],
+      turnPrefixMessages: [],
+      isSplitTurn: false,
     };
   }
 
@@ -172,9 +218,13 @@ export class FastCompactionController {
     sessionFile: string | undefined,
   ): string {
     if (typeof sessionFile !== "string" || sessionFile.length === 0) return "";
+    const boundary =
+      preparation.firstKeptEntryId === KeptWindowLimiter.KEEP_NONE
+        ? "the previous summary"
+        : preparation.firstKeptEntryId;
     return (
       `Full pre-compaction transcript: ${sessionFile} — entries before ` +
-      `${preparation.firstKeptEntryId} were dropped by this compaction and ` +
+      `${boundary} were dropped by this compaction and ` +
       `remain readable there. Recall with a bounded search, e.g. ` +
       `grep -m 5 '<term>' ${sessionFile}; never read the file whole.`
     );

@@ -888,6 +888,55 @@ test("extension: fast digest appends the span record and toggles independently",
   }
 });
 
+test("extension: fast compaction bounds an oversized kept window", async () => {
+  const root = join(scratchDir(), "e2e-kept-window");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+    PI_CACHE_AUTO_COMPACT: "0",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    const projected = (id: string, role: string, text: string) => ({
+      sourceEntry: { type: "message", id },
+      messages: [{ role, content: [{ type: "text", text }] }],
+    });
+    const entries = [
+      projected("e1", "user", "old"),
+      projected("e2", "assistant", "x".repeat(400_000)),
+      projected("e3", "user", "next"),
+    ];
+    const ctx = {
+      sessionManager: {
+        getSessionFile: () => "/x/s1.jsonl",
+        buildSessionProjection: () => ({ entries, messages: [] }),
+      },
+    };
+    const results = await pi.emit(
+      "session_before_compact",
+      {
+        preparation: {
+          firstKeptEntryId: "e2",
+          tokensBefore: 200_000,
+          messagesToSummarize: [{ role: "user", content: "earlier" }],
+          settings: { keepRecentTokens: 20_000 },
+        },
+        reason: "overflow",
+      },
+      ctx,
+    );
+    const compaction = (results[0] as { compaction?: { firstKeptEntryId: string } } | undefined)
+      ?.compaction;
+    assert(compaction !== undefined, "fast override present");
+    assertEq(compaction!.firstKeptEntryId, "e3", "cut advanced past the oversized entry");
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
 test("extension: option rows toggle, persist, and take effect", async () => {
   const root = join(scratchDir(), "e2e-option-switch");
   mkdirSync(root, { recursive: true });

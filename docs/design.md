@@ -180,6 +180,20 @@ compaction is on, makes the compaction itself prefix-stable:
    24000, ~4 chars/token) yields the whole proposal to pi's LLM
    summarizer — very large losses still get real distillation. Digest
    failure degrades to the bare stub (never wedges compaction).
+6. The kept window is bounded (`src/kept-window.ts`). pi's own cut walks
+   back to `keepRecentTokens`, but one context-visible entry that
+   exceeds that budget by itself (a many-hundred-KB tool result) forces
+   the cut to the turn boundary before it, so the oversized entry stays
+   in the verbatim window and the post-compaction request can still
+   exceed the provider's context limit; the overflow retry then keeps
+   it again. When the window pi would keep exceeds `PI_CACHE_FAST_KEEP_RATIO`
+   (default 4) times `keepRecentTokens`, pi-cache advances the cut to
+   the next safe boundary (never opening on an orphaned tool result)
+   whose retained window fits, adding the additionally dropped messages
+   to the digest span. When even the tail is one oversized entry, the
+   summary is kept alone (the dropped bytes remain in the session file
+   the transcript pointer names), so a compaction always sheds the
+   content the provider rejected.
 
 **Expected effect.** Compaction fires when it is the cheaper choice over
 the expected horizon or when the context has passed the degradation onset,
