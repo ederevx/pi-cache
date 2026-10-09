@@ -40,6 +40,12 @@ export interface UsageRow {
   /** True when the cache was warm (a touch within the effective TTL)
    *  when this request was recorded. */
   warm?: boolean;
+  /** Row kind, owned exclusively by the ledger: `"turn"` for a real
+   *  assistant turn, `"warm"` for a warm-refresh telemetry row. Absent in
+   *  rows written before the field existed, which are all turns. Never
+   *  place this in {@link RecordExtras}: a caller must not be able to
+   *  relabel a turn as a refresh or the reverse. */
+  kind?: "turn" | "warm";
   /** Age (ms) of the last cache touch at record time; omitted when the
    *  cache was never touched in the session. */
   msSinceCacheTouch?: number;
@@ -120,8 +126,19 @@ export class CacheLedger {
     session: string = this.sessionId ?? "session",
     extras: RecordExtras = {},
   ): UsageRow | undefined {
+    return this.append(usage, model, session, extras, "turn");
+  }
+
+  /** The one append path, with the ledger as the sole writer of `kind`. */
+  private append(
+    usage: Usage | undefined,
+    model: string,
+    session: string,
+    extras: RecordExtras,
+    kind: UsageRow["kind"],
+  ): UsageRow | undefined {
     if (!usage || !this.enabledOn) return undefined;
-    const row = this.buildRow(usage, model, session, extras);
+    const row = this.buildRow(usage, model, session, extras, kind);
     this.rows.push(row);
     this.noteSessionRow(row);
     this.sink.append(row);
@@ -141,9 +158,10 @@ export class CacheLedger {
   }
 
   /** Last completed turn's usage for the current session, for the
-   *  auto-compaction trigger. Warm-refresh rows (extras.warm) are not
-   *  turns: the accessors below skip them so a background refresh can
-   *  never masquerade as turn activity. */
+   *  auto-compaction trigger. Warm-refresh telemetry rows (`kind`
+   *  `"warm"`) are not turns: the accessors below skip them so a
+   *  background refresh can never masquerade as turn activity. The
+   *  telemetry `warm` flag is unrelated and never used for this. */
   lastUsage(): { input: number; cacheRead: number; cacheWrite: number } | undefined {
     const last = this.lastTurnRow();
     return last ? { input: last.input, cacheRead: last.cacheRead, cacheWrite: last.cacheWrite } : undefined;
@@ -170,21 +188,21 @@ export class CacheLedger {
     return this.lastTurnRow()?.id;
   }
 
-  /** The session's newest non-warm row (a real turn), scanning back over
-   *  any warm-refresh rows appended after it. */
+  /** The session's newest real turn (`kind` absent or `"turn"`),
+   *  scanning back over any warm-refresh rows appended after it. */
   private lastTurnRow(): UsageRow | undefined {
     for (let i = this.sessionRows.length - 1; i >= 0; i--) {
-      if (this.sessionRows[i].warm !== true) return this.sessionRows[i];
+      if (this.sessionRows[i].kind !== "warm") return this.sessionRows[i];
     }
     return undefined;
   }
 
-  /** Record one confirmed warm refresh as a ledger row, flagged `warm`
-   *  so turn-scoped accessors skip it while totals and /cache-stats
-   *  still count it. Stamp time is reconcile time, at most one refresh
-   *  cadence after the refresh itself landed. */
+  /** Record one confirmed warm refresh as a ledger row of `kind`
+   *  `"warm"` so turn-scoped accessors skip it while totals and
+   *  /cache-stats still count it. Stamp time is reconcile time, at most
+   *  one refresh cadence after the refresh itself landed. */
   recordWarm(usage: Usage | undefined, model: string): UsageRow | undefined {
-    return this.record(usage, model, undefined, { warm: true });
+    return this.append(usage, model, this.sessionId ?? "session", { warm: true }, "warm");
   }
 
   /** Flush queued appends, then bound the file; call once at shutdown. */
@@ -228,8 +246,15 @@ export class CacheLedger {
     for (const row of this.rows) if (row.seq >= this.seq) this.seq = row.seq + 1;
   }
 
-  /** Build one ledger row from a recorded usage. */
-  private buildRow(usage: Usage, model: string, session: string, extras: RecordExtras = {}): UsageRow {
+  /** Build one ledger row from a recorded usage. `kind` is written last
+   *  so the ledger's own classification always wins. */
+  private buildRow(
+    usage: Usage,
+    model: string,
+    session: string,
+    extras: RecordExtras = {},
+    kind: UsageRow["kind"] = "turn",
+  ): UsageRow {
     return {
       id: `${process.pid}:${this.boot}:${this.seq}`,
       seq: this.seq++,
@@ -243,6 +268,7 @@ export class CacheLedger {
       cacheWrite: usage.cacheWrite ?? 0,
       totalTokens: usage.totalTokens ?? 0,
       ...extras,
+      kind,
     };
   }
 

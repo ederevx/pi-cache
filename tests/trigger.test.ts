@@ -65,6 +65,15 @@ test("gate: one compaction per window and never two at once", () => {
   assertEq(gate.tryBegin("k1"), true, "reset forgets the window");
 });
 
+test("gate: abort releases a failed window for retry", () => {
+  const gate = new CompactionGate();
+  assertEq(gate.tryBegin("k1"), true, "claim");
+  gate.abort("k1");
+  assertEq(gate.tryBegin("k1"), true, "a failed window is retryable");
+  gate.abort("other");
+  assertEq(gate.tryBegin("k1"), false, "abort only clears the matching claim");
+});
+
 test("request: resolves true on complete and false on failure", async () => {
   let failures = 0;
   const request = new CompactionRequest(() => failures++);
@@ -107,6 +116,33 @@ test("trigger: declines, claims, runs, and settles", async () => {
   assertEq(calls.length, 1);
   assertEq(await trigger.tryCompact(ctx), false, "same window is gated");
   assertEq(calls.length, 1);
+});
+
+test("trigger: a failed compaction releases the window for retry", async () => {
+  const gate = new CompactionGate();
+  let attempts = 0;
+  let fail = true;
+  const request = new CompactionRequest();
+  const trigger = new CompactionTrigger<FakeCtx>({
+    shouldCompact: () => true,
+    keyOf: () => "w",
+    gate,
+    request,
+  });
+  const ctx: FakeCtx = {
+    compact: (o) => {
+      attempts++;
+      if (fail) o?.onError?.(new Error("refused"));
+      else o?.onComplete?.({});
+    },
+  };
+  assertEq(await trigger.tryCompact(ctx), false, "a failed attempt reports false");
+  assertEq(attempts, 1);
+  fail = false;
+  assertEq(await trigger.tryCompact(ctx), true, "the same window retries once released");
+  assertEq(attempts, 2);
+  assertEq(await trigger.tryCompact(ctx), false, "a completed window is retired");
+  assertEq(attempts, 2);
 });
 
 test("idle-trigger: fires at TTL expiry when idle", () => {

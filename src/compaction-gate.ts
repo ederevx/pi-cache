@@ -9,7 +9,9 @@
  */
 
 export class CompactionGate {
-  private inFlight = false;
+  /** Key of the one in-flight window, or undefined when none. */
+  private inFlight: string | undefined;
+  /** The window key already compacted, if any. */
   private lastKey: string | undefined;
 
   /**
@@ -18,21 +20,30 @@ export class CompactionGate {
    * already been compacted.
    */
   tryBegin(key: string): boolean {
-    if (this.inFlight) return false;
+    if (this.inFlight !== undefined) return false;
     if (this.lastKey !== undefined && this.lastKey === key) return false;
-    this.inFlight = true;
+    this.inFlight = key;
     return true;
   }
 
   /** Release the claim and remember the window as compacted. */
   settle(key: string): void {
-    this.inFlight = false;
+    this.inFlight = undefined;
     this.lastKey = key;
+  }
+
+  /**
+   * Release an in-flight claim whose compaction did not complete. The
+   * window is not remembered as compacted, so a later turn may retry it;
+   * only the claim matching `key` is cleared.
+   */
+  abort(key: string): void {
+    if (this.inFlight === key) this.inFlight = undefined;
   }
 
   /** Forget all state (session replacement). */
   reset(): void {
-    this.inFlight = false;
+    this.inFlight = undefined;
     this.lastKey = undefined;
   }
 }
