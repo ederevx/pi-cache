@@ -116,16 +116,16 @@ option to its built-in default; env-pinned rows keep the env value.
   economics justify it and a real turn exists (`PI_CACHE_FORCE_WARM`);
   the warming schedule follows the tier the rewrite actually put on the
   wire, idle fires defer past an in-flight refresh, and confirmed
-  refreshes land in the ledger as `warm`-flagged rows.
+  refreshes land in the ledger as `kind: "warm"` telemetry rows.
 
 ## Telemetry
 
 Telemetry goes to the `.pi-cache/ledger.jsonl` dot-dir and survives
 reloads. Each usage row also carries the request's cache state as
 optional fields (`cacheTtlMs`, `piTtlMs`, `retentionLong`, `warm`,
-`msSinceCacheTouch`) so tier and warm-vs-miss questions are answerable
-from the ledger itself; rows written without them stay
-schema-compatible.
+`msSinceCacheTouch`) plus the ledger-owned `kind` (`"turn"` or
+`"warm"`) so tier and warm-vs-miss questions are answerable from the
+ledger itself; rows written without them stay schema-compatible.
 
 The ledger keeps the most recent `PI_CACHE_LEDGER_MAX_ROWS` rows
 (default 20000; trimmed on load, in-session once a full window of
@@ -201,8 +201,8 @@ temp files.
    and a real turn exists (`PI_CACHE_FORCE_WARM`) — the warming schedule
    follows the tier the per-request rewrite actually put on the wire,
    idle fires defer past an in-flight refresh (margin plus round-trip
-   grace), and confirmed refreshes land in the ledger as `warm`-flagged
-   rows.
+   grace), and confirmed refreshes land in the ledger as `kind: "warm"`
+   telemetry rows.
 6. **Compaction pressure + fast override** — the trigger is
    `CompactionPressure`, combining the expected-cost economics model
    (`src/economics.ts`) with the context-degradation onset

@@ -42,7 +42,11 @@ export class CompactionTrigger<Ctx extends CompactableContext> {
     } catch {
       completed = false;
     }
-    this.opts.gate.settle(key);
+    // The gate owns the window lock: a completed compaction retires the
+    // window, a failed or refused one releases the claim so a later turn
+    // can retry it instead of pinning the window forever.
+    if (completed) this.opts.gate.settle(key);
+    else this.opts.gate.abort(key);
     return completed;
   }
 }

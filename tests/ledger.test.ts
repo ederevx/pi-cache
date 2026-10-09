@@ -280,6 +280,25 @@ test("ledger: warm rows are recorded but never masquerade as turns", () => {
   assertEq(ledger.lastRowId(), sink.rows[0].id, "window key skips warm rows");
 });
 
+test("ledger: cache-warm turn rows still advance the compaction window", () => {
+  const sink = new MemorySink();
+  const ledger = new CacheLedger(sink, true);
+  ledger.useSession("s");
+  // A cold turn, then ordinary turns recorded while the cache was warm (the
+  // normal active-session case). The telemetry `warm` flag must never hide a
+  // real turn from the turn-scoped accessors, or the gate window pins.
+  ledger.record({ ...usage, input: 10 }, "m", "s", { cacheTtlMs: 300_000, warm: false });
+  ledger.record({ ...usage, input: 20 }, "m", "s", { cacheTtlMs: 300_000, warm: true });
+  ledger.record({ ...usage, input: 30 }, "m", "s", { cacheTtlMs: 300_000, warm: true });
+  assertEq(ledger.lastUsage()?.input, 30, "newest warm-cache turn is the turn view");
+  assertEq(ledger.lastRowId(), sink.rows[2].id, "window key follows warm-cache turns");
+  assertEq(sink.rows[2].kind, "turn", "turn rows are kind turn");
+  ledger.recordWarm({ input: 1, output: 0, cacheRead: 1, cacheWrite: 0, totalTokens: 2 }, "m");
+  assertEq(sink.rows[3].kind, "warm", "refresh rows are kind warm");
+  assertEq(ledger.lastRowId(), sink.rows[2].id, "refresh rows never move the window key");
+  assertEq(ledger.lastUsage()?.input, 30, "refresh rows never move the turn view");
+});
+
 test("ledger: recordWarm of nothing records nothing", () => {
   const sink = new MemorySink();
   const ledger = new CacheLedger(sink, false);
