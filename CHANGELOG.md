@@ -3,6 +3,22 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.13.3] - 2026-10-09
+
+### Fixed
+
+- Auto-compaction no longer stalls on a warm-cache session. The ledger's
+  `warm` field was set on every turn recorded while the cache was warm
+  and also used to mark a warm-refresh telemetry row; `lastTurnRow()`
+  skipped both, so `lastRowId()` only advanced when the cache went cold.
+  The compaction gate keys its window on `lastRowId()`, so a settled
+  window was never released and pi-cache stopped firing for hours (a
+  live session stalled at 813k tokens of a 1M window with the pressure
+  model still reporting probability 1). Warm-refresh rows now carry a
+  ledger-owned `kind`, the turn-scoped accessors skip only that, and a
+  failed or refused compaction releases the gate claim instead of
+  retiring the window.
+
 ## [0.13.2] - 2026-10-07
 
 ### Fixed
