@@ -291,10 +291,12 @@ a fire inside the grace window could compact a cache being refreshed.
 A kept warm also re-arms the idle fire from the newest touch (idle
 only), so compaction lands near the refreshed expiry instead of the
 pre-refresh clock. Each confirmed refresh is recorded as a ledger row
-flagged `warm` — totals and /cache-stats count it, while the
-turn-scoped accessors (`lastUsage`, `msSinceLastTurn`, `lastRowId`)
-skip it so a background refresh can never masquerade as turn
-activity.
+of `kind` `"warm"` (the ledger, and only the ledger, writes `kind`)
+— totals and /cache-stats count it, while the turn-scoped accessors
+(`lastUsage`, `msSinceLastTurn`, `lastRowId`) skip it so a background
+refresh can never masquerade as turn activity. The telemetry `warm`
+flag says only that the cache was warm at record time and never
+decides row kind.
 
 ### 6. Removed: affinity observation
 
