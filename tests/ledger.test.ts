@@ -8,23 +8,34 @@
 import { test, assert, assertEq, assertDeepEq, scratchDir, waitFor } from "./harness.ts";
 import { CacheLedger } from "../src/ledger.ts";
 import { FileRecordSink } from "../src/sink.ts";
-import type { RecordSink, UsageRow } from "../src/ledger.ts";
+import type {
+  LedgerSnapshot,
+  RecordSink,
+  SinkCommit,
+  UsageRow,
+  UsageTotals,
+} from "../src/ledger.ts";
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 
 /** In-memory sink for pure ledger behavior tests. */
 class MemorySink implements RecordSink {
+  baseline: UsageTotals = { input: 0, cacheRead: 0, cacheWrite: 0, n: 0 };
   rows: UsageRow[] = [];
-  append(row: UsageRow): void {
+  append(row: UsageRow): boolean {
     this.rows.push(row);
+    return true;
   }
-  load(): UsageRow[] {
-    return [...this.rows];
+  load(): LedgerSnapshot {
+    return { baseline: { ...this.baseline }, rows: [...this.rows] };
   }
-  transform(keep: (rows: UsageRow[]) => UsageRow[]): void {
-    const raw = [...this.rows];
+  transform(keep: (snapshot: LedgerSnapshot) => LedgerSnapshot): SinkCommit {
+    const raw = this.load();
     const next = keep(raw);
-    if (next !== raw) this.rows = next.map((row) => ({ ...row }));
+    if (next === raw) return { snapshot: raw, rewritten: false };
+    this.baseline = { ...next.baseline };
+    this.rows = next.rows.map((row) => ({ ...row }));
+    return { snapshot: { baseline: { ...this.baseline }, rows: [...this.rows] }, rewritten: true };
   }
   flush(): Promise<void> {
     return Promise.resolve();
@@ -128,7 +139,7 @@ test("ledger: torn/corrupt ledger lines are skipped", () => {
   assertEq(ledger.totals().n, 1, "only the valid line loads");
 });
 
-test("ledger: retention bounds the file and rewrites on load", () => {
+test("ledger: retention bounds the file but keeps lifetime totals", () => {
   const sink = new MemorySink();
   const now = Date.now();
   sink.rows = [0, 1, 2, 3, 4].map((i) => ({
@@ -145,9 +156,11 @@ test("ledger: retention bounds the file and rewrites on load", () => {
     totalTokens: 1,
   }));
   const ledger = new CacheLedger(sink, true, 2);
-  assertEq(ledger.totals().n, 2, "only the newest rows retained");
+  assertEq(ledger.totals().n, 5, "lifetime counts every recorded row");
+  assertEq(ledger.retainedTotals().n, 2, "retained window is bounded");
   assertEq(sink.rows.length, 2, "file rewritten to the retained window");
   assertDeepEq(sink.rows.map((r) => r.id), ["r3", "r4"]);
+  assertEq(sink.baseline.n, 3, "evicted rows folded into the baseline");
 });
 
 test("ledger: retention bounds the file during a long session", () => {
@@ -155,7 +168,11 @@ test("ledger: retention bounds the file during a long session", () => {
   const ledger = new CacheLedger(sink, true, 2);
   for (let i = 0; i < 6; i++) ledger.record(usage, "m", "s");
   assertEq(sink.rows.length, 2, "file bounded without waiting for close");
-  assertEq(ledger.totals().n, 2, "in-memory window retained");
+  assertEq(ledger.retainedTotals().n, 2, "in-memory window retained");
+  assertEq(ledger.sessionTotals().n, 2, "session window stays bounded");
+  assertEq(sink.baseline.n, 4, "evicted rows counted once in the baseline");
+  assertEq(ledger.totals().n, 6, "lifetime reaches past the window");
+  assertEq(ledger.totals().input, 6000, "lifetime token sums are complete");
 });
 
 test("ledger: compact rewrites only when rows were dropped", () => {
@@ -166,8 +183,9 @@ test("ledger: compact rewrites only when rows were dropped", () => {
   assertEq(ledger.compact(), false, "within the window: no rewrite");
   ledger.record(usage, "m", "s");
   assertEq(ledger.compact(), true, "over the window: rewrite");
-  assertEq(ledger.totals().n, 2);
+  assertEq(ledger.totals().n, 3, "lifetime is not capped by the window");
   assertEq(sink.rows.length, 2);
+  assertEq(sink.baseline.n, 1);
 });
 
 test("ledger: flush resolves through the sink", async () => {
@@ -175,6 +193,37 @@ test("ledger: flush resolves through the sink", async () => {
   const ledger = new CacheLedger(sink, true);
   await ledger.flush();
   assert(true, "flush resolved");
+});
+
+test("ledger: lifetime totals survive reload from the baseline", () => {
+  const sink = new MemorySink();
+  const first = new CacheLedger(sink, true, 2);
+  for (let i = 0; i < 5; i++) first.record(usage, "m", "s");
+  const second = new CacheLedger(sink, true, 2);
+  assertEq(second.totals().n, 5, "baseline + window rehydrate the lifetime");
+  assertEq(second.retainedTotals().n, 2, "window still bounded");
+  assertEq(second.sessionTotals().n, 0, "a reload has no session yet");
+});
+
+test("ledger: two writers share the lifetime without double counting", () => {
+  const file = join(scratchDir(), "ledger-two-writers.jsonl");
+  const a = new CacheLedger(new FileRecordSink(file), true, 2);
+  const b = new CacheLedger(new FileRecordSink(file), true, 2);
+  for (let i = 0; i < 3; i++) a.record(usage, "m", "s");
+  for (let i = 0; i < 3; i++) b.record(usage, "m", "s");
+  const reloaded = new CacheLedger(new FileRecordSink(file), true, 2);
+  assertEq(reloaded.totals().n, 6, "both writers' rows counted once");
+  assertEq(reloaded.retainedTotals().n, 2, "the shared window stays bounded");
+});
+
+test("ledger: an unpersisted row is not counted", () => {
+  const sink = new MemorySink();
+  sink.append = () => false;
+  const ledger = new CacheLedger(sink, true, 2);
+  const row = ledger.record(usage, "m", "s");
+  assertEq(row, undefined, "failed persistence reports no row");
+  assertEq(ledger.totals().n, 0, "a failed append never inflates totals");
+  assertEq(ledger.sessionTotals().n, 0, "session totals stay tied to disk");
 });
 
 test("ledger: useSession rebuilds the session window from persisted rows", () => {
@@ -200,6 +249,7 @@ test("ledger: close flushes and bounds the file", async () => {
   ledger.record(usage, "m", "s");
   await ledger.close();
   assertEq(sink.rows.length, 2, "file bounded after close");
+  assertEq(ledger.totals().n, 3, "close never drops a lifetime count");
 });
 
 test("ledger: record with extras carries the cache-state fields", () => {

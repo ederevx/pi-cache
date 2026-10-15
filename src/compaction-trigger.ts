@@ -31,9 +31,16 @@ export class CompactionTrigger<Ctx extends CompactableContext> {
     }
   }
 
-  /** Claim, compact, and settle; false when declined, gated, or failed. */
-  async tryCompact(ctx: Ctx): Promise<boolean> {
-    if (!this.decide(ctx)) return false;
+  /**
+   * Claim, compact, and settle; false when declined, gated, or failed.
+   * `explicit` is a deliberate agent request: it bypasses the automatic
+   * decision (enable switch, warm floor, minimum tokens, cooldown, and the
+   * probabilistic draw) but still honors the in-flight/window gate, so an
+   * explicit request can never stack on a running compaction or re-compact
+   * a window already compacted.
+   */
+  async tryCompact(ctx: Ctx, options?: { explicit?: boolean }): Promise<boolean> {
+    if (!options?.explicit && !this.decide(ctx)) return false;
     const key = this.opts.keyOf(ctx);
     if (!this.opts.gate.tryBegin(key)) return false;
     let completed = false;

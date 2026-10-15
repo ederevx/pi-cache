@@ -38,9 +38,10 @@ export interface PiCacheOptions {
   missDiagnosis: boolean;
   /** Log compaction advisories (observational only). */
   advisory: boolean;
-  /** Absolute path of the append-only usage ledger. */
+  /** Absolute path of the usage ledger (baseline header plus row window). */
   ledgerPath: string;
-  /** Retained ledger rows before the oldest are dropped (<= 0 = unbounded). */
+  /** Retained ledger rows before the oldest are folded into the lifetime
+   *  baseline (<= 0 = unbounded). */
   ledgerMaxRows: number;
   /** Directory for pre-retention ledger backups. */
   backupDir: string;

@@ -21,7 +21,7 @@ test("stats: renders distinct global and session usage lines", () => {
     branchEnabled: true,
   });
   const [globalLine, sessionLine] = text.split("\n");
-  assert(globalLine.startsWith("pi-cache global: 12 req"), globalLine);
+  assert(globalLine.startsWith("pi-cache global (all time): 12 req"), globalLine);
   assert(globalLine.includes("(75.0%)"), globalLine);
   assert(sessionLine.startsWith("pi-cache session: 2 req"), sessionLine);
   assert(sessionLine.includes("(90.0%)"), sessionLine);
@@ -37,7 +37,7 @@ test("stats: empty scopes render the no-usage wording", () => {
     fastEnabled: false,
     branchEnabled: false,
   });
-  assert(text.includes("pi-cache global: no usage recorded yet"));
+  assert(text.includes("pi-cache global (all time): no usage recorded yet"));
   assert(text.includes("pi-cache session: no usage recorded yet"));
 });
 

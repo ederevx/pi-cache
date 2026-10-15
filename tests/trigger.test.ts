@@ -145,6 +145,34 @@ test("trigger: a failed compaction releases the window for retry", async () => {
   assertEq(attempts, 2);
 });
 
+test("trigger: explicit bypasses the decision but not the gate", async () => {
+  const gate = new CompactionGate();
+  let attempts = 0;
+  const request = new CompactionRequest();
+  const trigger = new CompactionTrigger<FakeCtx>({
+    shouldCompact: () => false,
+    keyOf: () => "w",
+    gate,
+    request,
+  });
+  const ctx: FakeCtx = {
+    compact: (o) => {
+      attempts++;
+      o?.onComplete?.({});
+    },
+  };
+  assertEq(await trigger.tryCompact(ctx), false, "the automatic path still declines");
+  assertEq(attempts, 0);
+  assertEq(await trigger.tryCompact(ctx, { explicit: true }), true, "an explicit request fires anyway");
+  assertEq(attempts, 1);
+  assertEq(
+    await trigger.tryCompact(ctx, { explicit: true }),
+    false,
+    "the completed window is still gated",
+  );
+  assertEq(attempts, 1);
+});
+
 test("idle-trigger: fires at TTL expiry when idle", () => {
   const timers = new FakeTimers();
   const fired: number[] = [];

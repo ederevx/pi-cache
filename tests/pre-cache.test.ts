@@ -45,6 +45,13 @@ test("pre-cache: catalog states tools, conventions, and features", () => {
   assertMatches(catalog, /warming/i, "names warming");
 });
 
+test("pre-cache: catalog lists the owned tools when configured", () => {
+  const catalog = new PreCacheTool(["cache_compact"]).catalog();
+  assertMatches(catalog, /Model-callable tools/, "declares model tools");
+  assertMatches(catalog, /cache_compact/, "lists cache_compact");
+  assert(!/Model-callable tools: none/.test(catalog), "no empty-tools wording");
+});
+
 test("pre-cache: registers the tool and the gate", () => {
   const pi = new FakePi();
   new PreCacheTool().register(pi as never);

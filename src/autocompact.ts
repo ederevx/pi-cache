@@ -32,7 +32,7 @@
  * cooldown and counter stay tied to reality.
  */
 
-import type { CompactionPressure, PressureSample, PressureVerdict } from "./pressure.ts";
+import type { CompactionPressure, PressurePreview, PressureSample } from "./pressure.ts";
 import type { CostRates } from "./economics.ts";
 
 export interface AutocompactSignal {
@@ -266,17 +266,19 @@ export class AutocompactController {
   }
 
   /**
-   * Public preview for /cache-stats: the current pressure verdict for a
-   * live context sample, or undefined when it cannot be sampled.
+   * Public draw-free preview for /cache-stats and the cache_compact tool:
+   * the current pressure for a live context sample, or undefined when it
+   * cannot be sampled. Never consumes the RNG, so reading live state cannot
+   * perturb the automatic decision.
    */
   currentPressure(
     usageView: ContextUsageLike | undefined,
     usage: AutocompactUsage | undefined,
     signals?: AutocompactSignal,
-  ): PressureVerdict | undefined {
+  ): PressurePreview | undefined {
     if (!usage) return undefined;
     const { sample } = this.evaluate(this.readContext(usageView), usage, signals);
-    return sample ? this.opts.pressure?.sample(sample) : undefined;
+    return sample ? this.opts.pressure?.preview(sample) : undefined;
   }
 
   /**

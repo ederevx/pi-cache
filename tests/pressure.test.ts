@@ -119,6 +119,25 @@ test("pressure: probability() composes without consuming the draw", () => {
   assertEq(draws, 1, "an explicit sample draws exactly once");
 });
 
+test("pressure: preview matches the sampled values without drawing", () => {
+  let draws = 0;
+  const p = new CompactionPressure({
+    random: () => {
+      draws++;
+      return 0.5;
+    },
+  });
+  const input = { tokens: 120_000, contextWindow: 200_000, coldness: 1 as const, rates };
+  const preview = p.preview(input);
+  assertEq(draws, 0, "preview consumes no draw");
+  const sampled = p.sample(input);
+  assertEq(sampled.pressure, preview.pressure, "same pressure");
+  assertEq(sampled.degradation, preview.degradation, "same degradation");
+  assertEq(sampled.economics, preview.economics, "same economics");
+  assertEq(sampled.probability, preview.probability, "same probability");
+  assertEq(draws, 1, "only the explicit sample draws");
+});
+
 test("pressure: either reason alone can saturate the ramp", () => {
   // Context degradation saturates by itself without rates.
   const degradationOnly = pressure().sample({ tokens: 200_000, contextWindow: 200_000 });

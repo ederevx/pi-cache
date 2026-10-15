@@ -9,7 +9,14 @@
 import { test, assert, assertEq, assertDeepEq, scratchDir } from "./harness.ts";
 import { SettingsSwitchBoard } from "../src/settings-switch.ts";
 import { SettingsPresenter } from "../src/settings.ts";
-import { CacheLedger, type RecordSink, type UsageRow } from "../src/ledger.ts";
+import {
+  CacheLedger,
+  type LedgerSnapshot,
+  type RecordSink,
+  type SinkCommit,
+  type UsageRow,
+  type UsageTotals,
+} from "../src/ledger.ts";
 import { PrefixNormalizer } from "../src/normalizer.ts";
 import { BreakpointAnchor } from "../src/breakpoint-anchor.ts";
 import { RetentionRewriter } from "../src/retention.ts";
@@ -25,17 +32,22 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 
 /** In-memory sink so the ledger needs no files. */
 class MemorySink implements RecordSink {
+  baseline: UsageTotals = { input: 0, cacheRead: 0, cacheWrite: 0, n: 0 };
   rows: UsageRow[] = [];
-  append(row: UsageRow): void {
+  append(row: UsageRow): boolean {
     this.rows.push(row);
+    return true;
   }
-  load(): UsageRow[] {
-    return [...this.rows];
+  load(): LedgerSnapshot {
+    return { baseline: { ...this.baseline }, rows: [...this.rows] };
   }
-  transform(keep: (rows: UsageRow[]) => UsageRow[]): void {
-    const raw = [...this.rows];
+  transform(keep: (snapshot: LedgerSnapshot) => LedgerSnapshot): SinkCommit {
+    const raw = this.load();
     const next = keep(raw);
-    if (next !== raw) this.rows = next.map((row) => ({ ...row }));
+    if (next === raw) return { snapshot: raw, rewritten: false };
+    this.baseline = { ...next.baseline };
+    this.rows = next.rows.map((row) => ({ ...row }));
+    return { snapshot: { baseline: { ...this.baseline }, rows: [...this.rows] }, rewritten: true };
   }
 }
 
