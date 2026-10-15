@@ -31,7 +31,8 @@ function version() {
 
 try {
 	const dropped = new SettingsReconciler(
-		SettingsReconciler.defaultPath(), version(), "pi-cache").reconcile();
+		SettingsReconciler.defaultPath(), version(), "pi-cache",
+		repoRoot).reconcile();
 	if (dropped.length > 0) {
 		process.stderr.write(
 			"pi-cache: removed duplicate package entries that would load " +

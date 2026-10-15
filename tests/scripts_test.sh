@@ -123,6 +123,44 @@ grep -q "installed as a pi package" "$scratch/guard-err" || fail "guard message 
 [[ ! -e "$guard_home/extensions/pi-cache" ]] || fail "guard must install nothing"
 echo "  ok: pinned install refuses, nothing installed"
 
+echo "== install refuses a local entry that is this checkout =="
+# Regression: the guard compared the entry's final path component, so a
+# worktree or renamed clone of this checkout slipped through and
+# installed a second extension copy.
+renamed="$scratch/renamed-checkout"
+ln -sfn "$repo" "$renamed"
+printf '{"packages":["%s"]}\n' "$renamed" > "$settings"
+PI_CODING_AGENT_DIR="$guard_home" bash "$repo/scripts/install.sh" 2> "$scratch/guard-err"   && fail "guard exit expected"
+grep -q "installed as a pi package" "$scratch/guard-err" || fail "guard message missing"
+[[ ! -e "$guard_home/extensions/pi-cache" ]] || fail "guard must install nothing"
+echo "  ok: renamed-checkout path refuses, nothing installed"
+
+echo "== install allows an unrelated local entry =="
+unrelated="$scratch/another-package"
+mkdir -p "$unrelated"
+printf '{"packages":["%s"]}\n' "$unrelated" > "$settings"
+PI_CODING_AGENT_DIR="$guard_home" bash "$repo/scripts/install.sh" >/dev/null 2>&1 || fail "an unrelated entry must not refuse"
+[[ -f "$guard_home/extensions/pi-cache/index.ts" ]] || fail "install should have proceeded"
+echo "  ok: unrelated local entry installs"
+
+echo "== postinstall drops a renamed local entry =="
+# The reconciler reads the agent dir this script exported, not the
+# guard-only override above.
+post_settings="$PI_CODING_AGENT_DIR/settings.json"
+printf '{"packages":["git:github.com/ederevx/pi-cache@v9.9.9","%s"]}\n' "$renamed" > "$post_settings"
+node "$repo/scripts/postinstall.mjs" >/dev/null 2>&1 || fail "postinstall exited nonzero"
+python3 - "$post_settings" <<'PY' || fail "reconciler left the renamed entry"
+import json, sys
+packages = json.load(open(sys.argv[1], encoding="utf-8")).get("packages", [])
+if len(packages) != 1 or not packages[0].startswith("git:"):
+    print("duplicate survived: %r" % (packages,), file=sys.stderr)
+    sys.exit(1)
+PY
+echo "  ok: renamed local entry reconciled"
+# Leave the agent-dir settings as the following sections expect: absent,
+# so their manual install is not blocked by an entry.
+rm -f "$post_settings"
+
 echo "== postinstall drops manual copies beside the package =="
 rm -f "$settings"
 bash "$repo/scripts/install.sh" >/dev/null 2>&1 || fail "manual reinstall failed"
