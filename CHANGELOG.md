@@ -3,6 +3,20 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.14.1] - 2026-10-15
+
+### Fixed
+
+- Recognize this checkout by path, not directory name, in the one-loader
+  guard (`scripts/install.sh`) and the postinstall reconciler
+  (`scripts/settings-reconciler.mjs`). Both matched a local `packages`
+  entry only when its final path component was `pi-cache`, so a worktree
+  or renamed clone was missed: a manual install added a second extension
+  copy beside the pin, and the reconciler left both entries loading it.
+  A local entry that resolves to this checkout is now caught whatever
+  the directory is called; the git-pin and same-named-directory rules are
+  unchanged.
+
 ## [0.14.0] - 2026-10-15
 
 ### Added
