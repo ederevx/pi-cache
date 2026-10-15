@@ -55,7 +55,8 @@ export interface PressureSample {
   msSinceCacheTouch?: number;
 }
 
-export interface PressureVerdict {
+/** A draw-free pressure reading: everything but the Bernoulli draw. */
+export interface PressurePreview {
   /** Combined pressure in `[0,1]` (`max`-style either-reason blend). */
   pressure: number;
   /** The context-degradation component of the pressure. */
@@ -64,6 +65,9 @@ export interface PressureVerdict {
   economics: number;
   /** Clamped Bernoulli probability for this sample. */
   probability: number;
+}
+
+export interface PressureVerdict extends PressurePreview {
   /** The drawn decision. */
   fire: boolean;
 }
@@ -89,9 +93,15 @@ export class CompactionPressure {
 
   /** Compose the pressure and probability into the drawn verdict. */
   sample(input: PressureSample): PressureVerdict {
+    const preview = this.preview(input);
+    return { ...preview, fire: this.opts.random() < preview.probability };
+  }
+
+  /** The same composition without consuming the RNG, so a live preview
+   *  (or an explicit decision) cannot perturb the automatic draw. */
+  preview(input: PressureSample): PressurePreview {
     const { pressure, degradation, economics } = this.compose(input);
-    const probability = this.probabilityFor(pressure);
-    return { pressure, degradation, economics, probability, fire: this.opts.random() < probability };
+    return { pressure, degradation, economics, probability: this.probabilityFor(pressure) };
   }
 
   /** The Bernoulli probability for a sample without drawing, so a caller's

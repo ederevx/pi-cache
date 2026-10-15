@@ -70,6 +70,17 @@ Cache-aware compaction has two layers, both on by default.
   (`grep -m 5 '<term>' <session-file>`) instead of a whole-file read.
   Disable the digest with the `/cache-settings` switch or
   `PI_CACHE_FAST_DIGEST=off`.
+- **Explicit compaction.** The model-callable `cache_compact` tool lets the
+  agent deliberately request a compaction — typically when the user asks
+  for a complete context switch — after reading a draw-free snapshot of the
+  cache state (global lifetime and session scopes, live pressure). The
+  request is deferred to the next settled boundary (`agent_settled`), so
+  the tool result is delivered and the live run is never aborted. It
+  bypasses the automatic policy (enable switch, warm floor, minimum tokens,
+  cooldown, and the probability draw) but still honors the in-flight/window
+  gate, and one request per run is accepted (duplicate calls coalesce).
+  Call `pre_cache` once first: it returns the pi-cache catalog and gates
+  `cache_compact`.
 
 The cache TTL that drives the idle trigger and the compaction-pressure
 ramp uses pi's `promptCache` tier when the model declares one, else a
@@ -129,11 +140,14 @@ ledger itself; rows written without them stay schema-compatible.
 
 The ledger keeps the most recent `PI_CACHE_LEDGER_MAX_ROWS` rows
 (default 20000; trimmed on load, in-session once a full window of
-appends accumulates, and at session shutdown). A bounded pre-trim backup
-is captured before any shrinking rewrite
-(`PI_CACHE_LEDGER_BACKUPS`/`_TTL_DAYS`/`_MAX_MB`). Session stats are
-rebuilt from the ledger on session start so they survive reloads, and
-stale atomic-write temp files are swept at load.
+appends accumulates, and at session shutdown). Rows evicted by that
+window are folded into a baseline persisted inside the same file, so
+`/cache-stats` reports every request ever recorded (`global (all time)`)
+while the file stays bounded; the `session` scope remains the current
+session's retained window. A bounded pre-trim backup is captured before
+any shrinking rewrite (`PI_CACHE_LEDGER_BACKUPS`/`_TTL_DAYS`/`_MAX_MB`).
+Session stats are rebuilt from the ledger on session start so they
+survive reloads, and stale atomic-write temp files are swept at load.
 
 Live views: `/cache-stats` (global and session scopes, with live
 compaction pressure) and `/cache-settings`.

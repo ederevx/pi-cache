@@ -180,7 +180,13 @@ test("autocompact: cache-neutral fast compaction relaxes the warm gate", () => {
 });
 
 test("autocompact: currentPressure previews the live sample", () => {
-  const pressure = new CompactionPressure({ random: () => 0.5 });
+  let draws = 0;
+  const pressure = new CompactionPressure({
+    random: () => {
+      draws++;
+      return 0.5;
+    },
+  });
   const c = new AutocompactController({ ...opts, pressure });
   const verdict = c.currentPressure(
     { tokens: 180_000, contextWindow: 200_000, percent: 90 },
@@ -188,6 +194,7 @@ test("autocompact: currentPressure previews the live sample", () => {
   );
   assert(verdict !== undefined, "verdict expected");
   assert(verdict!.pressure > 0.9, "cold pressure exceeds utilization");
+  assertEq(draws, 0, "the live preview consumes no RNG draw");
   assertEq(
     c.currentPressure({ tokens: null, contextWindow: 1 }, { input: 1, cacheRead: 0, cacheWrite: 0 }),
     undefined,

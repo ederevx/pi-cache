@@ -6,9 +6,9 @@
  * tools. Tool rows use pi's native collapsed rendering, so the extension
  * blends in; Ctrl+O expands. The catalog is the only
  * model-facing summary of pi-cache; feature and tool lists live here
- * rather than in prompt snippets or long tool descriptions. pi-cache is
- * hook-driven and today registers no model-callable tools, so the gate
- * stays open and the catalog says so plainly.
+ * rather than in prompt snippets or long tool descriptions. The gate lists
+ * the tools the extension owns (today `cache_compact`); when the list is
+ * empty the gate stays open and the catalog says so plainly.
  */
 
 import { Type } from "@earendil-works/pi-ai";
@@ -29,10 +29,15 @@ export class PreCacheTool {
       "Fast compaction: a byte-stable stub for every reason, an optional " +
         "dropped-span digest, and a branch summary.",
       "Warming: retention-aware refresh scheduling and a gated force-warm policy.",
+      "Explicit compaction: the cache_compact tool queues one agent-requested " +
+        "compaction at the next settled boundary.",
       "Settings: PI_CACHE_* env vars plus the owned settings JSON.",
     ];
     this.conventions = [
-      "pi-cache exposes no model-callable tools; it acts through lifecycle hooks.",
+      "pi-cache's only model-callable operations are its listed tools; every " +
+        "other feature acts through lifecycle hooks.",
+      "cache_compact queues a compaction at the next settled boundary; it never " +
+        "aborts the live run, and one call per run is enough.",
       "Read live state with /cache-stats and change options with " +
         "/cache-settings; do not edit the owned settings JSON mid-session.",
       "Fast compaction replaces pi's summarizer for every compaction " +
@@ -88,10 +93,7 @@ export class PreCacheTool {
     return [
       "pi-cache catalog",
       "",
-      "Model-callable tools: none — pi-cache is hook-driven and registers",
-      "no tools. Two user commands are available:",
-      "  /cache-stats     global + session cache stats with live pressure",
-      "  /cache-settings  edit every pi-cache option (restore/reset)",
+      ...this.toolSection(),
       "",
       "Conventions:",
       ...this.conventions.map((line) => `- ${line}`),
@@ -99,6 +101,28 @@ export class PreCacheTool {
       "Features:",
       ...this.features.map((line) => `- ${line}`),
     ].join("\n");
+  }
+
+  /** The tool block: owned tools plus the two user commands. */
+  private toolSection(): string[] {
+    const commands = [
+      "  /cache-stats     global + session cache stats with live pressure",
+      "  /cache-settings  edit every pi-cache option (restore/reset)",
+    ];
+    if (this.ownTools.size === 0) {
+      return [
+        "Model-callable tools: none — pi-cache is hook-driven and registers",
+        "no tools. Two user commands are available:",
+        ...commands,
+      ];
+    }
+    return [
+      "Model-callable tools (call pre_cache once before any of them):",
+      ...[...this.ownTools].map((name) => `  ${name}`),
+      "",
+      "User commands:",
+      ...commands,
+    ];
   }
 
   /** True only for pi-cache's own model-callable tools. */

@@ -42,6 +42,7 @@ import "./sink.test.ts";
 import "./backup-store.test.ts";
 import "./normalizer.test.ts";
 import "./pre-cache.test.ts";
+import "./cache-compact.test.ts";
 import "./temp-sweep.test.ts";
 import "./advisor.test.ts";
 import "./signals.test.ts";

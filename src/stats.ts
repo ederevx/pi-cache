@@ -47,13 +47,13 @@ export interface CacheStatsMisses {
 export class CacheStatsPresenter {
   render(input: CacheStatsInput): string {
     return [
-      this.scopeLine("global", input.global),
+      this.scopeLine("global (all time)", input.global),
       this.scopeLine("session", input.session) + this.sessionSignals(input),
     ].join("\n");
   }
 
   /** One usage line in the ledger's established wording. */
-  private scopeLine(scope: "global" | "session", s: CacheStatsScope): string {
+  private scopeLine(scope: string, s: CacheStatsScope): string {
     if (s.n === 0) return `pi-cache ${scope}: no usage recorded yet`;
     const denom = s.input + s.cacheRead;
     const ratio = denom > 0 ? s.cacheRead / denom : 0;
