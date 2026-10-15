@@ -3,6 +3,35 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.14.0] - 2026-10-15
+
+### Added
+
+- `cache_compact`, a model-callable tool that lets the agent request a
+  context compaction on its own (typically for a complete context
+  switch). It reports a draw-free snapshot of the cache state (lifetime
+  and session scopes, live pressure) and queues at most one request per
+  run; the request runs at the next settled boundary (`agent_settled`),
+  so the tool result is delivered and the live run is not aborted. It
+  bypasses the automatic policy (enable switch, warm floor, minimum
+  tokens, cooldown, and the probability draw) but still honors the
+  in-flight/window gate, and duplicate calls coalesce. `pre_cache` now
+  gates and catalogs it. The ledger, `/cache-stats`, and the tool
+  previews are draw-free, so reading live state no longer consumes a
+  probabilistic compaction draw (`CompactionPressure.preview`).
+
+### Fixed
+
+- Global `/cache-stats` counters no longer cap at
+  `PI_CACHE_LEDGER_MAX_ROWS` (default 20000). The ledger still retains
+  only the newest window of rows, but folds every evicted row into a
+  baseline persisted inside the same JSONL file, so `global (all time)`
+  counts every recorded request while the file stays bounded; the
+  `session` scope remains the current session's window. The baseline is
+  written atomically with the row window, so a crash cannot desync the
+  two, and a row that cannot be committed (a contended lock) is reported
+  and never counted instead of being written outside the lock.
+
 ## [0.13.3] - 2026-10-09
 
 ### Fixed
