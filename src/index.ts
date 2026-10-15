@@ -40,8 +40,11 @@
  *
  * Tools:
  *   pre_cache                — onboarding catalog; the first-call gate over
- *                              pi-cache's own tools (none today — hooks only)
- *                              and the collapsed-by-default tool display
+ *                              pi-cache's own tools and the
+ *                              collapsed-by-default tool display
+ *   cache_compact            — agent-requested compaction: read the
+ *                              draw-free cache state and queue one explicit
+ *                              compaction at the next settled boundary
  *
  * Commands:
  *   /cache-stats             — global + session cache stats, live pressure,
@@ -55,6 +58,8 @@
 
 import { OptionsLoader } from "./constants.ts";
 import { PreCacheTool } from "./pre-cache.ts";
+import { CacheCompactTool } from "./cache-compact.ts";
+import { CacheStateReader } from "./cache-state.ts";
 import { CacheLedger } from "./ledger.ts";
 import { RowExtrasBuilder } from "./row-extras.ts";
 import { FileRecordSink } from "./sink.ts";
@@ -97,10 +102,9 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
   const opts = loader.load();
   // Onboarding: one `pre_cache` catalog call gates pi-cache's own
   // model-callable tools and makes every tool row collapse by default
-  // (Ctrl+O expands). The list is empty: pi-cache is hook-driven and
-  // registers no tools, so the gate stays open and the catalog says so.
-  const preCache = new PreCacheTool([]);
-  preCache.register(pi);
+  // (Ctrl+O expands). The gate lists cache_compact; both tools are
+  // registered once the state reader exists, below.
+  const preCache = new PreCacheTool(["cache_compact"]);
   // Sweep stale atomic-write temp files before the ledger/settings/params
   // are read. Any of the three files may live outside the default dir
   // (PI_CACHE_SETTINGS / PI_CACHE_MODEL_PARAMS / PI_CACHE_LEDGER), so each
@@ -226,6 +230,15 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     },
   );
 
+  // Agent-requested compaction: the cache_compact tool reads the draw-free
+  // cache state and queues one explicit compaction at the next settled
+  // boundary. Both pi-cache tools register together so the pre_cache gate
+  // covers them from the start.
+  const cacheState = new CacheStateReader(ledger, autocompact, fastcompact, signals);
+  const cacheCompact = new CacheCompactTool(cacheState);
+  preCache.register(pi);
+  cacheCompact.register(pi);
+
   // Warming schedule: mirrors pi's refresh margin from the effective tier
   // the last request actually ran on (per-request override aware).
   const warmingSchedule = new WarmingSchedule(signals, retention);
@@ -295,6 +308,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       warming.reconcile(ctx);
       ledger.useSession(signals.sessionIdOf(ctx));
       missClassifier.useSession(signals.sessionIdOf(ctx));
+      cacheCompact.reset();
       // Always attempt a fresh pull of the live model parameters; the
       // background refresh leaves last-good in place when OpenRouter is
       // unreachable. Only OpenRouter-routed models have fetched rates.
@@ -461,6 +475,16 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     // expires.
     try {
       warming.reconcile(ctx);
+      // A deliberate agent request runs before the automatic policy and
+      // bypasses it, while still honoring the in-flight/window gate. One
+      // request is taken per settlement; a duplicate call coalesced.
+      const requested = cacheCompact.takeForSettlement();
+      if (requested) {
+        const completed = await compactionTrigger.tryCompact(ctx, { explicit: true });
+        cacheCompact.finish(completed);
+        idleTrigger.arm(ctx);
+        return;
+      }
       if (!autocompact.enabled) return;
       void compactionTrigger.tryCompact(ctx);
       idleTrigger.arm(ctx);
@@ -479,8 +503,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     try {
       const preparation = event?.preparation;
       if (preparation) {
+        // The advisory measures the current session's cache, not the
+        // lifetime ledger, so a past session's warm ratio cannot color it.
         const tip = advisor.suggest(
-          ledger.totals(),
+          ledger.sessionTotals(),
           preparation.messagesToSummarize.length,
           preparation.tokensBefore,
         );

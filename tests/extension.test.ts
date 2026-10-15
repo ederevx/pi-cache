@@ -365,7 +365,7 @@ test("extension: default cold-window auto-compaction lifecycle", async () => {
       ui: { notify: (text: string) => { notified = text; } },
     };
     await pi.commands.get("cache-stats")!.handler([], statsCtx as never);
-    assert(notified.includes("pi-cache global: 1 req"), "global stats: " + notified);
+    assert(notified.includes("pi-cache global (all time): 1 req"), "global stats: " + notified);
     assert(notified.includes("pi-cache session: 1 req"), "session stats: " + notified);
     assert(notified.includes("pressure "), "session pressure: " + notified);
     assert(notified.includes("head churn 1"), "stats reports churn: " + notified);
@@ -433,6 +433,72 @@ test("extension: async auto-compact failure is fail-open", async () => {
     };
     const onError = compactCalls[0].onError as () => void;
     onError();
+  } finally {
+    unsetEnv(PI_CACHE_KEYS);
+  }
+});
+
+test("extension: cache_compact queues and fires at the settled boundary", async () => {
+  const root = join(scratchDir(), "e2e-compact-tool");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+    PI_CACHE_FAST_COMPACT: "1",
+    // The explicit request must still fire with automatic compaction off.
+    PI_CACHE_AUTO_COMPACT: "0",
+  });
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const pi = new MockPi();
+    factory(pi as never);
+    const def = pi.tools.get("cache_compact") as Record<string, unknown> | undefined;
+    assert(def !== undefined, "cache_compact registered");
+
+    // A cold turn so the ledger has evidence for the reported state.
+    await pi.emit(
+      "message_end",
+      {
+        message: {
+          role: "assistant",
+          usage: { input: 1000, output: 1, cacheRead: 5, cacheWrite: 950, totalTokens: 1956 },
+        },
+      },
+      { model: { id: "m1" } },
+    );
+    await waitFor(() => existsSync(join(root, "ledger.jsonl")), "ledger persisted");
+
+    const compactCalls: Array<Record<string, unknown>> = [];
+    const ctx = {
+      model: { id: "m1" },
+      getContextUsage: () => ({ tokens: 60_000, contextWindow: 200_000, percent: 30 }),
+      sessionManager: { getSessionId: () => "sess1" },
+      compact: (args: Record<string, unknown>) => {
+        compactCalls.push(args);
+        (args.onComplete as (result: unknown) => void)?.({});
+      },
+    };
+    const execute = def!.execute as (
+      id: string,
+      params: { reason?: string },
+      signal: unknown,
+      onUpdate: unknown,
+      context: unknown,
+    ) => Promise<{ content: Array<{ text: string }>; details: Record<string, unknown> }>;
+
+    const first = await execute("c1", { reason: "switch tasks" }, undefined, undefined, ctx);
+    assertEq(first.details.duplicate, false, "first call requests");
+    assert(first.content[0].text.includes("request queued"), "receipt states the queue");
+    const second = await execute("c2", { reason: "again" }, undefined, undefined, ctx);
+    assertEq(second.details.duplicate, true, "a second call coalesces");
+    assertEq(compactCalls.length, 0, "the tool never compacts by itself");
+
+    await pi.emit("agent_settled", {}, ctx);
+    assertEq(compactCalls.length, 1, "the explicit request fires at settle");
+    assertEq(typeof compactCalls[0].onError, "function", "failure callback bound");
+
+    await pi.emit("agent_settled", {}, ctx);
+    assertEq(compactCalls.length, 1, "the request is consumed exactly once");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
@@ -969,7 +1035,7 @@ test("extension: option rows toggle, persist, and take effect", async () => {
       },
     };
     await pi.commands.get("cache-stats")!.handler([], statsCtx as never);
-    assert(notified.includes("global: 1 req"), "telemetry on records the turn: " + notified);
+    assert(notified.includes("global (all time): 1 req"), "telemetry on records the turn: " + notified);
 
     // Toggle Telemetry off through the two-column view.
     let view: { selectItem(id: string): void; handleInput(data: string): void } | undefined;
@@ -1002,7 +1068,7 @@ test("extension: option rows toggle, persist, and take effect", async () => {
     // A second turn is dropped, so the ledger stays at one row.
     await pi.emit("message_end", usageEvent, { model: { id: "m1" } });
     await pi.commands.get("cache-stats")!.handler([], statsCtx as never);
-    assert(notified.includes("global: 1 req"), "telemetry off drops the new turn: " + notified);
+    assert(notified.includes("global (all time): 1 req"), "telemetry off drops the new turn: " + notified);
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }

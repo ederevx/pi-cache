@@ -1,14 +1,19 @@
 /**
  * pi-cache — usage ledger.
  *
- * One responsibility: record per-request cache usage, keep global and
- * current-session totals, persist rows through an injected sink, and bound
- * the retained window so the ledger cannot grow without limit. Writing and
- * retention go through the sink so the file side stays a single owner.
- * Telemetry must never break the session, so failures are swallowed.
+ * One responsibility: record per-request cache usage, keep global lifetime
+ * and current-session totals, persist rows through an injected sink, and
+ * bound the retained row window so the ledger cannot grow without limit.
+ * Global totals survive eviction: rows dropped from the window are folded
+ * into a baseline persisted inside the same file, so `global = baseline +
+ * retained rows` holds at every committed state. Writing and retention go
+ * through the sink so the file side stays a single owner. Telemetry must
+ * never break the session, so persistence failures are reported rather than
+ * thrown.
  */
 
 import type { Usage } from "@earendil-works/pi-ai";
+import { randomUUID } from "node:crypto";
 
 /** A single recorded request row in the ledger. */
 export interface UsageRow {
@@ -61,19 +66,54 @@ export interface RecordExtras {
   msSinceCacheTouch?: number;
 }
 
+/** Aggregated cache counters over some set of rows. */
+export interface UsageTotals {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  n: number;
+}
+
+/** Persisted grand total of rows already evicted from the retained window. */
+export interface LedgerBaseline extends UsageTotals {
+  _type: "pi-cache-ledger-baseline";
+  version: 1;
+}
+
+/** One complete ledger document: the evicted-row baseline plus retained rows. */
+export interface LedgerSnapshot {
+  baseline: UsageTotals;
+  rows: UsageRow[];
+}
+
+/** Outcome of a locked snapshot transaction. */
+export interface SinkCommit {
+  /** The committed snapshot (the unchanged one when nothing was written). */
+  snapshot: LedgerSnapshot;
+  /** True when the transaction replaced the file. */
+  rewritten: boolean;
+}
+
 /** Persistence seam: the ledger owns rows, the sink owns bytes. */
 export interface RecordSink {
-  append(row: UsageRow): void;
-  /** All rows currently persisted on disk (for rehydration on load). */
-  load(): UsageRow[];
+  /** Append one row; false when the write did not commit (never silently
+   *  counted, so global totals stay tied to persisted rows). */
+  append(row: UsageRow): boolean;
+  /** All rows and the evicted-row baseline currently persisted on disk. */
+  load(): LedgerSnapshot;
   /**
-   * Locked read-modify-write: load the rows, call `keep`, and persist the
-   * returned array atomically. Returning the same array means "unchanged".
+   * Locked read-modify-write: load the snapshot, call `keep`, and persist
+   * the returned snapshot atomically. Returning the same object means
+   * "unchanged". The committed snapshot is returned even when the write
+   * could not run (fail-open telemetry).
    */
-  transform(keep: (rows: UsageRow[]) => UsageRow[]): void;
+  transform(keep: (snapshot: LedgerSnapshot) => LedgerSnapshot): SinkCommit;
   /** Resolve once every queued append has landed. */
   flush(): Promise<void>;
 }
+
+/** Marker `_type` of the in-file evicted-row baseline line. */
+export const LEDGER_BASELINE_TYPE = "pi-cache-ledger-baseline";
 
 export class CacheLedger {
   private rows: UsageRow[] = [];
@@ -81,11 +121,13 @@ export class CacheLedger {
    *  window by `useSession` so session stats survive reloads. Empty until
    *  the id is known; the auto-compaction trigger reads its last row. */
   private sessionRows: UsageRow[] = [];
+  /** Lifetime totals of rows already evicted from the retained window. */
+  private baseline: UsageTotals = CacheLedger.zeroTotals();
   private seq = 0;
   /** Appends since the last in-session file compaction (see record). */
   private appendsSinceCompact = 0;
   /** Per-process boot nonce so row ids are unique across reloads. */
-  private boot = Math.floor(Math.random() * 0x10000).toString(16);
+  private readonly boot = randomUUID();
   private readonly sink: RecordSink;
   private enabledOn: boolean;
   /** Retained row window; `<= 0` means unbounded. */
@@ -139,21 +181,27 @@ export class CacheLedger {
   ): UsageRow | undefined {
     if (!usage || !this.enabledOn) return undefined;
     const row = this.buildRow(usage, model, session, extras, kind);
+    // Only a persisted row may count; a failed write is not telemetry.
+    if (!this.sink.append(row)) return undefined;
     this.rows.push(row);
     this.noteSessionRow(row);
-    this.sink.append(row);
     this.trim();
     this.maybeCompactFile();
     return row;
   }
 
-  /** Aggregated counters over the retained ledger window (all processes). */
-  totals(): { input: number; cacheRead: number; cacheWrite: number; n: number } {
+  /** Lifetime counters across every recorded row (retained + evicted). */
+  totals(): UsageTotals {
+    return this.addTotals(this.baseline, this.sumRows(this.rows));
+  }
+
+  /** Counters over the retained window only (no evicted baseline). */
+  retainedTotals(): UsageTotals {
     return this.sumRows(this.rows);
   }
 
   /** Aggregated counters over the current session's retained rows. */
-  sessionTotals(): { input: number; cacheRead: number; cacheWrite: number; n: number } {
+  sessionTotals(): UsageTotals {
     return this.sumRows(this.sessionRows);
   }
 
@@ -213,8 +261,8 @@ export class CacheLedger {
 
   /**
    * Locked read-modify-write retention: merge the freshest disk rows,
-   * reclaim duplicates, trim to the window, and persist only when
-   * something changed. Returns whether the file was rewritten.
+   * fold evicted rows into the baseline, trim to the window, and persist
+   * only when something changed. Returns whether the file was rewritten.
    */
   compact(): boolean {
     return this.enforceRetention();
@@ -225,23 +273,28 @@ export class CacheLedger {
     return this.sink.flush();
   }
 
-  /** Bound the file inside the sink's lock; true when it was rewritten. */
+  /**
+   * Reconcile with the file inside the sink's lock: normalize the disk
+   * rows, move everything past the window into the disk baseline, and
+   * adopt the committed snapshot. The disk snapshot is authoritative for
+   * the baseline; the local rows are never merged back in, or rows another
+   * process already folded into the baseline would be resurrected.
+   */
   private enforceRetention(): boolean {
-    let changed = false;
-    // The callback mutates this ledger's own rows (owner-initiated) and
-    // returns the snapshot the sink should persist; the sink never keeps
-    // a live reference to them.
-    this.sink.transform((raw) => {
-      const duplicates = this.normalize(raw).length < raw.length;
-      this.rows = this.normalize([...this.rows, ...raw]);
-      const dropped = this.trim();
-      changed = duplicates || dropped;
-      return changed ? this.rows.slice() : raw;
+    const commit = this.sink.transform((snapshot) => {
+      const rows = this.normalize(snapshot.rows);
+      const split = CacheLedger.splitIndex(rows.length, this.maxRows);
+      const baseline = this.addTotals(snapshot.baseline, this.sumRows(rows.slice(0, split)));
+      const next: LedgerSnapshot = { baseline, rows: rows.slice(split) };
+      return this.snapshotEqual(snapshot, next) ? snapshot : next;
     });
-    return changed;
+    this.baseline = commit.snapshot.baseline;
+    this.rows = commit.snapshot.rows;
+    this.sessionRows = this.trimToWindow(this.sessionRows);
+    return commit.rewritten;
   }
 
-  /** Keep `seq` ahead of every rehydrated row so new ids stay unique. */
+  /** Keep `seq` ahead of every retained row so new ids stay unique. */
   private noteSeq(): void {
     for (const row of this.rows) if (row.seq >= this.seq) this.seq = row.seq + 1;
   }
@@ -289,11 +342,15 @@ export class CacheLedger {
     return [...byId.values()].sort((a, b) => a.ts - b.ts || a.seq - b.seq);
   }
 
-  /** Drop oldest rows beyond the window; returns whether either list shrank. */
+  /** Fold global evictions into the baseline; trim the session window. */
   private trim(): boolean {
     const rowsBefore = this.rows.length;
     const sessionBefore = this.sessionRows.length;
-    this.rows = this.trimToWindow(this.rows);
+    const split = CacheLedger.splitIndex(this.rows.length, this.maxRows);
+    if (split > 0) {
+      this.baseline = this.addTotals(this.baseline, this.sumRows(this.rows.slice(0, split)));
+      this.rows = this.rows.slice(split);
+    }
     this.sessionRows = this.trimToWindow(this.sessionRows);
     return this.rows.length !== rowsBefore || this.sessionRows.length !== sessionBefore;
   }
@@ -304,7 +361,7 @@ export class CacheLedger {
    * so rewrite it to the retained set. A no-op when unbounded.
    */
   private maybeCompactFile(): void {
-    if (this.maxRows === Number.POSITIVE_INFINITY) return;
+    if (!Number.isFinite(this.maxRows)) return;
     this.appendsSinceCompact++;
     if (this.appendsSinceCompact < this.maxRows) return;
     this.appendsSinceCompact = 0;
@@ -313,15 +370,36 @@ export class CacheLedger {
 
   /** Keep only the newest `maxRows` entries of one collection. */
   private trimToWindow(rows: UsageRow[]): UsageRow[] {
-    return rows.length > this.maxRows ? rows.slice(rows.length - this.maxRows) : rows;
+    const split = CacheLedger.splitIndex(rows.length, this.maxRows);
+    return split > 0 ? rows.slice(split) : rows;
   }
 
-  private sumRows(rows: UsageRow[]): {
-    input: number;
-    cacheRead: number;
-    cacheWrite: number;
-    n: number;
-  } {
+  /** How many leading rows fall outside a window of `maxRows`. */
+  private static splitIndex(length: number, maxRows: number): number {
+    return Number.isFinite(maxRows) ? Math.max(0, length - maxRows) : 0;
+  }
+
+  /** Whether a candidate snapshot changes nothing (same baseline, same rows). */
+  private snapshotEqual(a: LedgerSnapshot, b: LedgerSnapshot): boolean {
+    if (!this.totalsEqual(a.baseline, b.baseline)) return false;
+    if (a.rows.length !== b.rows.length) return false;
+    return a.rows.every((row, index) => row === b.rows[index]);
+  }
+
+  private totalsEqual(a: UsageTotals, b: UsageTotals): boolean {
+    return a.n === b.n && a.input === b.input && a.cacheRead === b.cacheRead && a.cacheWrite === b.cacheWrite;
+  }
+
+  private addTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
+    return {
+      input: a.input + b.input,
+      cacheRead: a.cacheRead + b.cacheRead,
+      cacheWrite: a.cacheWrite + b.cacheWrite,
+      n: a.n + b.n,
+    };
+  }
+
+  private sumRows(rows: UsageRow[]): UsageTotals {
     return rows.reduce(
       (a, r) => ({
         input: a.input + r.input,
@@ -329,7 +407,11 @@ export class CacheLedger {
         cacheWrite: a.cacheWrite + r.cacheWrite,
         n: a.n + 1,
       }),
-      { input: 0, cacheRead: 0, cacheWrite: 0, n: 0 },
+      CacheLedger.zeroTotals(),
     );
+  }
+
+  private static zeroTotals(): UsageTotals {
+    return { input: 0, cacheRead: 0, cacheWrite: 0, n: 0 };
   }
 }
