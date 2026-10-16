@@ -155,6 +155,15 @@ test("constants: boolean env parsing", () => {
   );
 });
 
+test("constants: 'on' is an enabled boolean env value", () => {
+  withEnv(
+    { ...CLEAN, PI_CACHE_SETTINGS: settingsPath("on"), PI_CACHE_TELEMETRY: "on" },
+    () => {
+      assertEq(loadOptions().telemetry, true);
+    },
+  );
+});
+
 test("constants: owned settings file drives the fast-compaction switch", () => {
   const file = settingsPath("switch");
   writeFileSync(file, JSON.stringify({ fastCompaction: false }));
