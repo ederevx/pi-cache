@@ -3,6 +3,19 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.14.2] - 2026-10-16
+
+### Fixed
+
+- The DeepSeek cache-lifetime profile assumed a four-hour TTL. OpenRouter
+  sticky routing expires after ten minutes of inactivity and a host ledger
+  put cache-hit share at 0.92 in the 5-10 minute gap band and 0.23 in the
+  1-4 hour band, so the idle and before-turn compaction triggers fired
+  after the cache had gone cold. The profile now uses 30 minutes.
+- Boolean `PI_CACHE_*` environment options accept `on`. They previously
+  treated it as false, so `PI_CACHE_FAST_COMPACT=on` silently disabled
+  fast compaction.
+
 ## [0.14.1] - 2026-10-15
 
 ### Fixed
