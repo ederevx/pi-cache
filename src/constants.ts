@@ -120,7 +120,7 @@ export class OptionsLoader {
       backupTtlDays: this.envInt("PI_CACHE_LEDGER_BACKUP_TTL_DAYS", 7),
       backupMaxMb: this.envInt("PI_CACHE_LEDGER_BACKUP_MAX_MB", 32),
       // Cache-favoring features are ON by default; set the env var to
-      // 0/off/false to disable.
+      // 0/off/false/no to disable. Truthy spellings are 1/true/yes/on.
       autoCompact: this.envBool("PI_CACHE_AUTO_COMPACT", stored.autoCompact ?? true),
       idleTrigger: this.envBool("PI_CACHE_IDLE_TRIGGER", true),
       beforeTurn: this.envBool("PI_CACHE_BEFORE_TURN", true),
@@ -201,7 +201,7 @@ export class OptionsLoader {
   private envBool(name: string, fallback: boolean): boolean {
     const raw = this.env[name];
     if (raw === undefined) return fallback;
-    return raw === "1" || raw === "true" || raw === "yes";
+    return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
   }
 
   /** parseFloat/parseInt with a guarded default: unset/unparsable values

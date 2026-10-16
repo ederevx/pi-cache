@@ -23,14 +23,17 @@ export class ModelTtl {
    * Ordered profiles; the first matching substring of
    * `${provider} ${modelId}` wins. Values are the documented provider
    * lifetimes (see docs/research/internet-prompt-caching-2026-09-18.md):
-   * Anthropic/OpenAI/Kimi/Gemini are published, DeepSeek and GLM are
-   * conservative empirical midpoints because neither publishes a lifetime.
+   * Anthropic/OpenAI/Kimi/Gemini are published; DeepSeek and GLM publish
+   * none, so their values are empirical. DeepSeek sits at 30 min because
+   * OpenRouter sticky routing expires after 10 min of inactivity and a
+   * host measurement of 19,957 inter-request gaps put hit share at 0.92
+   * (5-10 min), 0.55 (30-60 min), and 0.23 (1-4 h).
    */
   private static readonly PROFILES: readonly TtlProfile[] = [
     { matches: ["anthropic"], short: 300, long: 3600 },
     { matches: ["openai", "azure"], short: 1800, long: 1800 },
     { matches: ["moonshot", "kimi", "qwen", "alibaba"], short: 300, long: 3600 },
-    { matches: ["deepseek"], short: 14400, long: 14400 },
+    { matches: ["deepseek"], short: 1800, long: 1800 },
     { matches: ["z-ai", "glm"], short: 120, long: 120 },
     { matches: ["google", "gemini"], short: 300, long: 3600 },
   ];

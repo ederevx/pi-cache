@@ -14,7 +14,8 @@ test("model-ttl: documented provider profiles", () => {
   assertEq(ttl.secondsFor("anthropic", "claude-sonnet-4", true), 3600, "long tier");
   assertEq(ttl.secondsFor("openai", "gpt-4o"), 1800);
   assertEq(ttl.secondsFor("z-ai", "glm-4.6"), 120);
-  assertEq(ttl.secondsFor("deepseek", "deepseek-chat"), 14400);
+  assertEq(ttl.secondsFor("deepseek", "deepseek-chat"), 1800);
+  assertEq(ttl.secondsFor("deepseek", "deepseek-chat", true), 1800, "long tier");
   assertEq(ttl.secondsFor("google", "gemini-2.5-flash"), 300);
   assertEq(ttl.secondsFor("moonshot", "kimi-k2"), 300);
 });
