@@ -27,81 +27,27 @@ Then run `/reload` in pi (or restart). No config file needed.
 
 ## How it works
 
-Cache-aware compaction has two layers, both on by default.
+Cache-aware compaction has two layers, both on by default; the full trigger
+and retention semantics are in `docs/design.md`.
 
-- **Compaction pressure.** The auto-compaction trigger is a
-  probabilistic *compaction pressure* that blends context degradation as
-  the window fills with the expected cost of continuing versus rewriting
-  the prefix (cache write amortization, coldness, TTL idle ramp), with a
-  warm-cache floor and fast compaction relaxing it. The expected-cost
-  horizon shrinks toward cache expiry: the current request always
-  counts, and each further request counts only while the cache is still
-  warm, so a prefix seconds from its TTL asks for less rewrite than a
-  freshly touched one. The read rates come from pi's own model catalog,
-  or — for OpenRouter-routed models — from a freshly pulled OpenRouter
-  snapshot (see below). It fires at three
-  idle points when the pressure draw passes: after a turn settles
-  (`agent_settled`), on a session-scoped timer when the provider cache
-  TTL expires while pi sits idle (`PI_CACHE_IDLE_TRIGGER`), and when a
-  cold prompt arrives before a turn (the `input` handler defers the
-  prompt until compaction finishes, `PI_CACHE_BEFORE_TURN`). A fourth,
-  mid-run point fires at a turn boundary (`turn_end`) only when the
-  pressure is saturated (probability 1) and the window is at least half
-  full, so a long agentic run compacts without waiting to settle; it
-  proposes a boundary compaction and asks pi to continue the run
-  (`PI_CACHE_MIDTERM`, using the fast summary; without fast compaction it
-  falls back to the aborting `ctx.compact()`).
-  With fast compaction on, the cache-window gate is relaxed because the
-  override is prefix-stable; with it off, compaction stays inside
-  cold/churned windows.
-- **Fast compaction override.** When fast compaction is on, pi-cache
-  answers `session_before_compact` for *every* compaction reason
-  (`manual`/`threshold`/`overflow`) with a byte-stable cache-aware
-  override that replaces pi's LLM summarizer entirely, and answers a
-  wanted `/tree` branch summary (`session_before_tree`) the same way.
-  Turn it off with the `/cache-settings` switch or
-  `PI_CACHE_FAST_COMPACT=off`; branch summaries have their own
-  `PI_CACHE_FAST_BRANCH_SUMMARY` switch, and pi's own normal summarizer
-  runs for whichever is off. pi-cache also bounds the verbatim window
-  pi's cut keeps: when a single recent entry dwarfs pi's keep-recent
-  budget (a many-hundred-KB tool result), pi's cut lands before it and
-  would keep it in every retry, so pi-cache advances the cut past the
-  oversized content (or keeps the summary alone) instead of overflowing
-  the provider context. Tune the retained-window multiple with
-  `PI_CACHE_FAST_KEEP_RATIO` (default 4).
-- **Dropped-span digest.** The fast stub alone discards the summarized
-  span's content; with the digest on (default), pi-cache appends a
-  deterministic, bounded extractive record after the stub — modified
-  and read files (from pi's own `fileOps`), one capped line per turn
-  (first user text, bash commands, tool names) — and folds the previous
-  compaction's digest blocks in, so the record accumulates across
-  repeated compactions instead of vanishing. The digest sits after the
-  stub text, so the shared prefix head is byte-identical either way.
-  Fast compaction is enforced for dropped spans of any size — no span
-  ever falls back to pi's slow LLM summarizer. After the digest (or
-  alone when it is empty) the summary carries a deterministic
-  transcript pointer naming the session file and the boundary entry id,
-  so dropped detail stays recallable on demand with a bounded search
-  (`grep -m 5 '<term>' <session-file>`) instead of a whole-file read.
-  Disable the digest with the `/cache-settings` switch or
-  `PI_CACHE_FAST_DIGEST=off`.
-- **Explicit compaction.** The model-callable `cache_compact` tool lets the
-  agent deliberately request a compaction — typically when the user asks
-  for a complete context switch — after reading a draw-free snapshot of the
-  cache state (global lifetime and session scopes, live pressure). The
-  request is deferred to the next settled boundary (`agent_settled`), so
-  the tool result is delivered and the live run is never aborted. It
-  bypasses the automatic policy (enable switch, warm floor, minimum tokens,
-  cooldown, and the probability draw) but still honors the in-flight/window
-  gate, and one request per run is accepted (duplicate calls coalesce).
-  Call `pre_cache` once first: it returns the pi-cache catalog and gates
-  `cache_compact`.
+- **Compaction pressure.** Auto-compaction fires on a probabilistic pressure
+  that blends context degradation with the expected cost of continuing
+  versus rewriting the prefix, checked at settle, at cache-TTL idle, before
+  a cold turn, and at a saturated turn boundary.
+- **Fast compaction override.** When on, pi-cache answers every compaction
+  reason, and a wanted `/tree` branch summary, with a byte-stable
+  cache-aware override instead of pi's LLM summarizer.
+- **Dropped-span digest.** The override appends a bounded extractive record
+  of the summarized span (changed and read files, one line per turn) that
+  folds earlier digests in, plus a transcript pointer for bounded recall.
+- **Explicit compaction.** `cache_compact` requests a compaction for the next
+  settled boundary; call `pre_cache` once first.
 
-The cache TTL that drives the idle trigger and the compaction-pressure
-ramp uses pi's `promptCache` tier when the model declares one, else a
-provider-aware profile for the model in use (Anthropic 5m/1h, OpenAI
-30m, DeepSeek 30m, Gemini 5m, Kimi 5m/1h, GLM ~2m), and only then
-`PI_CACHE_TTL_SECONDS` (default 300 s) for an unknown model.
+The cache TTL that drives the idle trigger and the pressure ramp uses pi's
+`promptCache` tier when the model declares one, else a provider-aware
+profile (Anthropic 5m/1h, OpenAI 30m, DeepSeek 30m, Gemini 5m, Kimi 5m/1h,
+GLM ~2m), and only then `PI_CACHE_TTL_SECONDS` (default 300 s) for an
+unknown model.
 
 **Live model parameters.** For OpenRouter-routed models, pi-cache pulls
 OpenRouter's public model list at session start and when the cached
