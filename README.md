@@ -1,14 +1,29 @@
 # pi-cache
 
-A pi coding-agent extension that maximizes LLM prompt-cache hit rate and
-cuts token cost. Public research + implementation repo.
+Adds cache-aware request transforms, compaction, and cache-usage
+telemetry to pi.
 
-## Status
+## Installation
 
-Design, research, and implementation are complete: house-structured OOP
-code, validated by the zero-dependency suite under `tests/` (see
-`tests/run.ts`), and installed in the pi runtime. Paired A/B validation
-is the remaining step.
+As a pi package (see `docs/packages.md`):
+
+    pi install git:github.com/ederevx/pi-cache@v0.14.2
+    pi -e /absolute/path/to/pi-cache      # try a local checkout for one run
+
+The repo declares its extension in `package.json` under the `pi` key
+(`pi.extensions` -> `./src/index.ts`) and lists the bundled pi core
+packages as `peerDependencies` and marks them optional in
+`peerDependenciesMeta`, so pi's `npm install` in a git clone does not
+vendor the host's bundled packages. There is no build step and no
+third-party runtime dependency; pi loads `src/*.ts` in place.
+
+As a flat extension copy:
+
+    bash scripts/install.sh
+
+Re-run to refresh owned copies in place (idempotent; the manifest at
+`~/.pi/agent/.pi-cache/manifest.json` records exactly what it owns).
+Then run `/reload` in pi (or restart). No config file needed.
 
 ## How it works
 
@@ -85,7 +100,7 @@ Cache-aware compaction has two layers, both on by default.
 The cache TTL that drives the idle trigger and the compaction-pressure
 ramp uses pi's `promptCache` tier when the model declares one, else a
 provider-aware profile for the model in use (Anthropic 5m/1h, OpenAI
-30m, DeepSeek 4h, Gemini 5m, Kimi 5m/1h, GLM ~2m), and only then
+30m, DeepSeek 30m, Gemini 5m, Kimi 5m/1h, GLM ~2m), and only then
 `PI_CACHE_TTL_SECONDS` (default 300 s) for an unknown model.
 
 **Live model parameters.** For OpenRouter-routed models, pi-cache pulls
@@ -145,34 +160,13 @@ window are folded into a baseline persisted inside the same file, so
 `/cache-stats` reports every request ever recorded (`global (all time)`)
 while the file stays bounded; the `session` scope remains the current
 session's retained window. A bounded pre-trim backup is captured before
-any shrinking rewrite (`PI_CACHE_LEDGER_BACKUPS`/`_TTL_DAYS`/`_MAX_MB`).
+any shrinking rewrite (`PI_CACHE_LEDGER_BACKUPS`, `PI_CACHE_LEDGER_BACKUP_TTL_DAYS`, and
+`PI_CACHE_LEDGER_BACKUP_MAX_MB`).
 Session stats are rebuilt from the ledger on session start so they
 survive reloads, and stale atomic-write temp files are swept at load.
 
 Live views: `/cache-stats` (global and session scopes, with live
 compaction pressure) and `/cache-settings`.
-
-## Installation
-
-As a pi package (see `docs/packages.md`):
-
-    pi install /absolute/path/to/pi-cache
-    pi -e /absolute/path/to/pi-cache      # try it for one run
-
-The repo declares its extension in `package.json` under the `pi` key
-(`pi.extensions` -> `./src/index.ts`) and lists the bundled pi core
-packages as `peerDependencies` and marks them optional in
-`peerDependenciesMeta`, so pi's `npm install` in a git clone does not
-vendor the host's bundled packages. There is no build step and no
-third-party runtime dependency; pi loads `src/*.ts` in place.
-
-As a flat extension copy:
-
-    bash scripts/install.sh
-
-Re-run to refresh owned copies in place (idempotent; the manifest at
-`~/.pi/agent/.pi-cache/manifest.json` records exactly what it owns).
-Then run `/reload` in pi (or restart). No config file needed.
 
 ## Uninstall
 
@@ -184,70 +178,9 @@ settings, and bounded backups are left in place;
 `bash scripts/uninstall.sh --purge` also removes them plus any stale
 temp files.
 
-## Design pillars
-
-1. **Telemetry first** — log per-request `usage.cacheRead` /
-   `usage.cacheWrite` and cost from `message_end`; cache economics
-   today are measured, not assumed (DeepSeek read pricing conflicts
-   across sources: native docs vs OpenRouter's table vs this machine's
-   catalog).
-2. **Stable prefix normalization** — byte-stable opening messages; split
-   the system block into stable (provider prompt + global rules) and
-   dynamic (cwd, date, run metadata) regions, mirroring opencode's
-   measured 0% -> 97.6% cross-repo hit fix.
-3. **Tool-schema hygiene** — dedup and removal of volatile fields (cwd,
-   absolute paths) from tool definitions.
-4. **Cache-aware compaction** — the trigger is an expected-cost
-   probabilistic pressure (coldness and prefix amortization drive it,
-   with a context-degradation onset as the occupancy guard); when fast
-   compaction is on, the compaction itself is a byte-stable O(1)
-   override at pi's own cut point, so the cached prefix head never
-   moves. Fast compaction replaces pi's summarizer for all reasons; with
-   it off, pi's own normal summarizer runs unchanged in cold/churned
-   windows.
-5. **Prefix continuance** — a fourth Anthropic cache_control marker
-   pinned on stable mid-history at a quantum position (bounds tail-churn
-   loss and the >20-block walk-back gap); an opt-in per-request rewrite
-   upgrades every marker to the 1h tier (`PI_CACHE_RETENTION_OVERRIDE`);
-   the OpenAI `prompt_cache_key` can be derived from the prefix head so
-   sibling sessions share a warm bucket (`PI_CACHE_SHARED_KEY`); and
-   pi's warming decision is kept warm when its own economics justify it
-   and a real turn exists (`PI_CACHE_FORCE_WARM`) — the warming schedule
-   follows the tier the per-request rewrite actually put on the wire,
-   idle fires defer past an in-flight refresh (margin plus round-trip
-   grace), and confirmed refreshes land in the ledger as `kind: "warm"`
-   telemetry rows.
-6. **Compaction pressure + fast override** — the trigger is
-   `CompactionPressure`, combining the expected-cost economics model
-   (`src/economics.ts`) with the context-degradation onset
-   (`src/context-degradation.ts`); the economics horizon decays with the
-   time since the last cache touch against the model's TTL
-   (`src/model-ttl.ts`), and OpenRouter-routed models price against a
-   freshly pulled OpenRouter snapshot (`src/model-params.ts`); fast
-   compaction overrides pi's
-   summarizer via `session_before_compact` for every reason and
-   `session_before_tree` for a wanted branch summary (each with its own
-   switch: `PI_CACHE_FAST_COMPACT` / `PI_CACHE_FAST_BRANCH_SUMMARY`);
-   the dropped-span digest (`PI_CACHE_FAST_DIGEST`, default on) appends
-   a bounded deterministic record after the stub and folds prior digest
-   blocks in across compactions.
-   `AutocompactController` accounts for every completed compaction (its
-   own trigger, pi's threshold/overflow, the override), and cooldowns
-   (seconds + turns) gate repetition; `PI_CACHE_FAST_COMPACT=off` (or
-   the `/cache-settings` switch) returns to pi's normal summarizer, and
-   `PI_CACHE_AUTO_COMPACT=off` disables the trigger entirely.
-
 ## Repo layout
 
-- `src/` — extension source (house layout: `index.ts` wiring +
-  per-responsibility modules: `ledger.ts`, `sink.ts`, `normalizer.ts`,
-  `compaction.ts`, `markers.ts`, `breakpoint-anchor.ts`, `retention.ts`,
-  `canonicalizer.ts`, `cache-key.ts`, `warming-policy.ts`,
-  `autocompact.ts`, `pressure.ts`, `economics.ts`,
-  `context-degradation.ts`, `model-params.ts`, `model-ttl.ts`,
-  `params-store.ts`, `fastcompact.ts`, `kept-window.ts`,
-  `feature-switch.ts`, `user-settings.ts`, `settings.ts`,
-  `settings-view.ts`, `stats.ts`, `temp-sweep.ts`, `constants.ts`)
+- `src/` — extension wiring and implementation modules
 - `tests/` — zero-dependency validation + OOP/format lint suite
   (`tests/run.ts`, `tests/oop_lint.py`, per-module tests, the installer
   round-trip, and the mock-pi wiring test)
@@ -256,24 +189,5 @@ temp files.
 - `docs/implementation-reference.md` — pi extension API reference
 - `docs/web-solutions.md` — surveyed third-party solutions
 
-## Key verified facts
-
-Details and citations in `docs/research/`.
-
-- Anthropic: explicit `cache_control`, 4 breakpoints, 5m/1h TTL, writes
-  1.25x/2x, **reads 0.1x**, hits exempt from rate limits.
-- OpenAI: implicit + explicit breakpoints, 1,024-token min, 30m TTL,
-  writes 1.25x / reads 0.1x, cached tokens count against TPM.
-- Gemini: implicit by default (2.5+), ~0.08x cached reads.
-- OpenRouter: passthrough + sticky routing keyed on the first
-  system/developer + first non-system message; `session_id` forces
-  stickiness; `cache_discount` in every response.
-- pi 0.86.0: `session_before_compact` may return `{ compaction }` and
-  that fully replaces the default summarizer for all reasons
-  (`manual`/`threshold`/`overflow`); there is no extension-declared user
-  setting, so pi-cache owns `~/.pi/agent/.pi-cache/settings.json`.
-- Agent bugs to avoid: volatile tool schemas (opencode #14743), per-turn
-  data in cache keys (aider #5556), naive compaction re-writing ~97k
-  tokens (claude-code #94197), metering over-counts (#94224).
-
-See `docs/research/README.md` for the sources index.
+Details and citations live under `docs/research/` (`docs/design.md` has the
+full design).
