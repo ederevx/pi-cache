@@ -106,8 +106,13 @@ compaction is on, makes the compaction itself prefix-stable:
    reasons into a `[0,1]` pressure:
    - *Context degradation* (`src/context-degradation.ts`): the occupancy
      at which long-context answer quality starts to fall (RULER/NoLiMa),
-     as a `start`/`full`/`gamma` onset (default 0.5/0.85/2). The true
-     onset is model- and task-dependent, so it is a tunable guard.
+     as a `start`/`full`/`gamma` onset (default 0.5/0.85/2) whose token
+     points are each capped at an absolute budget (`startTokens`/
+     `fullTokens`, default 100 000/200 000; <=0 disables the cap). Because
+     effective context does not grow with the advertised window, the cap
+     makes a no-cost 1M-window model compact around the frontier ~200K
+     class instead of at 500K-850K; windows <= 200K are unchanged. The
+     true onset is model- and task-dependent, so it stays a tunable guard.
    - *Expected cost* (`src/economics.ts`): continuing reads the prefix for
      an expected horizon `1/(1-continuation)` capped at `maxRequests`,
      while compacting pays one rewrite of the retained `keepFraction` plus
@@ -123,7 +128,9 @@ compaction is on, makes the compaction itself prefix-stable:
      per-million rates, or — for OpenRouter-routed models — from a
      freshly pulled OpenRouter snapshot (`src/model-params.ts`) with
      per-request override tiers selected by live token count; absent
-     rates leave economics at 0, so the degradation onset gates alone.
+     rates - or all-zero rates, as the no-cost `*-token-plan` / coding-plan
+     models declare - leave economics at 0, so an unlimited-tokens or
+     no-cost model is gated by the degradation onset alone.
    The two combine by inclusion-exclusion (`1-(1-d)(1-e)`), then a
    `start=0.1`/`full=0.6`/`gamma=2` ramp yields the Bernoulli probability;
    the draw uses an injected RNG. Because economics is flat in token
@@ -136,7 +143,8 @@ compaction is on, makes the compaction itself prefix-stable:
    while pi sits idle, and the `input` hook when a cold prompt arrives
    before a turn. A fourth, mid-run point fires at the `turn_end`
    boundary, but only when the pressure is saturated (probability 1) and
-   the window is at least half full, so a long agentic run can compact
+   the window is at least half full or past the degradation onset, so a
+   long agentic run can compact
    without waiting to settle (`PI_CACHE_MIDTERM`). It returns a boundary
    `compaction` draft (built by `src/midterm.ts` + `src/midterm-cut.ts`)
    plus `continue: true`, so pi applies the compaction and continues the

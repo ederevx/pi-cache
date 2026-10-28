@@ -269,6 +269,56 @@ test("autocompact: the midterm predicate consumes no RNG draw", () => {
   assertEq(draws, 0, "no RNG touched");
 });
 
+test("autocompact: a no-cost 1M-window model compacts on the capped onset", () => {
+  const costRates = () => ({ input: 0, cacheRead: 0, cacheWrite: 0 });
+  const pressure = new CompactionPressure({ random: () => 0 });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure });
+  c.noteTurn();
+  const below = c.decide(
+    { tokens: 90_000, contextWindow: 1_048_576, percent: 8.6 },
+    signals({ costRates }),
+  );
+  assertEq(below.shouldCompact, false);
+  assertEq(below.reason, "pressure below draw");
+  const past = c.decide(
+    { tokens: 210_000, contextWindow: 1_048_576, percent: 20 },
+    signals({ costRates }),
+  );
+  assertEq(past.shouldCompact, true);
+  assertEq(past.reason, "compaction pressure");
+  assertEq(past.probability, 1, "the capped onset saturates without cost rates");
+});
+
+test("autocompact: the midterm gate follows the capped onset on a large window", () => {
+  let draws = 0;
+  const costRates = () => ({ input: 0, cacheRead: 0, cacheWrite: 0 });
+  const pressure = new CompactionPressure({
+    random: () => {
+      draws++;
+      return 0.99;
+    },
+  });
+  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: true });
+  c.noteTurn();
+  assertEq(
+    c.midtermEligible(
+      { tokens: 210_000, contextWindow: 1_048_576, percent: 20 },
+      signals({ costRates }),
+    ),
+    true,
+    "past the onset though under half the window",
+  );
+  assertEq(
+    c.midtermEligible(
+      { tokens: 90_000, contextWindow: 1_048_576, percent: 8.6 },
+      signals({ costRates }),
+    ),
+    false,
+    "below the onset is ineligible",
+  );
+  assertEq(draws, 0, "the predicate consumes no draw");
+});
+
 test("autocompact: decide reads the freshest request, not just the last turn", () => {
   const c = new AutocompactController(opts);
   c.noteTurn();

@@ -110,6 +110,12 @@ export class CompactionPressure {
     return this.probabilityFor(this.compose(input).pressure);
   }
 
+  /** The live-token onset where degradation starts for a window, so the
+   *  midterm gate can follow the absolute cap rather than half a window. */
+  degradationOnset(contextWindow: number): number {
+    return this.opts.degradation.onset(contextWindow).start;
+  }
+
   /** Compose the two reasons into the combined pressure, without a draw. */
   private compose(input: PressureSample): {
     pressure: number;

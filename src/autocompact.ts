@@ -106,7 +106,8 @@ export interface AutocompactOptions {
    *  0 or negative disables the floor. */
   minTokens?: number;
   /** Allow the mid-run trigger when the pressure is saturated and the
-   *  window is at least half full (default off; wired from options). */
+   *  window is at least half full or past the degradation onset (default
+   *  off; wired from options). */
   midterm?: boolean;
   /** Probabilistic pressure model; absent = fixed percent threshold. */
   pressure?: CompactionPressure;
@@ -231,9 +232,10 @@ export class AutocompactController {
   /**
    * Mid-run eligibility: the in-run trigger may fire only when the
    * pressure is saturated (probability 1) and the window is at least half
-   * full. A pure predicate with no RNG draw, so the caller can gate the
-   * existing trigger without perturbing the probabilistic decision; the
-   * warm-cache floor and cooldown are still applied by the trigger path.
+   * full or past the degradation onset. A pure predicate with no RNG draw,
+   * so the caller can gate the existing trigger without perturbing the
+   * probabilistic decision; the warm-cache floor and cooldown are still
+   * applied by the trigger path.
    */
   midtermEligible(
     usageView: ContextUsageLike | undefined,
@@ -243,13 +245,21 @@ export class AutocompactController {
     const usage = this.liveUsage(signals);
     if (!usage) return false;
     const view = this.readContext(usageView);
-    if (!AutocompactController.atLeastPercent(view, AutocompactController.MIDTERM_MIN_CONTEXT_PERCENT)) {
-      return false;
-    }
     const { sample } = this.evaluate(view, usage, signals);
-    const probability = sample ? this.opts.pressure?.probability(sample) : undefined;
+    if (!sample || !this.pastMidtermOnset(view, sample)) return false;
+    const probability = this.opts.pressure?.probability(sample);
     if (probability === undefined || probability < 1) return false;
     return this.cooldownElapsed();
+  }
+
+  /** Half full, or past the degradation onset (an absolute token cap pulls
+   *  the onset below half of a large window). */
+  private pastMidtermOnset(view: AutocompactView, sample: PressureSample): boolean {
+    if (AutocompactController.atLeastPercent(view, AutocompactController.MIDTERM_MIN_CONTEXT_PERCENT)) {
+      return true;
+    }
+    const onset = this.opts.pressure?.degradationOnset(sample.contextWindow);
+    return typeof onset === "number" && sample.tokens >= onset;
   }
 
   /** Whether the sampled window has reached `percent` of its context window. */

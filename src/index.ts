@@ -148,6 +148,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       start: opts.pressureDegradeStart,
       full: opts.pressureDegradeFull,
       gamma: opts.pressureDegradeGamma,
+      startTokens: opts.pressureDegradeStartTokens,
+      fullTokens: opts.pressureDegradeFullTokens,
     }),
   });
   const fastcompact = new FastCompactionController({

@@ -67,6 +67,8 @@ const CLEAN = {
   PI_CACHE_PRESSURE_DEGRADE_START: undefined,
   PI_CACHE_PRESSURE_DEGRADE_FULL: undefined,
   PI_CACHE_PRESSURE_DEGRADE_GAMMA: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_START_TOKENS: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS: undefined,
   PI_CACHE_PRESSURE_COLD_FLOOR: undefined,
   PI_CACHE_TTL_SECONDS: undefined,
 };
@@ -112,6 +114,8 @@ test("constants: default options", () => {
     );
     assertEq(opts.pressureDegradeFull, 0.85);
     assertEq(opts.pressureDegradeGamma, 2);
+    assertEq(opts.pressureDegradeStartTokens, 100_000, "onset start token cap default");
+    assertEq(opts.pressureDegradeFullTokens, 200_000, "onset full token cap default");
     assert(opts.pressureContinuation > 0 && opts.pressureContinuation < 1, "continuation default");
     assert(opts.pressureMaxRequests >= 1, "horizon cap default");
     assert(opts.pressureKeepFraction > 0 && opts.pressureKeepFraction < 1, "keep fraction default");
@@ -239,6 +243,7 @@ test("constants: numeric parsing falls back on garbage", () => {
       PI_CACHE_COOLDOWN_SECONDS: "12.5",
       PI_CACHE_TTL_SECONDS: "abc",
       PI_CACHE_PRESSURE_DEGRADE_FULL: "nope",
+      PI_CACHE_PRESSURE_DEGRADE_START_TOKENS: "nope",
       PI_CACHE_SETTINGS: settingsPath("numeric"),
     },
     () => {
@@ -246,6 +251,7 @@ test("constants: numeric parsing falls back on garbage", () => {
       assertEq(opts.cooldownSeconds, 12.5);
       assertEq(opts.cacheTtlSeconds, 300, "TTL fallback");
       assertEq(opts.pressureDegradeFull, 0.85, "pressure fallback");
+      assertEq(opts.pressureDegradeStartTokens, 100_000, "token cap fallback");
     },
   );
 });
@@ -262,6 +268,8 @@ test("constants: pressure env overrides resolve", () => {
       PI_CACHE_PRESSURE_DEGRADE_START: "0.3",
       PI_CACHE_PRESSURE_DEGRADE_FULL: "0.7",
       PI_CACHE_PRESSURE_DEGRADE_GAMMA: "1.5",
+      PI_CACHE_PRESSURE_DEGRADE_START_TOKENS: "64000",
+      PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS: "0",
       PI_CACHE_SETTINGS: settingsPath("pressure"),
     },
     () => {
@@ -274,6 +282,8 @@ test("constants: pressure env overrides resolve", () => {
       assertEq(opts.pressureDegradeStart, 0.3);
       assertEq(opts.pressureDegradeFull, 0.7);
       assertEq(opts.pressureDegradeGamma, 1.5);
+      assertEq(opts.pressureDegradeStartTokens, 64000);
+      assertEq(opts.pressureDegradeFullTokens, 0, "an explicit zero cap survives");
     },
   );
 });

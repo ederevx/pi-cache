@@ -138,6 +138,28 @@ test("pressure: preview matches the sampled values without drawing", () => {
   assertEq(draws, 1, "only the explicit sample draws");
 });
 
+test("pressure: a no-cost model pressures on the capped onset alone", () => {
+  const p = pressure();
+  const zeroRates = { input: 0, cacheRead: 0, cacheWrite: 0 };
+  const at = (tokens: number) =>
+    p.preview({ tokens, contextWindow: 1_000_000, coldness: 1, rates: zeroRates });
+  assertEq(at(50_000).economics, 0, "no dollars to save");
+  assertEq(at(50_000).pressure, 0, "below the capped onset");
+  assertEq(at(50_000).probability, 0);
+  assert(Math.abs(at(150_000).degradation - 0.25) < 1e-9, "a quarter at 150K");
+  assert(Math.abs(at(150_000).probability - 0.09) < 1e-9, "the ramp past the deadband");
+  assertEq(at(200_000).probability, 1, "saturates at the capped full");
+  // Unknown rates leave the same quality-only pressure.
+  const unknown = p.preview({ tokens: 150_000, contextWindow: 1_000_000, coldness: 1 });
+  assertEq(unknown.economics, 0);
+  assert(Math.abs(unknown.probability - at(150_000).probability) < 1e-9, "same without rates");
+});
+
+test("pressure: exposes the live degradation onset for a window", () => {
+  assertEq(new CompactionPressure().degradationOnset(1_000_000), 100_000);
+  assertEq(new CompactionPressure().degradationOnset(128_000), 64_000);
+});
+
 test("pressure: either reason alone can saturate the ramp", () => {
   // Context degradation saturates by itself without rates.
   const degradationOnly = pressure().sample({ tokens: 200_000, contextWindow: 200_000 });
@@ -147,7 +169,9 @@ test("pressure: either reason alone can saturate the ramp", () => {
   const economics = new CacheEconomics({ continuationProbability: 0.6 });
   const economicsOnly = new CompactionPressure({
     economics,
-    degradation: new ContextDegradation({ start: 10, full: 11 }),
+    // Fractions above 1 no longer disable the onset once it is token-capped,
+    // so the caps are zeroed to give back the raw fraction.
+    degradation: new ContextDegradation({ start: 10, full: 11, startTokens: 0, fullTokens: 0 }),
     random: () => 0,
   }).sample({ tokens: 120_000, contextWindow: 200_000, coldness: 1, rates });
   assert(economicsOnly.degradation === 0, "degradation disabled");

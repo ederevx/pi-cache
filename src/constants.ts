@@ -92,6 +92,10 @@ export interface PiCacheOptions {
   pressureDegradeStart: number;
   pressureDegradeFull: number;
   pressureDegradeGamma: number;
+  /** Absolute token cap on the degradation onset start (<=0 disables). */
+  pressureDegradeStartTokens: number;
+  /** Absolute token cap on degradation saturation (<=0 disables). */
+  pressureDegradeFullTokens: number;
 }
 
 export class OptionsLoader {
@@ -156,6 +160,10 @@ export class OptionsLoader {
       pressureDegradeStart: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_START", 0.5),
       pressureDegradeFull: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_FULL", 0.85),
       pressureDegradeGamma: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_GAMMA", 2),
+      // The onset fractions are capped at absolute token budgets, because
+      // effective context does not grow with the advertised window.
+      pressureDegradeStartTokens: this.envInt("PI_CACHE_PRESSURE_DEGRADE_START_TOKENS", 100_000),
+      pressureDegradeFullTokens: this.envInt("PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS", 200_000),
     };
   }
 
