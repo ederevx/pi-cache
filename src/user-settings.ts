@@ -35,7 +35,8 @@ export interface UserSettings {
   advisory?: boolean;
   /** Cache-aware automatic compaction. */
   autoCompact?: boolean;
-  /** Allow a mid-run compaction at saturated pressure and half-full window. */
+  /** Allow a mid-run compaction at saturated pressure and a half-full window
+   *  or past the degradation onset. */
   midterm?: boolean;
   /** Fast cache-aware compaction override (the /cache-settings switch). */
   fastCompaction?: boolean;

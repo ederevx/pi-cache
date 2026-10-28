@@ -382,7 +382,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       autocompact.noteTurn();
       // Midterm trigger: a run still in progress may compact at a turn
       // boundary when the pressure is saturated and the window is at least
-      // half full. With fast compaction it proposes a boundary draft, so pi
+      // half full or past the degradation onset. With fast compaction it
+      // proposes a boundary draft, so pi
       // applies the compaction and continues the run instead of aborting it;
       // without fast compaction it keeps the old aborting request.
       const usage = ctx.getContextUsage?.();

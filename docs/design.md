@@ -217,7 +217,8 @@ Feasibility confirmed against the pi 0.86 extension API:
 (`void`) but its `onComplete`/`onError` callbacks let an `input` handler
 await it; it aborts a live run, so it is only ever called from an idle
 point. The strictly gated `turn_end` midterm point (saturated pressure
-and a half-full window) instead returns a boundary `compaction` draft
+and a half-full window or past the degradation onset) instead returns a
+boundary `compaction` draft
 with `continue: true`, which pi applies and then resumes the run; only
 the no-fast-compaction fallback still calls `ctx.compact()` there.
 Compaction summaries are cache-transparent

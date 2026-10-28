@@ -57,8 +57,8 @@ export interface PiCacheOptions {
   idleTrigger: boolean;
   /** Defer a cold prompt to compact before the turn starts (default on). */
   beforeTurn: boolean;
-  /** Allow a mid-run compaction when pressure is saturated and the
-   *  window is at least half full (default on). */
+  /** Allow a mid-run compaction when pressure is saturated and the window
+   *  is at least half full or past the degradation onset (default on). */
   midterm: boolean;
   /** Minimum seconds between automatic compactions. */
   cooldownSeconds: number;
