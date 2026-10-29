@@ -222,6 +222,16 @@ test("digest: further errors are counted, not inlined", () => {
   assert(!body.includes("second failed"), "later error absent");
 });
 
+test("digest: empty flagged failures count as further errors", () => {
+  const d = new SpanDigest();
+  const body = d.build(
+    [user("go"), result("bash", "first failed", true), result("read", "", true)],
+    [],
+    undefined,
+  );
+  assert(body.includes("E: first failed (+1)"), "all failures counted");
+});
+
 test("digest: assistant and command caps are enforced", () => {
   const d = new SpanDigest({ maxAssistantChars: 10, maxCommandChars: 6 });
   const body = d.build([user("q"), bashCall("abcdefghij"), textAssistant("0123456789abc")], [], undefined);
