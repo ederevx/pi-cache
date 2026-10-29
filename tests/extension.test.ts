@@ -546,19 +546,27 @@ test("extension: settings custom-view failure falls back to the listing", async 
     const pi = new MockPi();
     factory(pi as never);
     let printed = false;
+    const notices: Array<{ message: string; kind?: string }> = [];
     const original = console.error;
     console.error = () => {
       printed = true;
     };
     try {
       await pi.commands.get("cache-settings")!.handler([], {
-        ui: { custom: () => Promise.reject(new Error("no view")) },
+        ui: {
+          custom: () => Promise.reject(new Error("no view")),
+          notify: (message: string, kind?: string) => notices.push({ message, kind }),
+        },
         mode: "tui",
       } as never);
     } finally {
       console.error = original;
     }
-    assertEq(printed, true, "a throwing view falls back to the listing");
+    assertEq(notices.length, 1, "a throwing view reports instead of only printing");
+    assertEq(notices[0].kind, "error");
+    assert(notices[0].message.includes("no view"), "the reason is carried");
+    assert(notices[0].message.includes("Telemetry"), "the listing still answers");
+    assertEq(printed, false, "the interactive path does not also write to stderr");
   } finally {
     unsetEnv(PI_CACHE_KEYS);
   }
