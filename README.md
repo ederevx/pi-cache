@@ -45,7 +45,7 @@ and retention semantics are in `docs/design.md`.
 
 The cache TTL that drives the idle trigger and the pressure ramp uses pi's
 `promptCache` tier when the model declares one, else a provider-aware
-profile (Anthropic 5m/1h, [OI] 30m, DeepSeek 30m, Gemini 5m, Kimi 5m/1h,
+profile (Anthropic 5m/1h, OpenAI 30m, DeepSeek 30m, Gemini 5m, Kimi 5m/1h,
 GLM ~2m), and only then `PI_CACHE_TTL_SECONDS` (default 300 s) for an
 unknown model. The profile table is configuration, not code:
 `PI_CACHE_TTL_PROFILES` takes `match[,match...]=short[,long]` entries

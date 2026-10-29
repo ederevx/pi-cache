@@ -220,7 +220,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       retentionLongOf: () => retention.effectiveLong(),
       costRatesOf: (ctx, tokens) =>
         modelParams.appliesTo(ctx?.model?.baseUrl)
-          ? modelParams.ratesFor(ctx.model.id ?? "", tokens)
+          ? modelParams.ratesFor(ctx?.model?.id ?? "", tokens)
           : undefined,
       fallbackTtlSecondsOf: (ctx) =>
         modelTtl.secondsFor(ctx?.model?.provider, ctx?.model?.id, retention.effectiveLong()),
