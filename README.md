@@ -7,7 +7,7 @@ telemetry to pi.
 
 As a pi package (see `docs/packages.md`):
 
-    pi install git:github.com/ederevx/pi-cache@v0.16.0
+    pi install git:github.com/ederevx/pi-cache@v0.16.1
     pi -e /absolute/path/to/pi-cache      # try a local checkout for one run
 
 The repo declares its extension in `package.json` under the `pi` key

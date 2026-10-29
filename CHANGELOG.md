@@ -3,6 +3,17 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.16.1] - 2026-10-29
+
+### Fixed
+
+- A `/cache-settings` dock that failed to open no longer answers like a session
+  with no TUI: the failure reports its reason above the listing, and a headless
+  run keeps the stderr listing.
+- A settings row whose submenu cannot be built is reported instead of thrown,
+  so the exception no longer escapes into pi's input loop and ends the dock on
+  the first keypress.
+
 ## [0.16.0] - 2026-10-29
 
 ### Changed
