@@ -13,7 +13,7 @@
  * discounted by the time since the cache was last touched against the
  * model's TTL, so a near-expiry prefix is compared over fewer warm
  * requests. Rates and TTL come from the model in use — pi's catalog, or a
- * freshly pulled OpenRouter snapshot for OpenRouter-routed models. The two
+ * freshly pulled model-list snapshot for models that endpoint prices. The two
  * reasons are combined by inclusion-exclusion (either suffices). The draw
  * uses an injected RNG so callers stay deterministic in tests.
  */

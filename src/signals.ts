@@ -24,6 +24,8 @@ import type { AutocompactSignal } from "./autocompact.ts";
 export interface ModelView {
   id?: string;
   provider?: string;
+  /** The endpoint serving the model; decides which catalog prices it. */
+  baseUrl?: string;
   cost?: { input?: number; cacheRead?: number; cacheWrite?: number };
   promptCache?: { short?: number; long?: number };
 }
@@ -45,8 +47,8 @@ export interface SessionSignalsOptions {
    *  the old static fallback, so callers without a resolver are unchanged. */
   fallbackTtlSecondsOf?: (ctx: SessionContextView | undefined) => number | undefined;
   /** Optional live model-parameter source consulted before pi's own
-   *  `ctx.model.cost` (a freshly pulled OpenRouter snapshot); returning
-   *  undefined defers to pi's rates, so other providers are unchanged. The
+   *  `ctx.model.cost` (a freshly pulled model-list snapshot); returning
+   *  undefined defers to pi's rates, so other endpoints are unchanged. The
    *  live token count selects a request-wide pricing tier when one exists. */
   costRatesOf?: (
     ctx: SessionContextView | undefined,
@@ -114,7 +116,7 @@ export class SessionSignals {
 
   /**
    * Model cache cost rates (per million tokens). The injected live source
-   * (a fresh OpenRouter snapshot) wins when it has the model; otherwise
+   * (a fresh model-list snapshot) wins when it has the model; otherwise
    * pi's own declared rates are used, and undefined when neither does.
    */
   costRates(ctx: SessionContextView | undefined, tokens?: number): CostRates | undefined {

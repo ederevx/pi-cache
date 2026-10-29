@@ -4,48 +4,34 @@
  * One responsibility: map the model in use onto its provider cache lifetime
  * so the coldness ramp, the idle timer, and the ledger's warm flag measure
  * against the real TTL instead of one static default. pi's own
- * `model.promptCache` tier remains the authority when it is declared
- * (Anthropic is the only pi catalog entry that populates it); this resolver
- * is the fallback the signals consult next. Owns only a static profile
- * table; no mutable state.
+ * `model.promptCache` tier remains the authority when it is declared; the
+ * bundled catalog populates it for no provider, so a user `models.json` or a
+ * `modelOverrides` entry is what usually declares it. This resolver is the
+ * fallback the signals consult next. Owns no state: the profile table is
+ * supplied by the caller (see constants.ts), because a provider's cache
+ * lifetime is a provider fact, not a code constant.
  */
 
-/** One static profile: case-insensitive match tokens plus its short and
- *  long retention lifetimes in seconds. */
-interface TtlProfile {
+/** One profile: case-insensitive match tokens plus its short and long
+ *  retention lifetimes in seconds. */
+export interface TtlProfile {
   matches: readonly string[];
   short: number;
   long: number;
 }
 
 export class ModelTtl {
-  /**
-   * Ordered profiles; the first matching substring of
-   * `${provider} ${modelId}` wins. Values are the documented provider
-   * lifetimes (see docs/research/internet-prompt-caching-2026-09-18.md):
-   * Anthropic/OpenAI/Kimi/Gemini are published; DeepSeek and GLM publish
-   * none, so their values are empirical. DeepSeek sits at 30 min because
-   * OpenRouter sticky routing expires after 10 min of inactivity and a
-   * host measurement of 19,957 inter-request gaps put hit share at 0.92
-   * (5-10 min), 0.55 (30-60 min), and 0.23 (1-4 h).
-   */
-  private static readonly PROFILES: readonly TtlProfile[] = [
-    { matches: ["anthropic"], short: 300, long: 3600 },
-    { matches: ["openai", "azure"], short: 1800, long: 1800 },
-    { matches: ["moonshot", "kimi", "qwen", "alibaba"], short: 300, long: 3600 },
-    { matches: ["deepseek"], short: 1800, long: 1800 },
-    { matches: ["z-ai", "glm"], short: 120, long: 120 },
-    { matches: ["google", "gemini"], short: 300, long: 3600 },
-  ];
+  constructor(private readonly profiles: readonly TtlProfile[]) {}
 
   /**
    * The effective short/long cache lifetime (s) for a provider + model, or
    * undefined when no profile matches so the caller's static fallback
-   * (PI_CACHE_TTL_SECONDS) still owns unknown models.
+   * (PI_CACHE_TTL_SECONDS) still owns unknown models. Ordered profiles; the
+   * first matching substring of `${provider} ${modelId}` wins.
    */
   secondsFor(provider: string | undefined, modelId: string | undefined, long = false): number | undefined {
     const key = `${provider ?? ""} ${modelId ?? ""}`.toLowerCase();
-    for (const profile of ModelTtl.PROFILES) {
+    for (const profile of this.profiles) {
       if (profile.matches.some((token) => key.includes(token))) {
         return long ? profile.long : profile.short;
       }

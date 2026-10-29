@@ -1,9 +1,9 @@
 /**
- * pi-cache — persisted OpenRouter model-parameter snapshot.
+ * pi-cache — persisted model-parameter snapshot.
  *
  * One responsibility: own the on-disk last-good model-parameter document —
  * validate it on load and land it atomically on save, so a model-parameter
- * pull that never reaches OpenRouter still has the previous values to fall
+ * pull that never reaches its endpoint still has the previous values to fall
  * back to across a restart. Never throws into a caller; a missing, corrupt,
  * or partial document degrades to `undefined`/a dropped entry.
  */
@@ -34,15 +34,19 @@ export interface PersistedModel {
 export interface PersistedSnapshot {
   schemaVersion: number;
   fetchedAt: number;
+  /** Endpoint the snapshot was pulled from; absent in legacy documents. */
+  sourceUrl?: string;
   models: Record<string, PersistedModel>;
 }
 
 export class ParamsStore {
   private static readonly SCHEMA_VERSION = 1;
   private static readonly MODE = 0o600;
-  private static readonly MAX_MODELS = 5000;
 
-  constructor(private readonly path: string) {}
+  constructor(
+    private readonly path: string,
+    private readonly maxModels: number,
+  ) {}
 
   /** The last-good snapshot, or undefined when absent or unusable. */
   load(): PersistedSnapshot | undefined {
@@ -69,14 +73,19 @@ export class ParamsStore {
     const models: Record<string, PersistedModel> = {};
     let count = 0;
     for (const [id, raw] of Object.entries(parsed.models)) {
-      if (count >= ParamsStore.MAX_MODELS) break;
+      if (count >= this.maxModels) break;
       const model = this.validateModel(raw);
       if (model) {
         models[id] = model;
         count++;
       }
     }
-    return { schemaVersion: ParamsStore.SCHEMA_VERSION, fetchedAt: parsed.fetchedAt, models };
+    return {
+      schemaVersion: ParamsStore.SCHEMA_VERSION,
+      fetchedAt: parsed.fetchedAt,
+      ...(typeof parsed.sourceUrl === "string" ? { sourceUrl: parsed.sourceUrl } : {}),
+      models,
+    };
   }
 
   /** One model entry: a valid base plus any valid override tiers. */

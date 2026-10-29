@@ -197,15 +197,19 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // Fresh OpenRouter model parameters: a live pull plus last-good disk
-  // fallback, so the economics read rates follow the model in use rather
-  // than pi's possibly-stale catalog entry. Non-OpenRouter providers defer
-  // to pi's own rates. The provider TTL resolver is the fallback the
-  // signals consult when pi declares no `promptCache` tier.
+  // Fresh model parameters: a live pull plus last-good disk fallback, so the
+  // economics read rates follow the model in use rather than pi's possibly
+  // stale catalog entry. Models served from another origin defer to pi's own
+  // rates. The provider TTL resolver is the fallback the signals consult when
+  // pi declares no `promptCache` tier.
   const modelParams = new OpenRouterModelParams({
-    store: new ParamsStore(opts.modelParamsPath),
+    store: new ParamsStore(opts.modelParamsPath, opts.modelParamsMaxModels),
+    url: opts.modelParamsUrl,
+    maxAgeMs: opts.modelParamsMaxAgeMs,
+    retryMs: opts.modelParamsRetryMs,
+    timeoutMs: opts.modelParamsTimeoutMs,
   });
-  const modelTtl = new ModelTtl();
+  const modelTtl = new ModelTtl(opts.cacheTtlProfiles);
 
   const signals = new SessionSignals(
     {
@@ -215,7 +219,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       // so TTL-tier decisions follow the wire.
       retentionLongOf: () => retention.effectiveLong(),
       costRatesOf: (ctx, tokens) =>
-        ctx?.model?.provider === "openrouter"
+        modelParams.appliesTo(ctx?.model?.baseUrl)
           ? modelParams.ratesFor(ctx.model.id ?? "", tokens)
           : undefined,
       fallbackTtlSecondsOf: (ctx) =>
@@ -310,10 +314,11 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       missClassifier.useSession(signals.sessionIdOf(ctx));
       cacheCompact.reset();
       // Always attempt a fresh pull of the live model parameters; the
-      // background refresh leaves last-good in place when OpenRouter is
-      // unreachable. Only OpenRouter-routed models have fetched rates.
+      // background refresh leaves last-good in place when the endpoint is
+      // unreachable. Only models the configured list prices have fetched
+      // rates.
       const model = (ctx as SessionContextView | undefined)?.model;
-      if (model?.provider === "openrouter") void modelParams.refresh();
+      if (modelParams.appliesTo(model?.baseUrl)) void modelParams.refresh();
       idleTrigger.arm(ctx);
     } catch {
       /* telemetry only */
