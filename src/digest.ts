@@ -54,8 +54,14 @@ const DIGEST_END = "</pi-cache-digest>";
 /** Tool names rendered per turn before collapsing the rest into a count. */
 const MAX_TOOL_NAMES = 8;
 
-/** Field separator inside a turn line. */
+/** Fixed field grammar of the dropped-span digest. */
 const SEP = " | ";
+const USER_LABEL = "U:";
+const ASSISTANT_LABEL = "A:";
+const COMMAND_LABEL = "$:";
+const ERROR_LABEL = "E:";
+const TOOLS_LABEL = "tools:";
+const COMMAND_JOINER = "; ";
 
 /**
  * A tool result is an error when pi flags it, or when a bash result's
@@ -87,6 +93,7 @@ export class SpanDigest {
   private readonly maxRegionChars: number;
 
   constructor(opts: SpanDigestOptions = {}) {
+    // The per-field budgets the digest is specified against.
     this.maxTurns = opts.maxTurns ?? 40;
     this.maxSnippetChars = opts.maxSnippetChars ?? 240;
     this.maxAssistantChars = opts.maxAssistantChars ?? 160;
@@ -244,17 +251,17 @@ export class SpanDigest {
       turn.errorText.length === 0 &&
       turn.tools.length === 0;
     if (empty) return "";
-    const fields = [`U: ${turn.userText.length > 0 ? turn.userText : "(no text)"}`];
-    if (turn.assistantText.length > 0) fields.push(`A: ${turn.assistantText}`);
-    if (turn.commands.length > 0) fields.push(`$: ${this.commandField(turn.commands)}`);
+    const fields = [`${USER_LABEL} ${turn.userText.length > 0 ? turn.userText : "(no text)"}`];
+    if (turn.assistantText.length > 0) fields.push(`${ASSISTANT_LABEL} ${turn.assistantText}`);
+    if (turn.commands.length > 0) fields.push(`${COMMAND_LABEL} ${this.commandField(turn.commands)}`);
     if (turn.errorText.length > 0) {
       const extra = turn.errors > 1 ? ` (+${turn.errors - 1})` : "";
-      fields.push(`E: ${turn.errorText}${extra}`);
+      fields.push(`${ERROR_LABEL} ${turn.errorText}${extra}`);
     }
     if (turn.tools.length > 0) {
       const names = turn.tools.slice(0, MAX_TOOL_NAMES).join(",");
       const more = turn.tools.length > MAX_TOOL_NAMES ? `+${turn.tools.length - MAX_TOOL_NAMES}` : "";
-      fields.push(`tools: ${names}${more}`);
+      fields.push(`${TOOLS_LABEL} ${names}${more}`);
     }
     return `- ${tag}${fields.join(SEP)}`;
   }
@@ -263,7 +270,7 @@ export class SpanDigest {
   private commandField(commands: readonly string[]): string {
     const shown = commands.slice(0, this.maxCommandsPerTurn);
     const extra = commands.length - shown.length;
-    const head = shown.join("; ");
+    const head = shown.join(COMMAND_JOINER);
     return extra > 0 ? `${head} (+${extra})` : head;
   }
 
@@ -301,12 +308,11 @@ export class SpanDigest {
     turn: TurnState,
   ): void {
     const flagged = m.isError === true;
+    if (!flagged && m.toolName !== "bash") return;
     const text = this.resultText(m.content);
-    // Only bash results are scanned by text: source code read by other tools is full of "error".
-    if (!flagged && !(m.toolName === "bash" && ERROR_RE.test(text))) return;
-    const excerpt = this.snippet(this.errorLine(text, flagged), this.maxErrorChars);
-    if (excerpt.length === 0) return;
+    if (!flagged && !ERROR_RE.test(text)) return;
     turn.errors += 1;
+    const excerpt = this.snippet(this.errorLine(text, flagged), this.maxErrorChars);
     if (turn.errorText.length === 0) turn.errorText = excerpt;
   }
 
