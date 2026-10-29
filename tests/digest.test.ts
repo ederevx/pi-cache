@@ -118,3 +118,92 @@ test("digest: split-turn prefix lines are tagged", () => {
   assert(body.includes("- split U: prefix question"), "prefix line tagged");
   assert(body.includes("- split !: ls"), "prefix bash tagged");
 });
+
+const assistantWith = (content: unknown[]): unknown => ({ role: "assistant", content, timestamp: 0 });
+const text = (value: string) => ({ type: "text", text: value });
+const bashCall = (command: string, id = "c" + command.length) => ({
+  type: "toolCall",
+  id,
+  name: "bash",
+  arguments: { command },
+});
+const result = (toolName: string, body: string, isError = false): unknown => ({
+  role: "toolResult",
+  toolCallId: "t",
+  toolName,
+  content: [text(body)],
+  isError,
+  timestamp: 0,
+});
+
+test("digest: records the turn's last assistant text and agent bash commands", () => {
+  const d = new SpanDigest();
+  const body = d.build(
+    [
+      user("fix the build"),
+      assistantWith([text("Let me look first."), bashCall("npm test")]),
+      assistantWith([text("The fix is in src/x.ts because the cache key moved.")]),
+    ],
+    [],
+    undefined,
+  );
+  assert(body.includes("A: The fix is in src/x.ts"), "last assistant text recorded");
+  assert(!body.includes("Let me look first"), "earlier assistant text superseded");
+  assert(body.includes("$: npm test"), "agent bash command recorded");
+});
+
+test("digest: agent commands dedupe and count the extras", () => {
+  const d = new SpanDigest({ maxCommandsPerTurn: 2 });
+  const body = d.build(
+    [user("run them"), assistantWith([bashCall("ls"), bashCall("ls"), bashCall("pwd"), bashCall("id")])],
+    [],
+    undefined,
+  );
+  assert(body.includes("$: ls; pwd (+1)"), "two shown, one extra, duplicate dropped");
+});
+
+test("digest: a failing bash result records its matching error line", () => {
+  const d = new SpanDigest();
+  const body = d.build(
+    [user("check"), assistantWith([bashCall("ls /nope")]), result("bash", "some output\nls: cannot access /nope: No such file\nmore")],
+    [],
+    undefined,
+  );
+  assert(body.includes("E: ls: cannot access /nope"), "matching line, not the first line");
+  assert(!body.includes("E: some output"), "non-error line not used");
+});
+
+test("digest: isError without a match falls back to the first non-empty line", () => {
+  const d = new SpanDigest();
+  const body = d.build([user("go"), result("write", "\n\nblocked by policy\n", true)], [], undefined);
+  assert(body.includes("E: blocked by policy"), "fallback line");
+});
+
+test("digest: a read result mentioning error produces no E field", () => {
+  const d = new SpanDigest();
+  const body = d.build([user("go"), result("read", "const error = new Error('x')")], [], undefined);
+  assert(!body.includes("E:"), "non-bash result is never scanned");
+});
+
+test("digest: empty fields are omitted and U is always present", () => {
+  const d = new SpanDigest();
+  const body = d.build([assistantWith([text("done")])], [], undefined);
+  assert(body.includes("- U: (no text) | A: done"), `line shape: ${body}`);
+  assert(!body.includes("$:") && !body.includes("E:") && !body.includes("tools:"), "empties omitted");
+});
+
+test("digest: a surrogate pair is never split at the cut", () => {
+  const d = new SpanDigest({ maxAssistantChars: 4 });
+  const body = d.build([assistantWith([text("abc\u{1F600}def")])], [], undefined);
+  assert(body.includes("A: abc…"), `cut before the pair: ${body}`);
+});
+
+test("digest: enriched turns stay byte-stable", () => {
+  const d = new SpanDigest();
+  const messages = [
+    user("q"),
+    assistantWith([text("because reasons"), bashCall("make")]),
+    result("bash", "make: *** failed", true),
+  ];
+  assertEq(d.build(messages, [], undefined), d.build(messages, [], undefined));
+});
