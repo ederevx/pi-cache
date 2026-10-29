@@ -14,14 +14,17 @@ import type { SettingRow, SettingsChange, ViewTheme } from "./settings.ts";
 
 export class CacheSettingsView extends Container {
   private readonly list: SettingsList;
+  private readonly onFailure: (message: string) => void;
 
   constructor(
     rows: readonly SettingRow[],
     theme: ViewTheme,
     onChange: SettingsChange,
     onCancel: () => void,
+    onFailure: (message: string) => void = () => {},
   ) {
     super();
+    this.onFailure = onFailure;
     const border = (text: string): string => theme.fg("border", text);
     this.list = new SettingsList(
       rows.map((row) => CacheSettingsView.toItem(row)),
@@ -38,7 +41,11 @@ export class CacheSettingsView extends Container {
 
   /** Forward focus input to the list; the Container base has none. */
   handleInput(data: string): void {
-    this.list.handleInput(data);
+    try {
+      this.list.handleInput(data);
+    } catch (err) {
+      this.onFailure(err instanceof Error ? err.message : String(err));
+    }
   }
 
   /** Move the selection to a row id (programmatic navigation). */
