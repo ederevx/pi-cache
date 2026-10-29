@@ -1120,3 +1120,49 @@ test("extension: /cache-settings restore clears the stored overrides", async () 
     unsetEnv(PI_CACHE_KEYS);
   }
 });
+
+test("extension: the pricing pull follows the model's endpoint, not a provider name", async () => {
+  const root = join(scratchDir(), "params-gate");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+    PI_CACHE_MODEL_PARAMS: join(root, "model-params.json"),
+    PI_CACHE_MODEL_PARAMS_URL: "https://pricing.example.com/models",
+  });
+  const fetched: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    fetched.push(url);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [{ id: "m1", pricing: { prompt: "0.000001" } }] }),
+    };
+  }) as typeof fetch;
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const mock = new MockPi();
+    factory(mock as never);
+
+    // A model served from another origin is not priced from this catalog.
+    await mock.emit(
+      "session_start",
+      {},
+      { model: { provider: "pricing", id: "m1", baseUrl: "https://api.other.example.com/v1" } },
+    );
+    assertEq(fetched.length, 0, "an unrelated endpoint is never pulled");
+
+    // The same provider name on the priced origin is.
+    await mock.emit(
+      "session_start",
+      {},
+      { model: { provider: "any", id: "m1", baseUrl: "https://pricing.example.com/v1" } },
+    );
+    assertEq(fetched.length, 1, "the priced origin is pulled");
+    assertEq(fetched[0], "https://pricing.example.com/models", "the configured endpoint");
+  } finally {
+    globalThis.fetch = originalFetch;
+    unsetEnv([...PI_CACHE_KEYS, "PI_CACHE_MODEL_PARAMS", "PI_CACHE_MODEL_PARAMS_URL"]);
+  }
+});

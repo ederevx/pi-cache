@@ -12,12 +12,15 @@
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { UserSettingsStore, type UserSettings } from "./user-settings.ts";
+import type { TtlProfile } from "./model-ttl.ts";
 
 /** Runtime data directory for pi-cache's ledger, backups, and settings. */
 const LEDGER_DIR_NAME = ".pi-cache";
 const LEDGER_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "ledger.jsonl");
 const SETTINGS_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "settings.json");
 const BACKUP_DEFAULT = join(getAgentDir(), LEDGER_DIR_NAME, "backups");
+/** Default model-list endpoint (OpenRouter publishes its pricing there). */
+const DEFAULT_MODEL_PARAMS_URL = "https://openrouter.ai/api/v1/models";
 
 export interface PiCacheOptions {
   /** Whether telemetry is recorded at all. */
@@ -66,8 +69,21 @@ export interface PiCacheOptions {
   pressureColdFloor: number;
   /** Fallback provider cache lifetime (s) when the model declares none. */
   cacheTtlSeconds: number;
-  /** Absolute path of the last-good OpenRouter model-parameter snapshot. */
+  /** Absolute path of the last-good model-parameter snapshot. */
   modelParamsPath: string;
+  /** Model-list endpoint the parameters are pulled from (an empty value
+   *  disables fetched parameters, leaving pi's own rates authoritative). */
+  modelParamsUrl: string;
+  /** In-memory freshness bound before a background re-pull (ms). */
+  modelParamsMaxAgeMs: number;
+  /** Minimum gap between failed re-pull attempts (ms). */
+  modelParamsRetryMs: number;
+  /** Model-list fetch abort timeout (ms). */
+  modelParamsTimeoutMs: number;
+  /** Model entries retained from one snapshot. */
+  modelParamsMaxModels: number;
+  /** Provider cache-lifetime profiles, first matching substring wins. */
+  cacheTtlProfiles: readonly TtlProfile[];
   /** True when `PI_CACHE_RETENTION=long` selects the long cache tier. */
   cacheRetentionLong: boolean;
   /** Fast cache-aware compaction override (default on; /cache-settings switch). */
@@ -95,6 +111,25 @@ export interface PiCacheOptions {
 }
 
 export class OptionsLoader {
+  /**
+   * Default cache-lifetime profiles, first matching substring of
+   * `${provider} ${modelId}` wins. Values are the documented provider
+   * lifetimes (see docs/research/internet-prompt-caching-2026-09-18.md):
+   * Anthropic/[OI]/Kimi/Gemini are published; DeepSeek and GLM publish
+   * none, so their values are empirical. DeepSeek sits at 30 min because
+   * OpenRouter sticky routing expires after 10 min of inactivity and a
+   * host measurement of 19,957 inter-request gaps put hit share at 0.92
+   * (5-10 min), 0.55 (30-60 min), and 0.23 (1-4 h).
+   */
+  private static readonly DEFAULT_TTL_PROFILES: readonly TtlProfile[] = [
+    { matches: ["anthropic"], short: 300, long: 3600 },
+    { matches: ["openai", "azure"], short: 1800, long: 1800 },
+    { matches: ["moonshot", "kimi", "qwen", "alibaba"], short: 300, long: 3600 },
+    { matches: ["deepseek"], short: 1800, long: 1800 },
+    { matches: ["z-ai", "glm"], short: 120, long: 120 },
+    { matches: ["google", "gemini"], short: 300, long: 3600 },
+  ];
+
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
 
   /** Resolve tunables: env overrides first, then owned settings, then defaults. */
@@ -129,6 +164,12 @@ export class OptionsLoader {
       pressureColdFloor: this.envFloat("PI_CACHE_PRESSURE_COLD_FLOOR", 0.2),
       cacheTtlSeconds: this.envFloat("PI_CACHE_TTL_SECONDS", 300),
       modelParamsPath: this.modelParamsPath(),
+      modelParamsUrl: (this.env["PI_CACHE_MODEL_PARAMS_URL"] ?? DEFAULT_MODEL_PARAMS_URL).trim(),
+      modelParamsMaxAgeMs: this.envInt("PI_CACHE_MODEL_PARAMS_MAX_AGE_MS", 300_000),
+      modelParamsRetryMs: this.envInt("PI_CACHE_MODEL_PARAMS_RETRY_MS", 60_000),
+      modelParamsTimeoutMs: this.envInt("PI_CACHE_MODEL_PARAMS_TIMEOUT_MS", 5_000),
+      modelParamsMaxModels: this.envInt("PI_CACHE_MODEL_PARAMS_MAX_MODELS", 5000),
+      cacheTtlProfiles: this.ttlProfiles(),
       cacheRetentionLong: this.env["PI_CACHE_RETENTION"] === "long",
       // Fast compaction: env beats the owned settings switch beats default on.
       fastCompact: this.envBool("PI_CACHE_FAST_COMPACT", stored.fastCompaction ?? true),
@@ -157,6 +198,36 @@ export class OptionsLoader {
       pressureDegradeFull: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_FULL", 0.85),
       pressureDegradeGamma: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_GAMMA", 2),
     };
+  }
+
+  /**
+   * Provider cache-lifetime profiles: PI_CACHE_TTL_PROFILES replaces the
+   * default table whole (unset keeps it, an empty value disables the table so
+   * only pi's `promptCache` tier and PI_CACHE_TTL_SECONDS remain, a malformed
+   * entry keeps the default table). Grammar: `match[,match...]=short[,long]`
+   * entries separated by `;`; an omitted long lifetime reuses the short one.
+   */
+  private ttlProfiles(): readonly TtlProfile[] {
+    const raw = this.env["PI_CACHE_TTL_PROFILES"];
+    if (raw === undefined) return OptionsLoader.DEFAULT_TTL_PROFILES;
+    if (raw.trim() === "") return [];
+    return OptionsLoader.parseTtlProfiles(raw) ?? OptionsLoader.DEFAULT_TTL_PROFILES;
+  }
+
+  /** One profile table from its serialized form; undefined when malformed. */
+  private static parseTtlProfiles(raw: string): TtlProfile[] | undefined {
+    const profiles: TtlProfile[] = [];
+    for (const entry of raw.split(";")) {
+      const parts = entry.split("=");
+      if (parts.length !== 2) return undefined;
+      const matches = parts[0].split(",").map((token) => token.trim().toLowerCase());
+      if (matches.some((token) => token === "")) return undefined;
+      const lifetimes = parts[1].split(",").map((value) => Number(value.trim()));
+      if (lifetimes.length < 1 || lifetimes.length > 2) return undefined;
+      if (lifetimes.some((seconds) => !Number.isFinite(seconds) || seconds <= 0)) return undefined;
+      profiles.push({ matches, short: lifetimes[0], long: lifetimes[1] ?? lifetimes[0] });
+    }
+    return profiles;
   }
 
   /** The owned settings file path (env override exists for hermetic tests). */

@@ -1,16 +1,19 @@
 /**
- * pi-cache — fresh OpenRouter model parameters.
+ * pi-cache — fresh model parameters from a model-list endpoint.
  *
- * One responsibility: turn a live OpenRouter model id into the cache cost
- * rates the compaction-economics model prices against, by always attempting
- * a fresh pull of OpenRouter's public model list and falling back to the
- * last-good snapshot only when the pull is inaccessible. The snapshot lives
- * in memory for synchronous reads (the pressure decision never awaits) and
- * is persisted through `ParamsStore` so last-good survives a restart. The
- * class never throws into a caller; every failure degrades to the previous
- * values and the caller defers to pi's own model rates.
+ * One responsibility: turn a live model id into the cache cost rates the
+ * compaction-economics model prices against, by always attempting a fresh pull
+ * of a model list and falling back to the last-good snapshot only when the
+ * pull is inaccessible. The endpoint is configuration (see constants.ts), not
+ * a code constant, and its decoder is the OpenRouter model-list schema; a
+ * snapshot is bound to the endpoint that produced it, so changing the endpoint
+ * never prices requests from another service's catalog. The snapshot lives in
+ * memory for synchronous reads (the pressure decision never awaits) and is
+ * persisted through `ParamsStore` so last-good survives a restart. The class
+ * never throws into a caller; every failure degrades to the previous values
+ * and the caller defers to pi's own model rates.
  *
- * TTL is not exposed by OpenRouter, so it is owned by `ModelTtl` instead.
+ * TTL is not exposed by the model list, so it is owned by `ModelTtl` instead.
  */
 
 import type { CostRates } from "./economics.ts";
@@ -30,20 +33,20 @@ export type FetchLike = (
 ) => Promise<FetchResponseLike>;
 
 export interface ModelParamsOptions {
+  /** Model-list endpoint; an empty value disables fetching entirely. */
+  url: string;
   /** Last-good persistence; absent disables disk (memory-only). */
   store?: ParamsStore;
   /** Injectable fetch for tests; defaults to `globalThis.fetch`. */
   fetchImpl?: FetchLike;
   /** Injectable clock for tests; defaults to `Date.now`. */
   now?: () => number;
-  /** In-memory freshness bound before a background re-pull (default 5 min). */
-  maxAgeMs?: number;
-  /** Minimum gap between failed re-pull attempts (default 60 s). */
-  retryMs?: number;
-  /** API base (default `https://openrouter.ai/api/v1`). */
-  baseUrl?: string;
-  /** Fetch abort timeout (default 5 s). */
-  timeoutMs?: number;
+  /** In-memory freshness bound before a background re-pull. */
+  maxAgeMs: number;
+  /** Minimum gap between failed re-pull attempts. */
+  retryMs: number;
+  /** Fetch abort timeout. */
+  timeoutMs: number;
 }
 
 export interface RefreshResult {
@@ -52,12 +55,6 @@ export interface RefreshResult {
 }
 
 export class OpenRouterModelParams {
-  private static readonly DEFAULTS = {
-    maxAgeMs: 300_000,
-    retryMs: 60_000,
-    baseUrl: "https://openrouter.ai/api/v1",
-    timeoutMs: 5_000,
-  };
   private static readonly SCHEMA_VERSION = 1;
 
   private snapshot: PersistedSnapshot | undefined;
@@ -67,20 +64,40 @@ export class OpenRouterModelParams {
   private readonly store: ParamsStore | undefined;
   private readonly fetchImpl: FetchLike;
   private readonly now: () => number;
+  private readonly url: string;
   private readonly maxAgeMs: number;
   private readonly retryMs: number;
-  private readonly baseUrl: string;
   private readonly timeoutMs: number;
 
-  constructor(opts: ModelParamsOptions = {}) {
+  constructor(opts: ModelParamsOptions) {
     this.store = opts.store;
     this.fetchImpl = opts.fetchImpl ?? ((url, init) => fetch(url, init) as Promise<FetchResponseLike>);
     this.now = opts.now ?? Date.now;
-    this.maxAgeMs = opts.maxAgeMs ?? OpenRouterModelParams.DEFAULTS.maxAgeMs;
-    this.retryMs = opts.retryMs ?? OpenRouterModelParams.DEFAULTS.retryMs;
-    this.baseUrl = (opts.baseUrl ?? OpenRouterModelParams.DEFAULTS.baseUrl).replace(/\/$/, "");
-    this.timeoutMs = opts.timeoutMs ?? OpenRouterModelParams.DEFAULTS.timeoutMs;
-    this.snapshot = this.store?.load();
+    this.url = opts.url;
+    this.maxAgeMs = opts.maxAgeMs;
+    this.retryMs = opts.retryMs;
+    this.timeoutMs = opts.timeoutMs;
+    // A snapshot belongs to the endpoint that produced it: another endpoint
+    // prices a different catalog, so a stale-source snapshot is discarded.
+    const stored = this.store?.load();
+    this.snapshot = this.url && stored?.sourceUrl === this.url ? stored : undefined;
+  }
+
+  /**
+   * Whether the configured model list prices a model served from `baseUrl`:
+   * the two must share an origin, so a provider label never decides it and a
+   * regional or proxied endpoint is supported by pointing the endpoint at it.
+   */
+  appliesTo(baseUrl: string | undefined): boolean {
+    if (!baseUrl || !this.url) return false;
+    try {
+      const model = new URL(baseUrl);
+      const source = new URL(this.url);
+      return (source.protocol === "https:" || source.protocol === "http:")
+        && model.origin === source.origin;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -112,6 +129,7 @@ export class OpenRouterModelParams {
    * is stale. Debounced by `retryMs` so a failing endpoint is not hammered.
    */
   ensure(modelId: string): void {
+    if (!this.url) return;
     const known = this.snapshot?.models[modelId] !== undefined;
     if (known && this.isFresh()) return;
     if (this.now() - this.lastAttemptAt < this.retryMs) return;
@@ -136,13 +154,15 @@ export class OpenRouterModelParams {
 
   /** The one fetch-and-persist attempt; every error is contained. */
   private async performRefresh(): Promise<RefreshResult> {
+    if (!this.url) return { ok: false, models: 0 };
     try {
-      const body = await this.fetchJson(`${this.baseUrl}/models`);
+      const body = await this.fetchJson(this.url);
       const models = this.parseSnapshot(body);
       if (Object.keys(models).length === 0) return { ok: false, models: 0 };
       const snapshot: PersistedSnapshot = {
         schemaVersion: OpenRouterModelParams.SCHEMA_VERSION,
         fetchedAt: this.now(),
+        sourceUrl: this.url,
         models,
       };
       this.snapshot = snapshot;
@@ -159,14 +179,14 @@ export class OpenRouterModelParams {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const response = await this.fetchImpl(url, { signal: controller.signal });
-      if (!response.ok) throw new Error(`openrouter ${response.status}`);
+      if (!response.ok) throw new Error(`model parameters ${response.status}`);
       return await response.json();
     } finally {
       clearTimeout(timer);
     }
   }
 
-  /** Map OpenRouter's `data` array into valid persisted entries. */
+  /** Map the model list's `data` array into valid persisted entries. */
   private parseSnapshot(body: unknown): Record<string, PersistedModel> {
     const models: Record<string, PersistedModel> = {};
     const data = (body as { data?: unknown } | undefined)?.data;

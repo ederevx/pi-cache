@@ -1,14 +1,17 @@
 /**
- * pi-cache — fresh OpenRouter model-parameter tests.
+ * pi-cache — fresh model-parameter tests.
  * The live pull must win, the last-good snapshot must cover an inaccessible
- * endpoint, and malformed/hostile pricing must never produce a rate.
+ * endpoint, malformed/hostile pricing must never produce a rate, and a
+ * snapshot must never price a request from another endpoint.
  */
 
 import { test, assert, assertEq, scratchDir } from "./harness.ts";
 import { join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { OpenRouterModelParams, type FetchResponseLike } from "../src/model-params.ts";
 import { ParamsStore } from "../src/params-store.ts";
+
+const URL_BASE = "https://openrouter.ai/api/v1/models";
 
 function ok(data: unknown): FetchResponseLike {
   return { ok: true, status: 200, json: async () => data };
@@ -19,7 +22,15 @@ function modelBody(models: unknown[]): unknown {
 }
 
 function params(fetchImpl: (url: string) => Promise<FetchResponseLike>, store?: ParamsStore) {
-  return new OpenRouterModelParams({ fetchImpl, store, now: () => 1_000_000 });
+  return new OpenRouterModelParams({
+    url: URL_BASE,
+    fetchImpl,
+    store,
+    now: () => 1_000_000,
+    maxAgeMs: 300_000,
+    retryMs: 60_000,
+    timeoutMs: 5_000,
+  });
 }
 
 test("model-params: a fresh pull converts USD/token to per-million rates", async () => {
@@ -117,7 +128,7 @@ test("model-params: an inaccessible pull never rejects and keeps last-good", asy
 test("model-params: a corrupt disk snapshot degrades to no rates", () => {
   const root = join(scratchDir(), "params-corrupt");
   mkdirSync(root, { recursive: true });
-  const store = new ParamsStore(join(root, "model-params.json"));
+  const store = new ParamsStore(join(root, "model-params.json"), 5000);
   const client = params(async () => {
     throw new Error("offline");
   }, store);
@@ -127,7 +138,7 @@ test("model-params: a corrupt disk snapshot degrades to no rates", () => {
 test("model-params: last-good survives a restart through the disk store", async () => {
   const root = join(scratchDir(), "params-persist");
   mkdirSync(root, { recursive: true });
-  const store = new ParamsStore(join(root, "model-params.json"));
+  const store = new ParamsStore(join(root, "model-params.json"), 5000);
   const first = params(
     async () =>
       ok(modelBody([{ id: "openai/gpt-4o", pricing: { prompt: "0.0000025", input_cache_read: "0.00000125" } }])),
@@ -148,4 +159,95 @@ test("model-params: concurrent refreshes share one request", async () => {
   });
   await Promise.all([client.refresh(), client.refresh(), client.refresh()]);
   assertEq(calls, 1, "one in-flight pull");
+});
+
+test("model-params: the configured endpoint is fetched unchanged", async () => {
+  const urls: string[] = [];
+  const client = new OpenRouterModelParams({
+    url: "https://pricing.example.com/v2/models?region=eu",
+    fetchImpl: async (url) => {
+      urls.push(url);
+      return ok(modelBody([{ id: "m", pricing: { prompt: "0.000001" } }]));
+    },
+    now: () => 1_000_000,
+    maxAgeMs: 300_000,
+    retryMs: 60_000,
+    timeoutMs: 5_000,
+  });
+  await client.refresh();
+  assertEq(urls.length, 1);
+  assertEq(urls[0], "https://pricing.example.com/v2/models?region=eu", "no path or query is derived");
+});
+
+test("model-params: applicability is the model's own endpoint origin", () => {
+  const client = params(async () => ok(modelBody([])));
+  assertEq(client.appliesTo("https://openrouter.ai/api"), true, "the anthropic-messages base URL");
+  assertEq(client.appliesTo("https://openrouter.ai/api/v1"), true, "the completions base URL");
+  assertEq(client.appliesTo("https://eu.openrouter.ai/api/v1"), false, "another origin");
+  assertEq(client.appliesTo("http://openrouter.ai/api/v1"), false, "another scheme");
+  assertEq(client.appliesTo("https://openrouter.ai:8443/api/v1"), false, "another port");
+  assertEq(client.appliesTo("https://api.deepseek.com"), false, "an unrelated provider");
+  assertEq(client.appliesTo(undefined), false, "no endpoint, no claim");
+  assertEq(client.appliesTo("not a url"), false, "an unusable endpoint, no claim");
+});
+
+test("model-params: an empty endpoint disables fetching and pricing", async () => {
+  let calls = 0;
+  const client = new OpenRouterModelParams({
+    url: "",
+    fetchImpl: async () => {
+      calls++;
+      return ok(modelBody([{ id: "m", pricing: { prompt: "0.000001" } }]));
+    },
+    now: () => 1_000_000,
+    maxAgeMs: 300_000,
+    retryMs: 60_000,
+    timeoutMs: 5_000,
+  });
+  assertEq(client.appliesTo("https://openrouter.ai/api/v1"), false);
+  const result = await client.refresh();
+  assertEq(result.ok, false);
+  assertEq(calls, 0, "nothing is fetched");
+});
+
+test("model-params: a snapshot from another endpoint is never used", async () => {
+  const root = join(scratchDir(), "params-source");
+  mkdirSync(root, { recursive: true });
+  const store = new ParamsStore(join(root, "model-params.json"), 5000);
+  const first = params(
+    async () => ok(modelBody([{ id: "m", pricing: { prompt: "0.000002" } }])),
+    store,
+  );
+  await first.refresh();
+  assertEq(first.ratesFor("m")?.input, 2, "same endpoint, stored snapshot loaded");
+  const other = new OpenRouterModelParams({
+    url: "https://pricing.example.com/models",
+    store,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    },
+    now: () => 1_000_000,
+    maxAgeMs: 300_000,
+    retryMs: 60_000,
+    timeoutMs: 5_000,
+  });
+  assertEq(other.ratesFor("m"), undefined, "another endpoint's prices are not applied");
+});
+
+test("model-params: a legacy snapshot without its source is discarded", () => {
+  const root = join(scratchDir(), "params-legacy");
+  mkdirSync(root, { recursive: true });
+  const path = join(root, "model-params.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      schemaVersion: 1,
+      fetchedAt: 1,
+      models: { m: { base: { input: 2, cacheRead: 1, cacheWrite: 0 }, overrides: [] } },
+    }),
+  );
+  const client = params(async () => {
+    throw new Error("offline");
+  }, new ParamsStore(path, 5000));
+  assertEq(client.ratesFor("m"), undefined, "no guessed endpoint");
 });

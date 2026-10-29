@@ -232,10 +232,10 @@ cache-read rate):
    `cache_warming_decision` intent and confirmed by the persisted
    `cache_warm` usage entry, whichever is newer) approaches the provider
    cache lifetime from `ctx.model.promptCache` when the model declares a
-   tier, else the provider-aware profile for the model in use
-   (`src/model-ttl.ts`: Anthropic 5m/1h, OpenAI 30m, DeepSeek 4h, Gemini
-   5m, Kimi 5m/1h, GLM ~2m), else `PI_CACHE_TTL_SECONDS`, combined by
-   their maximum. The warm observer
+   tier, else the profile table for the model in use (`src/model-ttl.ts`;
+   defaults Anthropic 5m/1h, [OI] 30m, DeepSeek 30m, Gemini 5m, Kimi
+   5m/1h, GLM ~2m, replaced whole by `PI_CACHE_TTL_PROFILES`), else
+   `PI_CACHE_TTL_SECONDS`, combined by their maximum. The warm observer
    keeps the idle trigger from compacting a cache pi just rewarmed, and
    the idle fire defers past an unelapsed warm refresh margin so a
    just-decided warm lands first (the warm-vs-compact race).
@@ -257,7 +257,7 @@ undefined exactly when pi's warmer schedules nothing — and it is the
 authority for anything that must match pi's warming behavior
 (`WarmingSchedule.refreshMarginMs`). `SessionSignals.cacheTtlMs` is
 pi-cache's coldness-ramp input: when the model declares no tier it
-falls back to the provider-aware profile (`src/model-ttl.ts`) and then
+falls back to the configured profile table (`src/model-ttl.ts`) and then
 `PI_CACHE_TTL_SECONDS`, so the idle ramp still fires for providers pi
 has no tier for and measures the model's real lifetime where one is
 documented. The miss

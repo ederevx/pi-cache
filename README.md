@@ -45,21 +45,33 @@ and retention semantics are in `docs/design.md`.
 
 The cache TTL that drives the idle trigger and the pressure ramp uses pi's
 `promptCache` tier when the model declares one, else a provider-aware
-profile (Anthropic 5m/1h, OpenAI 30m, DeepSeek 30m, Gemini 5m, Kimi 5m/1h,
+profile (Anthropic 5m/1h, [OI] 30m, DeepSeek 30m, Gemini 5m, Kimi 5m/1h,
 GLM ~2m), and only then `PI_CACHE_TTL_SECONDS` (default 300 s) for an
-unknown model.
+unknown model. The profile table is configuration, not code:
+`PI_CACHE_TTL_PROFILES` takes `match[,match...]=short[,long]` entries
+separated by `;` (a match is a case-insensitive substring of
+`provider modelId`; an omitted long lifetime reuses the short one) and
+replaces the table whole, so a provider whose lifetime changes is
+corrected without a release. An empty value disables the table; a
+malformed entry keeps the default.
 
-**Live model parameters.** For OpenRouter-routed models, pi-cache pulls
-OpenRouter's public model list at session start and when the cached
+**Live model parameters.** For models served from the priced origin,
+pi-cache pulls the model list at session start and when the cached
 snapshot goes stale, converts its USD-per-token pricing to the per-
 million units the economics model uses, and selects any request-wide
-override tier by live token count. The last-good snapshot is persisted
-under `.pi-cache/model-params.json` (override with
-`PI_CACHE_MODEL_PARAMS`) and is used only when OpenRouter is
-inaccessible; non-OpenRouter providers keep pi's own rates. Polling is
-edge-cached (about once per 2 minutes has value), one request is
-in-flight at a time, and no prompts or session content leave the
-machine.
+override tier by live token count. The endpoint is
+`PI_CACHE_MODEL_PARAMS_URL` (default OpenRouter's public model list) and
+its decoder is that list's schema; applicability is the model's own
+`baseUrl` origin, so no provider name decides it and a regional or
+proxied endpoint works by pointing the knob at it. Models from any other
+origin keep pi's own rates. The last-good snapshot is persisted under
+`.pi-cache/model-params.json` (override with `PI_CACHE_MODEL_PARAMS`),
+tagged with the endpoint that produced it so a changed endpoint never
+applies another service's prices, and is used only when the endpoint is
+inaccessible. `PI_CACHE_MODEL_PARAMS_MAX_AGE_MS`, `_RETRY_MS`,
+`_TIMEOUT_MS`, and `_MAX_MODELS` tune the poll. Polling is edge-cached
+(about once per 2 minutes has value), one request is in-flight at a
+time, and no prompts or session content leave the machine.
 
 ## Request transforms
 

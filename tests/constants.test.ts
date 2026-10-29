@@ -69,6 +69,12 @@ const CLEAN = {
   PI_CACHE_PRESSURE_DEGRADE_GAMMA: undefined,
   PI_CACHE_PRESSURE_COLD_FLOOR: undefined,
   PI_CACHE_TTL_SECONDS: undefined,
+  PI_CACHE_TTL_PROFILES: undefined,
+  PI_CACHE_MODEL_PARAMS_URL: undefined,
+  PI_CACHE_MODEL_PARAMS_MAX_AGE_MS: undefined,
+  PI_CACHE_MODEL_PARAMS_RETRY_MS: undefined,
+  PI_CACHE_MODEL_PARAMS_TIMEOUT_MS: undefined,
+  PI_CACHE_MODEL_PARAMS_MAX_MODELS: undefined,
 };
 
 test("constants: default options", () => {
@@ -223,6 +229,43 @@ test("constants: env overrides an owned option", () => {
       const opts = loadOptions();
       assertEq(opts.telemetry, true, "env wins over stored");
       assertEq(opts.autoCompact, true, "env wins over stored");
+    },
+  );
+});
+
+test("constants: the model-parameter endpoint and its timings are configured", () => {
+  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: settingsPath("params") }, () => {
+    const opts = loadOptions();
+    assert(opts.modelParamsUrl.endsWith("/models"), "default model-list endpoint");
+    assert(opts.modelParamsMaxAgeMs > 0, "freshness bound default");
+    assert(opts.modelParamsRetryMs > 0, "retry gap default");
+    assert(opts.modelParamsTimeoutMs > 0, "fetch timeout default");
+    assertEq(opts.modelParamsMaxModels, 5000, "catalog size cap default");
+    assertEq(opts.cacheTtlProfiles.length, 6, "default TTL profiles");
+  });
+  withEnv(
+    {
+      ...CLEAN,
+      PI_CACHE_SETTINGS: settingsPath("params-override"),
+      PI_CACHE_MODEL_PARAMS_URL: " https://pricing.example.com/models ",
+      PI_CACHE_MODEL_PARAMS_MAX_AGE_MS: "1000",
+      PI_CACHE_MODEL_PARAMS_RETRY_MS: "2000",
+      PI_CACHE_MODEL_PARAMS_TIMEOUT_MS: "3000",
+      PI_CACHE_MODEL_PARAMS_MAX_MODELS: "10",
+    },
+    () => {
+      const opts = loadOptions();
+      assertEq(opts.modelParamsUrl, "https://pricing.example.com/models", "trimmed override");
+      assertEq(opts.modelParamsMaxAgeMs, 1000);
+      assertEq(opts.modelParamsRetryMs, 2000);
+      assertEq(opts.modelParamsTimeoutMs, 3000);
+      assertEq(opts.modelParamsMaxModels, 10);
+    },
+  );
+  withEnv(
+    { ...CLEAN, PI_CACHE_SETTINGS: settingsPath("params-off"), PI_CACHE_MODEL_PARAMS_URL: "" },
+    () => {
+      assertEq(loadOptions().modelParamsUrl, "", "an empty value disables the pull");
     },
   );
 });
