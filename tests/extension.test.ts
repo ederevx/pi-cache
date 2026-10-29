@@ -1166,3 +1166,65 @@ test("extension: the pricing pull follows the model's endpoint, not a provider n
     unsetEnv([...PI_CACHE_KEYS, "PI_CACHE_MODEL_PARAMS", "PI_CACHE_MODEL_PARAMS_URL"]);
   }
 });
+
+test("extension: fetched rates price the model only on the priced origin", async () => {
+  const root = join(scratchDir(), "params-costs");
+  mkdirSync(root, { recursive: true });
+  setEnv({
+    PI_CACHE_LEDGER: join(root, "ledger.jsonl"),
+    PI_CACHE_SETTINGS: join(root, "settings.json"),
+    PI_CACHE_MODEL_PARAMS: join(root, "model-params.json"),
+    PI_CACHE_MODEL_PARAMS_URL: "https://pricing.example.com/models",
+    PI_CACHE_PRESSURE_MIN_TOKENS: "1",
+    PI_CACHE_AUTO_COMPACT: "0",
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ data: [{ id: "m1", pricing: { prompt: "0.000001", input_cache_read: "0.00000001" } }] }),
+  })) as unknown as typeof fetch;
+  try {
+    const { default: factory } = await import("../src/index.ts");
+    const mock = new MockPi();
+    factory(mock as never);
+    const priced = { model: { provider: "any", id: "m1", baseUrl: "https://pricing.example.com/v1" } };
+    await mock.emit("session_start", {}, priced);
+    // A warm turn: the cache carries almost the whole request, so the read
+    // rate the fetched prices set is what the economics compares.
+    await mock.emit(
+      "message_end",
+      { message: { role: "assistant", usage: { input: 10, output: 10, cacheRead: 990, cacheWrite: 0, totalTokens: 1010 } } },
+      priced,
+    );
+    await waitFor(() => existsSync(join(root, "model-params.json")), "snapshot persisted");
+
+    const statsText = async (model: Record<string, unknown>): Promise<string> => {
+      let notified = "";
+      const statsCtx = {
+        getContextUsage: () => ({ percent: 40, tokens: 40_000, contextWindow: 100_000 }),
+        ui: { notify: (text: string) => { notified = text; } },
+        ...model,
+      };
+      await mock.commands.get("cache-stats")!.handler([], statsCtx as never);
+      return notified;
+    };
+    const piRates = { cost: { input: 1, cacheRead: 1, cacheWrite: 0 } };
+    const pressureOf = (text: string): number => {
+      const match = /pressure ([\d.]+)/.exec(text);
+      assert(match !== null, "pressure rendered: " + text);
+      return Number(match![1]);
+    };
+    const pricedPressure = pressureOf(await statsText({ model: { ...priced.model, ...piRates } }));
+    const otherPressure = pressureOf(
+      await statsText({ model: { ...priced.model, baseUrl: "https://api.other.example.com/v1", ...piRates } }),
+    );
+    // The fetched read rate makes continuing nearly free, so the priced
+    // origin sees no economics pressure where pi's own rates still do.
+    assert(pricedPressure < otherPressure, "fetched rates price the priced origin");
+    assert(otherPressure > 0, "pi's own rates still pressure the other origin");
+  } finally {
+    globalThis.fetch = originalFetch;
+    unsetEnv([...PI_CACHE_KEYS, "PI_CACHE_MODEL_PARAMS", "PI_CACHE_MODEL_PARAMS_URL", "PI_CACHE_PRESSURE_MIN_TOKENS"]);
+  }
+});
