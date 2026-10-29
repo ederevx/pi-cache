@@ -3,6 +3,25 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.15.0] - 2026-10-29
+
+### Changed
+
+- The model-parameter pull is no longer pinned to one vendor endpoint or gated
+  on a provider id. `PI_CACHE_MODEL_PARAMS_URL` sets the endpoint (empty
+  disables it), and it applies by the model's own `baseUrl` origin, so a
+  regional or proxied endpoint works by pointing the knob at it. Each snapshot
+  records the endpoint that produced it and is discarded when the endpoint
+  changes, so another service's prices are never applied.
+- The provider cache-lifetime table moved out of code into
+  `PI_CACHE_TTL_PROFILES` (`token,token=short[,long];...`, whole-table
+  replacement; malformed keeps the default, empty disables it).
+- The poll's freshness, retry, timeout, and catalog-size bounds became
+  `PI_CACHE_MODEL_PARAMS_{MAX_AGE_MS,RETRY_MS,TIMEOUT_MS,MAX_MODELS}`, bounded
+  so an out-of-range value falls back instead of disabling the poll.
+
+Defaults are unchanged.
+
 ## [0.14.2] - 2026-10-16
 
 ### Fixed
