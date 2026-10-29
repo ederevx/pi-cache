@@ -133,3 +133,69 @@ test("settings: tui mode renders the two-column view through the custom UI", asy
   assert(rendered.includes("Telemetry"), "renders the option rows");
   assert(rendered.includes("on"), "renders a current value");
 });
+test("settings: a failed presentation reports why above the listing", async () => {
+  const notices: Array<{ message: string; kind?: string }> = [];
+  const ui = {
+    custom: async () => {
+      throw new Error("no dock here");
+    },
+    notify: (message: string, kind?: string) => notices.push({ message, kind }),
+  };
+  await new SettingsPresenter().present(LIVE, ui as never, "tui", () => {});
+  assertEq(notices.length, 1, "one notice, not a silent fallback");
+  assertEq(notices[0].kind, "error");
+  assert(notices[0].message.includes("no dock here"), "the reason is carried");
+  assert(notices[0].message.includes("Fast compaction"), "the listing still answers");
+});
+
+test("settings: a successful presentation reports nothing", async () => {
+  const notices: string[] = [];
+  const ui = {
+    custom: async (
+      factory: (tui: unknown, theme: ViewTheme, kb: unknown, done: () => void) => unknown,
+    ): Promise<void> => {
+      factory({}, THEME, {}, () => {});
+    },
+    notify: (message: string) => notices.push(message),
+  };
+  await new SettingsPresenter().present(LIVE, ui as never, "tui", () => {});
+  assertEq(notices.length, 0, "no notice on the success path");
+});
+
+test("settings: a row that throws on input is reported and the dock survives", async () => {
+  // A row whose submenu cannot be built (the shape a pi component throws
+  // when its theme is missing) must be reported, not escape into pi's
+  // input loop.
+  const notices: string[] = [];
+  let view:
+    | { handleInput(data: string): void; render(w: number): string[]; selectItem(id: string): void }
+    | undefined;
+  const ui = {
+    custom: async (
+      factory: (tui: unknown, theme: ViewTheme, kb: unknown, done: () => void) => {
+        handleInput(data: string): void;
+        render(w: number): string[];
+        selectItem(id: string): void;
+      },
+    ): Promise<void> => {
+      view = factory({}, THEME, {}, () => {});
+    },
+    notify: (message: string) => notices.push(message),
+  };
+  const presenter = new SettingsPresenter();
+  const rows = presenter.rows(LIVE, new Set(), () => "done");
+  const action = rows[rows.length - 1];
+  action.submenu = () => {
+    throw new Error("Theme not initialized. Call initTheme() first.");
+  };
+  presenter.rows = () => rows;
+  await presenter.present(LIVE, ui as never, "tui", () => {});
+  assert(view !== undefined, "the dock mounted");
+  view!.selectItem("restoreDefaults");
+  view!.handleInput("\r");
+  assert(notices.length >= 1, "the build failure is reported, not thrown");
+  assert(notices[0].includes("Theme not initialized"), "the original reason is carried");
+  assertEq(view!.render(80).length > 0, true, "the dock keeps rendering");
+  // A later keypress still works rather than ending the dock.
+  view!.handleInput("\u001b[B");
+});
