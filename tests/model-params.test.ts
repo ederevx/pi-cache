@@ -251,3 +251,27 @@ test("model-params: a legacy snapshot without its source is discarded", () => {
   }, new ParamsStore(path, 5000));
   assertEq(client.ratesFor("m"), undefined, "no guessed endpoint");
 });
+
+test("model-params: the catalog cap bounds the entries loaded from disk", async () => {
+  const root = join(scratchDir(), "params-cap");
+  mkdirSync(root, { recursive: true });
+  const path = join(root, "model-params.json");
+  const models: Record<string, unknown> = {};
+  for (const id of ["a", "b", "c", "d"]) {
+    models[id] = { base: { input: 1, cacheRead: 1, cacheWrite: 0 }, overrides: [] };
+  }
+  const first = params(
+    async () => ok(modelBody([{ id: "a", pricing: { prompt: "0.000001" } }])),
+    new ParamsStore(path, 5000),
+  );
+  await first.refresh();
+  writeFileSync(
+    path,
+    JSON.stringify({ schemaVersion: 1, fetchedAt: 1, sourceUrl: URL_BASE, models }),
+  );
+  const capped = params(async () => {
+    throw new Error("offline");
+  }, new ParamsStore(path, 2));
+  const ids = ["a", "b", "c", "d"].filter((id) => capped.ratesFor(id) !== undefined);
+  assertEq(ids.length, 2, "only the cap's worth of entries load");
+});
