@@ -120,8 +120,8 @@ compaction is on, makes the compaction itself prefix-stable:
      request counts only while the cache is still warm (`1 - age/ttl`),
      so a prefix seconds from expiry is amortized over a shorter horizon
      than a freshly touched one. Costs come from `ctx.model.cost`
-     per-million rates, or — for OpenRouter-routed models — from a
-     freshly pulled OpenRouter snapshot (`src/model-params.ts`) with
+     per-million rates, or — for models the configured model-list endpoint
+     prices — from a freshly pulled snapshot (`src/model-params.ts`) with
      per-request override tiers selected by live token count; absent
      rates leave economics at 0, so the degradation onset gates alone.
    The two combine by inclusion-exclusion (`1-(1-d)(1-e)`), then a
@@ -233,7 +233,7 @@ cache-read rate):
    `cache_warm` usage entry, whichever is newer) approaches the provider
    cache lifetime from `ctx.model.promptCache` when the model declares a
    tier, else the profile table for the model in use (`src/model-ttl.ts`;
-   defaults Anthropic 5m/1h, [OI] 30m, DeepSeek 30m, Gemini 5m, Kimi
+   defaults Anthropic 5m/1h, OpenAI 30m, DeepSeek 30m, Gemini 5m, Kimi
    5m/1h, GLM ~2m, replaced whole by `PI_CACHE_TTL_PROFILES`), else
    `PI_CACHE_TTL_SECONDS`, combined by their maximum. The warm observer
    keeps the idle trigger from compacting a cache pi just rewarmed, and

@@ -80,7 +80,7 @@ export interface PiCacheOptions {
   modelParamsRetryMs: number;
   /** Model-list fetch abort timeout (ms). */
   modelParamsTimeoutMs: number;
-  /** Model entries retained from one snapshot. */
+  /** Maximum valid model entries loaded from the persisted snapshot. */
   modelParamsMaxModels: number;
   /** Provider cache-lifetime profiles, first matching substring wins. */
   cacheTtlProfiles: readonly TtlProfile[];
@@ -115,7 +115,7 @@ export class OptionsLoader {
    * Default cache-lifetime profiles, first matching substring of
    * `${provider} ${modelId}` wins. Values are the documented provider
    * lifetimes (see docs/research/internet-prompt-caching-2026-09-18.md):
-   * Anthropic/[OI]/Kimi/Gemini are published; DeepSeek and GLM publish
+   * Anthropic/OpenAI/Kimi/Gemini are published; DeepSeek and GLM publish
    * none, so their values are empirical. DeepSeek sits at 30 min because
    * OpenRouter sticky routing expires after 10 min of inactivity and a
    * host measurement of 19,957 inter-request gaps put hit share at 0.92
@@ -165,10 +165,11 @@ export class OptionsLoader {
       cacheTtlSeconds: this.envFloat("PI_CACHE_TTL_SECONDS", 300),
       modelParamsPath: this.modelParamsPath(),
       modelParamsUrl: (this.env["PI_CACHE_MODEL_PARAMS_URL"] ?? DEFAULT_MODEL_PARAMS_URL).trim(),
-      modelParamsMaxAgeMs: this.envInt("PI_CACHE_MODEL_PARAMS_MAX_AGE_MS", 300_000),
-      modelParamsRetryMs: this.envInt("PI_CACHE_MODEL_PARAMS_RETRY_MS", 60_000),
-      modelParamsTimeoutMs: this.envInt("PI_CACHE_MODEL_PARAMS_TIMEOUT_MS", 5_000),
-      modelParamsMaxModels: this.envInt("PI_CACHE_MODEL_PARAMS_MAX_MODELS", 5000),
+      modelParamsMaxAgeMs: this.envInt("PI_CACHE_MODEL_PARAMS_MAX_AGE_MS", 300_000, 0),
+      modelParamsRetryMs: this.envInt("PI_CACHE_MODEL_PARAMS_RETRY_MS", 60_000, 0),
+      // Node turns a delay outside its signed 32-bit timer range into 1 ms.
+      modelParamsTimeoutMs: this.envInt("PI_CACHE_MODEL_PARAMS_TIMEOUT_MS", 5_000, 1, 2_147_483_647),
+      modelParamsMaxModels: this.envInt("PI_CACHE_MODEL_PARAMS_MAX_MODELS", 5000, 1),
       cacheTtlProfiles: this.ttlProfiles(),
       cacheRetentionLong: this.env["PI_CACHE_RETENTION"] === "long",
       // Fast compaction: env beats the owned settings switch beats default on.
@@ -288,7 +289,8 @@ export class OptionsLoader {
     return this.envNumber(name, fallback, parseFloat);
   }
 
-  private envInt(name: string, fallback: number): number {
-    return this.envNumber(name, fallback, (raw) => parseInt(raw, 10));
+  private envInt(name: string, fallback: number, min?: number, max?: number): number {
+    const n = this.envNumber(name, fallback, (raw) => parseInt(raw, 10));
+    return (min !== undefined && n < min) || (max !== undefined && n > max) ? fallback : n;
   }
 }

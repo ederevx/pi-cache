@@ -270,6 +270,56 @@ test("constants: the model-parameter endpoint and its timings are configured", (
   );
 });
 
+test("constants: model-parameter timings fall back outside their bounds", () => {
+  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: settingsPath("params-bounds") }, () => {
+    const opts = loadOptions();
+    assertEq(opts.modelParamsUrl, "https://openrouter.ai/api/v1/models", "default endpoint");
+    assertEq(opts.modelParamsMaxAgeMs, 300_000, "default freshness bound");
+    assertEq(opts.modelParamsRetryMs, 60_000, "default retry gap");
+    assertEq(opts.modelParamsTimeoutMs, 5_000, "default timeout");
+  });
+  withEnv(
+    {
+      ...CLEAN,
+      PI_CACHE_SETTINGS: settingsPath("params-negative"),
+      PI_CACHE_MODEL_PARAMS_MAX_AGE_MS: "-1",
+      PI_CACHE_MODEL_PARAMS_RETRY_MS: "-5",
+      PI_CACHE_MODEL_PARAMS_TIMEOUT_MS: "0",
+      PI_CACHE_MODEL_PARAMS_MAX_MODELS: "0",
+    },
+    () => {
+      const opts = loadOptions();
+      assertEq(opts.modelParamsMaxAgeMs, 300_000, "a negative age stales every snapshot");
+      assertEq(opts.modelParamsRetryMs, 60_000, "a negative retry drops the throttle");
+      assertEq(opts.modelParamsTimeoutMs, 5_000, "a zero timeout fires at once");
+      assertEq(opts.modelParamsMaxModels, 5000, "a zero cap would drop every model");
+    },
+  );
+  withEnv(
+    {
+      ...CLEAN,
+      PI_CACHE_SETTINGS: settingsPath("params-zero"),
+      PI_CACHE_MODEL_PARAMS_MAX_AGE_MS: "0",
+      PI_CACHE_MODEL_PARAMS_RETRY_MS: "0",
+    },
+    () => {
+      const opts = loadOptions();
+      assertEq(opts.modelParamsMaxAgeMs, 0, "a zero age is a legal always-refresh bound");
+      assertEq(opts.modelParamsRetryMs, 0, "a zero retry gap is legal");
+    },
+  );
+  withEnv(
+    {
+      ...CLEAN,
+      PI_CACHE_SETTINGS: settingsPath("params-overflow"),
+      PI_CACHE_MODEL_PARAMS_TIMEOUT_MS: "2147483648",
+    },
+    () => {
+      assertEq(loadOptions().modelParamsTimeoutMs, 5_000, "an out-of-range delay clamps to 1 ms");
+    },
+  );
+});
+
 test("constants: ledger path override", () => {
   withEnv({ PI_CACHE_LEDGER: "/home/x/ledger.jsonl" }, () => {
     assertEq(loadOptions().ledgerPath, "/home/x/ledger.jsonl");
