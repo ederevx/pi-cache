@@ -3,6 +3,21 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.16.0] - 2026-10-29
+
+### Changed
+
+- The fast-compaction digest keeps each turn's last assistant text, its agent
+  bash commands, and the first failing tool result, alongside the user text and
+  tool names. A fact stated later in a turn, or carried by a reply, a command,
+  or a failure, was previously dropped with the span. Empty fields are omitted
+  and further commands or failures are counted, so a line stays bounded.
+- A tool result counts as a failure when pi flags it, or when a bash result's
+  text names one; source code that merely mentions "error" cannot produce an
+  entry.
+- Snippets now keep 240 characters, a digest block 12000, and the accumulated
+  region 24000.
+
 ## [0.15.0] - 2026-10-29
 
 ### Changed
