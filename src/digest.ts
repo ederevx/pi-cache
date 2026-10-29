@@ -4,8 +4,9 @@
  * One responsibility: turn the span a compaction drops (pi's
  * `messagesToSummarize` plus any split-turn prefix) into a bounded,
  * byte-deterministic extractive digest — file lists from pi's own
- * `fileOps`, one capped line per turn (first user text, bash commands,
- * tool names) — and accumulate those blocks across compactions by
+ * `fileOps`, one capped line per turn (first user text, last assistant
+ * text, agent bash commands, first error line, tool names) — and
+ * accumulate those blocks across compactions by
  * folding the previous compaction's digest blocks (found in
  * `previousSummary`, self-anchored between <pi-cache-digest> markers)
  * ahead of the new one. Everything is derived from the span content
@@ -28,6 +29,14 @@ export interface SpanDigestOptions {
   maxTurns?: number;
   /** Characters kept per user-text/command snippet. */
   maxSnippetChars?: number;
+  /** Characters kept of the last assistant text per turn. */
+  maxAssistantChars?: number;
+  /** Characters kept per agent bash command. */
+  maxCommandChars?: number;
+  /** Agent bash commands rendered per turn before counting the rest. */
+  maxCommandsPerTurn?: number;
+  /** Characters kept per error excerpt. */
+  maxErrorChars?: number;
   /** File entries kept per file list; extras are counted. */
   maxFiles?: number;
   /** Characters kept per block; further turns are counted, not inlined. */
@@ -45,9 +54,33 @@ const DIGEST_END = "</pi-cache-digest>";
 /** Tool names rendered per turn before collapsing the rest into a count. */
 const MAX_TOOL_NAMES = 8;
 
+/** Field separator inside a turn line. */
+const SEP = " | ";
+
+/**
+ * A tool result is an error when pi flags it, or when a bash result's
+ * text names a failure the flag alone would miss.
+ */
+const ERROR_RE =
+  /\b(error|errors|failed|failure|fatal|panic|exception|traceback|denied|not found|no such file|exit code [1-9]\d*|command failed)\b/i;
+
+/** One turn's collected fields, reset at every flush. */
+interface TurnState {
+  userText: string;
+  assistantText: string;
+  commands: string[];
+  errorText: string;
+  errors: number;
+  tools: string[];
+}
+
 export class SpanDigest {
   private readonly maxTurns: number;
   private readonly maxSnippetChars: number;
+  private readonly maxAssistantChars: number;
+  private readonly maxCommandChars: number;
+  private readonly maxCommandsPerTurn: number;
+  private readonly maxErrorChars: number;
   private readonly maxFiles: number;
   private readonly maxBlockChars: number;
   private readonly maxBlocks: number;
@@ -55,11 +88,15 @@ export class SpanDigest {
 
   constructor(opts: SpanDigestOptions = {}) {
     this.maxTurns = opts.maxTurns ?? 40;
-    this.maxSnippetChars = opts.maxSnippetChars ?? 80;
+    this.maxSnippetChars = opts.maxSnippetChars ?? 240;
+    this.maxAssistantChars = opts.maxAssistantChars ?? 160;
+    this.maxCommandChars = opts.maxCommandChars ?? 100;
+    this.maxCommandsPerTurn = opts.maxCommandsPerTurn ?? 2;
+    this.maxErrorChars = opts.maxErrorChars ?? 100;
     this.maxFiles = opts.maxFiles ?? 20;
-    this.maxBlockChars = opts.maxBlockChars ?? 4000;
+    this.maxBlockChars = opts.maxBlockChars ?? 12000;
     this.maxBlocks = opts.maxBlocks ?? 8;
-    this.maxRegionChars = opts.maxRegionChars ?? 8000;
+    this.maxRegionChars = opts.maxRegionChars ?? 24000;
   }
 
   /** The current span's block body; empty when nothing worth recording. */
@@ -150,46 +187,154 @@ export class SpanDigest {
     lines.push(`${label}: ${shown.join(", ")}${suffix}`);
   }
 
-  /** One line per turn: first user text, bash commands, tool names. */
+  /** One line per turn: first user text, last assistant text, bash commands, first error, tool names. */
   private turnLines(messages: readonly unknown[], label: string): string[] {
     const lines: string[] = [];
     const tag = label.length > 0 ? `${label} ` : "";
-    let userText = "";
-    let tools: string[] = [];
+    const turn = this.newTurn();
     const flush = (): void => {
-      if (userText.length === 0 && tools.length === 0) return;
-      const head = userText.length > 0 ? userText : "(no text)";
-      const names = tools.slice(0, MAX_TOOL_NAMES).join(",");
-      const more = tools.length > MAX_TOOL_NAMES ? `+${tools.length - MAX_TOOL_NAMES}` : "";
-      const tail = tools.length > 0 ? ` | tools: ${names}${more}` : "";
-      lines.push(`- ${tag}U: ${head}${tail}`);
-      userText = "";
-      tools = [];
+      const line = this.turnLine(tag, turn);
+      if (line.length > 0) lines.push(line);
+      this.resetTurn(turn);
     };
     for (const message of messages) {
       const m = message as
-        | { role?: unknown; content?: unknown; command?: unknown }
+        | { role?: unknown; content?: unknown; command?: unknown; toolName?: unknown; isError?: unknown }
         | undefined;
       if (!m || typeof m !== "object") continue;
       if (m.role === "user") {
         flush();
-        if (userText.length === 0) userText = this.userSnippet(m.content);
+        if (turn.userText.length === 0) turn.userText = this.userSnippet(m.content);
       } else if (m.role === "assistant") {
-        this.toolNames(m.content, tools);
+        this.toolNames(m.content, turn.tools);
+        this.assistantText(m.content, turn);
+        this.agentCommands(m.content, turn);
+      } else if (m.role === "toolResult") {
+        this.errorExcerpt(m, turn);
       } else if (m.role === "bashExecution") {
         flush();
-        const cmd = this.snippet(typeof m.command === "string" ? m.command : "");
+        const cmd = this.snippet(typeof m.command === "string" ? m.command : "", this.maxSnippetChars);
         if (cmd.length > 0) lines.push(`- ${tag}!: ${cmd}`);
       }
-      // toolResult, custom, system, and unknown roles carry no digest line.
+      // custom, system, and unknown roles carry no digest line.
     }
     flush();
     return lines;
   }
 
+  private newTurn(): TurnState {
+    return { userText: "", assistantText: "", commands: [], errorText: "", errors: 0, tools: [] };
+  }
+
+  private resetTurn(turn: TurnState): void {
+    turn.userText = "";
+    turn.assistantText = "";
+    turn.commands = [];
+    turn.errorText = "";
+    turn.errors = 0;
+    turn.tools = [];
+  }
+
+  /** The rendered turn line, or an empty string when the turn carries nothing. */
+  private turnLine(tag: string, turn: TurnState): string {
+    const empty =
+      turn.userText.length === 0 &&
+      turn.assistantText.length === 0 &&
+      turn.commands.length === 0 &&
+      turn.errorText.length === 0 &&
+      turn.tools.length === 0;
+    if (empty) return "";
+    const fields = [`U: ${turn.userText.length > 0 ? turn.userText : "(no text)"}`];
+    if (turn.assistantText.length > 0) fields.push(`A: ${turn.assistantText}`);
+    if (turn.commands.length > 0) fields.push(`$: ${this.commandField(turn.commands)}`);
+    if (turn.errorText.length > 0) {
+      const extra = turn.errors > 1 ? ` (+${turn.errors - 1})` : "";
+      fields.push(`E: ${turn.errorText}${extra}`);
+    }
+    if (turn.tools.length > 0) {
+      const names = turn.tools.slice(0, MAX_TOOL_NAMES).join(",");
+      const more = turn.tools.length > MAX_TOOL_NAMES ? `+${turn.tools.length - MAX_TOOL_NAMES}` : "";
+      fields.push(`tools: ${names}${more}`);
+    }
+    return `- ${tag}${fields.join(SEP)}`;
+  }
+
+  /** The `$:` field: the first few distinct commands, then a count of the rest. */
+  private commandField(commands: readonly string[]): string {
+    const shown = commands.slice(0, this.maxCommandsPerTurn);
+    const extra = commands.length - shown.length;
+    const head = shown.join("; ");
+    return extra > 0 ? `${head} (+${extra})` : head;
+  }
+
+  /** The last assistant text of the turn: its conclusion, not its preamble. */
+  private assistantText(content: unknown, turn: TurnState): void {
+    if (!Array.isArray(content)) return;
+    let text = "";
+    for (const part of content) {
+      const block = part as { type?: unknown; text?: unknown } | undefined;
+      if (block && typeof block === "object" && block.type === "text") {
+        text += `${typeof block.text === "string" ? block.text : ""} `;
+      }
+    }
+    const excerpt = this.snippet(text, this.maxAssistantChars);
+    if (excerpt.length > 0) turn.assistantText = excerpt;
+  }
+
+  /** Agent bash commands from an assistant message, deduped in first-use order. */
+  private agentCommands(content: unknown, turn: TurnState): void {
+    if (!Array.isArray(content)) return;
+    for (const part of content) {
+      const block = part as { type?: unknown; name?: unknown; arguments?: unknown } | undefined;
+      if (!block || typeof block !== "object") continue;
+      if (block.type !== "toolCall" || block.name !== "bash") continue;
+      const args = block.arguments as { command?: unknown } | undefined;
+      if (!args || typeof args.command !== "string") continue;
+      const cmd = this.snippet(args.command, this.maxCommandChars);
+      if (cmd.length > 0 && !turn.commands.includes(cmd)) turn.commands.push(cmd);
+    }
+  }
+
+  /** First error excerpt of the turn, from a flagged or bash-failing result. */
+  private errorExcerpt(
+    m: { toolName?: unknown; isError?: unknown; content?: unknown },
+    turn: TurnState,
+  ): void {
+    const flagged = m.isError === true;
+    const text = this.resultText(m.content);
+    // Only bash results are scanned by text: source code read by other tools is full of "error".
+    if (!flagged && !(m.toolName === "bash" && ERROR_RE.test(text))) return;
+    const excerpt = this.snippet(this.errorLine(text, flagged), this.maxErrorChars);
+    if (excerpt.length === 0) return;
+    turn.errors += 1;
+    if (turn.errorText.length === 0) turn.errorText = excerpt;
+  }
+
+  /** The first line naming a failure, else (for a flagged result) the first non-empty line. */
+  private errorLine(text: string, flagged: boolean): string {
+    const lines = text.split(/\r?\n/);
+    for (const line of lines) if (ERROR_RE.test(line)) return line;
+    if (!flagged) return "";
+    return lines.find((line) => line.trim().length > 0) ?? "";
+  }
+
+  /** A tool result's text blocks joined by newlines, whitespace unsquashed. */
+  private resultText(content: unknown): string {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    const parts: string[] = [];
+    for (const part of content) {
+      const block = part as { type?: unknown; text?: unknown } | undefined;
+      if (block && typeof block === "object" && block.type === "text") {
+        parts.push(typeof block.text === "string" ? block.text : "");
+      }
+    }
+    return parts.join("\n");
+  }
+
   /** First text snippet of a user message's content (string or blocks). */
   private userSnippet(content: unknown): string {
-    if (typeof content === "string") return this.snippet(content);
+    if (typeof content === "string") return this.snippet(content, this.maxSnippetChars);
     if (!Array.isArray(content)) return "";
     let text = "";
     for (const part of content) {
@@ -198,7 +343,7 @@ export class SpanDigest {
         text += `${typeof block.text === "string" ? block.text : ""} `;
       }
     }
-    return this.snippet(text);
+    return this.snippet(text, this.maxSnippetChars);
   }
 
   /** Tool-call names from an assistant message, deduped in first-use order. */
@@ -213,7 +358,7 @@ export class SpanDigest {
   }
 
   /** Deterministic one-line snippet: squash whitespace, fixed truncation. */
-  private snippet(raw: string): string {
+  private snippet(raw: string, limit: number): string {
     const text = raw
       .replace(/\s+/g, " ")
       .trim()
@@ -221,8 +366,8 @@ export class SpanDigest {
       .join("")
       .split(DIGEST_END)
       .join("");
-    if (text.length <= this.maxSnippetChars) return text;
-    let cut = text.slice(0, this.maxSnippetChars);
+    if (text.length <= limit) return text;
+    let cut = text.slice(0, limit);
     // Never end mid-surrogate: deterministic and renderable.
     const code = cut.charCodeAt(cut.length - 1);
     if (code >= 0xd800 && code <= 0xdbff) cut = cut.slice(0, -1);
