@@ -7,16 +7,19 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ### Changed
 
-- The fast-compaction digest keeps each turn's last assistant text, its agent
-  bash commands, and the first failing tool result, alongside the user text and
-  tool names. A fact stated later in a turn, or carried by a reply, a command,
-  or a failure, was previously dropped with the span. Empty fields are omitted
-  and further commands or failures are counted, so a line stays bounded.
-- A tool result counts as a failure when pi flags it, or when a bash result's
-  text names one; source code that merely mentions "error" cannot produce an
-  entry.
-- Snippets now keep 240 characters, a digest block 12000, and the accumulated
-  region 24000.
+- The fast-compaction digest retains each turn's last non-empty assistant
+  text, its first two distinct agent bash command snippets, and its first
+  available error excerpt alongside user text and tool names. Additional
+  distinct commands and qualifying failures are counted, including failures
+  with no text. Empty optional fields are omitted.
+- A tool result qualifies as a failure when pi flags it, or when an unflagged
+  bash result contains failure text. Unflagged results from other tools are
+  ignored, so reading source code that mentions "error" adds no error entry.
+- Default user-text and user-run command snippets increase from 80 to 240
+  characters. Assistant text keeps 160 characters; agent commands and error
+  excerpts keep 100 each, with an ellipsis added when truncated. Block and
+  accumulated-region retention budgets increase to 12000 and 24000
+  characters; these are not strict rendered-output limits.
 
 ## [0.15.0] - 2026-10-29
 
