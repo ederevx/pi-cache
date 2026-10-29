@@ -139,8 +139,9 @@ export class SettingsPresenter {
   /**
    * Present the rows in pi's two-column settings view when a TUI custom UI
    * is available, reporting in-place changes through `onChange`; otherwise
-   * print the rows and report nothing. Rendering failures fall back to the
-   * listing so the command never breaks a session.
+   * print the rows and report nothing. A failed presentation reports why
+   * above the listing, because a silent fallback reads as the command doing
+   * nothing.
    */
   async present(
     live: LiveSettings,
@@ -164,11 +165,18 @@ export class SettingsPresenter {
     if (mode === "tui" && typeof ui?.custom === "function") {
       try {
         await ui.custom((_tui, theme, _keybindings, done) =>
-          new CacheSettingsView(rows, theme, onChange, () => done(undefined)),
+          new CacheSettingsView(
+            rows,
+            theme,
+            onChange,
+            () => done(undefined),
+            (message) => ui.notify?.(message, "error"),
+          ),
         );
         return;
-      } catch {
-        /* fall through to the stderr listing */
+      } catch (err) {
+        ui.notify?.(`pi-cache: settings presentation failed: ${this.message(err)}\n\n${this.listing(rows)}`, "error");
+        return;
       }
     }
     this.printRows(rows);
@@ -176,7 +184,17 @@ export class SettingsPresenter {
 
   /** Print the same rows to stderr for non-UI modes. */
   private printRows(rows: SettingRow[]): void {
-    console.error("pi-cache-settings:\n  " + rows.map((r) => this.formatRow(r)).join("\n  "));
+    console.error(this.listing(rows));
+  }
+
+  /** The rows as a plain listing, shared by stderr and the failure notice. */
+  private listing(rows: SettingRow[]): string {
+    return "pi-cache-settings:\n  " + rows.map((r) => this.formatRow(r)).join("\n  ");
+  }
+
+  /** One thrown value as a message. */
+  private message(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
   }
 
   /** One row in the fallback listing's single-line layout. */
