@@ -110,6 +110,11 @@ export class CompactionPressure {
     return this.probabilityFor(this.compose(input).pressure);
   }
 
+  /** The live-token onset where degradation pressure starts for a window. */
+  degradationOnset(contextWindow: number): number {
+    return this.opts.degradation.onset(contextWindow);
+  }
+
   /** Compose the two reasons into the combined pressure, without a draw. */
   private compose(input: PressureSample): {
     pressure: number;

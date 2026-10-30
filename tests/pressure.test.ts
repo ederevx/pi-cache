@@ -147,9 +147,27 @@ test("pressure: either reason alone can saturate the ramp", () => {
   const economics = new CacheEconomics({ continuationProbability: 0.6 });
   const economicsOnly = new CompactionPressure({
     economics,
-    degradation: new ContextDegradation({ start: 10, full: 11 }),
+    degradation: new ContextDegradation({ start: 10, full: 11, startTokens: 0, fullTokens: 0 }),
     random: () => 0,
   }).sample({ tokens: 120_000, contextWindow: 200_000, coldness: 1, rates });
   assert(economicsOnly.degradation === 0, "degradation disabled");
   assertEq(economicsOnly.probability, 1, "economics saturates alone");
+});
+
+test("pressure: degradationOnset follows the token cap", () => {
+  const p = pressure();
+  assertEq(p.degradationOnset(200_000), 100_000, "a 200K window keeps its fraction");
+  assertEq(p.degradationOnset(1_000_000), 100_000, "a 1M window starts at the cap");
+});
+
+test("pressure: zero rates leave degradation as the only reason", () => {
+  const zero = { input: 0, cacheRead: 0, cacheWrite: 0 };
+  const verdict = pressure().sample({
+    tokens: 250_000,
+    contextWindow: 1_000_000,
+    coldness: 1,
+    rates: zero,
+  });
+  assertEq(verdict.economics, 0, "no dollars to save");
+  assertEq(verdict.probability, 1, "degradation saturates alone");
 });
