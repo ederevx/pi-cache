@@ -148,6 +148,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       start: opts.pressureDegradeStart,
       full: opts.pressureDegradeFull,
       gamma: opts.pressureDegradeGamma,
+      startTokens: opts.pressureDegradeStartTokens,
+      fullTokens: opts.pressureDegradeFullTokens,
     }),
   });
   const fastcompact = new FastCompactionController({
@@ -165,6 +167,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
     summaryCost: opts.pressureSummaryCost,
     minTokens: opts.pressureMinTokens,
     midterm: opts.midterm,
+    midtermMinPercent: opts.midtermMinPercent,
     pressure,
   });
   const settingsStore = new UserSettingsStore(opts.settingsPath);

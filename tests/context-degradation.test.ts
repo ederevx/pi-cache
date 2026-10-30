@@ -44,3 +44,65 @@ test("degradation: a negative gamma stays bounded", () => {
   const above = model.pressure(160_000, 200_000);
   assert(Number.isFinite(above) && above >= 0 && above <= 1, `bounded ${above}`);
 });
+
+test("degradation: token caps bound a large window", () => {
+  const model = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1 });
+  assertEq(model.onset(1_000_000), 100_000, "a 1M window starts at the cap");
+  assertEq(model.pressure(100_000, 1_000_000), 0, "zero at the capped onset");
+  assertEq(model.pressure(200_000, 1_000_000), 1, "saturated at the full cap");
+  assertEq(model.onset(200_000), 100_000, "a 200K window keeps its fraction");
+});
+
+test("degradation: each cap can be disabled independently", () => {
+  const startCapped = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1, startTokens: 0 });
+  assertEq(startCapped.onset(1_000_000), 500_000, "fraction restored for start");
+  assertEq(startCapped.pressure(499_999, 1_000_000), 0, "zero below the fractional onset");
+
+  const fullCapped = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1, fullTokens: 0 });
+  assertEq(fullCapped.onset(1_000_000), 100_000, "start stays capped");
+  assertEq(fullCapped.pressure(850_000, 1_000_000), 1, "fraction restored for full");
+
+  const uncapped = new ContextDegradation({
+    start: 0.5,
+    full: 0.85,
+    gamma: 1,
+    startTokens: 0,
+    fullTokens: 0,
+  });
+  assertEq(uncapped.pressure(499_999, 1_000_000), 0, "fractional onset");
+  assertEq(uncapped.pressure(850_000, 1_000_000), 1, "fractional saturation");
+});
+
+test("degradation: a capped window ramps between the absolute points", () => {
+  const model = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 2 });
+  assertEq(model.pressure(150_000, 1_000_000), 0.25, "halfway between the caps");
+  assertEq(model.pressure(150_000, 200_000), 0.5102040816326531, "fractional full point kept");
+});
+
+test("degradation: crossed token budgets collapse to a step at the start", () => {
+  const model = new ContextDegradation({
+    start: 0.5,
+    full: 0.85,
+    gamma: 2,
+    startTokens: 300_000,
+    fullTokens: 150_000,
+  });
+  assertEq(model.onset(1_000_000), 300_000, "the start budget bounds the onset");
+  assertEq(model.pressure(300_000, 1_000_000), 0, "zero at the collapsed step");
+  assertEq(model.pressure(300_001, 1_000_000), 1, "saturated one step above it");
+});
+
+test("degradation: equal or reversed thresholds stay finite and monotone", () => {
+  // Equal points collapse to a single step: still zero at the onset itself,
+  // saturated immediately above it.
+  const equal = new ContextDegradation({ start: 0.5, full: 0.5, gamma: 2 });
+  assertEq(equal.pressure(100_000, 200_000), 0, "at the single step");
+  assertEq(equal.pressure(100_001, 200_000), 1, "one step above it");
+
+  const reversed = new ContextDegradation({ start: 0.8, full: 0.2, gamma: 2 });
+  const below = reversed.pressure(150_000, 200_000);
+  const above = reversed.pressure(190_000, 200_000);
+  assert(Number.isFinite(below) && Number.isFinite(above), "finite");
+  assert(below <= above, "still monotone");
+  assert(below >= 0 && above <= 1, "bounded");
+});
