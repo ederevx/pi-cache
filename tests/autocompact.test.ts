@@ -8,6 +8,7 @@
 import { test, assert, assertEq } from "./harness.ts";
 import { AutocompactController } from "../src/autocompact.ts";
 import { CompactionPressure } from "../src/pressure.ts";
+import { ContextDegradation } from "../src/context-degradation.ts";
 
 const opts = { enabled: true, cooldownSeconds: 0 };
 
@@ -280,4 +281,37 @@ test("autocompact: decide reads the freshest request, not just the last turn", (
   const verdict = c.decide(90, s);
   assertEq(verdict.shouldCompact, false);
   assertEq(verdict.reason, "cache warm");
+});
+
+test("autocompact: midterm fires past the degradation onset below the percent gate", () => {
+  const model = new CompactionPressure({
+    degradation: new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1 }),
+    random: () => 0,
+  });
+  const c = new AutocompactController({ ...opts, midterm: true, pressure: model });
+  c.noteTurn();
+  // 25% of a 1M window is under the 50% gate but past the 100K capped onset,
+  // and the degradation ramp is already saturated there.
+  assertEq(c.midtermEligible({ tokens: 250_000, contextWindow: 1_000_000 }, signals()), true);
+  // Below the onset the percent gate cannot be satisfied either.
+  assertEq(c.midtermEligible({ tokens: 60_000, contextWindow: 1_000_000 }, signals()), false);
+});
+
+test("autocompact: midterm still needs a saturated probability", () => {
+  const model = new CompactionPressure({
+    degradation: new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1, startTokens: 0 }),
+    random: () => 0,
+  });
+  const c = new AutocompactController({ ...opts, midterm: true, pressure: model });
+  c.noteTurn();
+  // 15% clears a 10% configured gate but the degradation ramp has not started,
+  // so the probability is 0 and the midterm trigger stays off.
+  const low = new AutocompactController({
+    ...opts,
+    midterm: true,
+    midtermMinPercent: 10,
+    pressure: model,
+  });
+  low.noteTurn();
+  assertEq(low.midtermEligible({ tokens: 150_000, contextWindow: 1_000_000 }, signals()), false);
 });

@@ -106,8 +106,16 @@ compaction is on, makes the compaction itself prefix-stable:
    reasons into a `[0,1]` pressure:
    - *Context degradation* (`src/context-degradation.ts`): the occupancy
      at which long-context answer quality starts to fall (RULER/NoLiMa),
-     as a `start`/`full`/`gamma` onset (default 0.5/0.85/2). The true
-     onset is model- and task-dependent, so it is a tunable guard.
+     as a `start`/`full`/`gamma` onset (default 0.5/0.85/2) whose token
+     points are each capped at an absolute budget (`startTokens`/
+     `fullTokens`, default 100 000/200 000; <=0 leaves that point
+     uncapped). A large advertised window otherwise postpones quality
+     pressure far past the context a model holds up on, so the budgets keep
+     a 1M-token window compacting around the frontier ~200K class. With the
+     default fractional thresholds and token budgets, windows at or below
+     200,000 tokens retain their previous degradation curve. The budgets are
+     provisional policy, not a measured universal limit. The true onset is
+     model- and task-dependent, so it stays a tunable guard.
    - *Expected cost* (`src/economics.ts`): continuing reads the prefix for
      an expected horizon `1/(1-continuation)` capped at `maxRequests`,
      while compacting pays one rewrite of the retained `keepFraction` plus
@@ -123,7 +131,12 @@ compaction is on, makes the compaction itself prefix-stable:
      per-million rates, or — for models the configured model-list endpoint
      prices — from a freshly pulled snapshot (`src/model-params.ts`) with
      per-request override tiers selected by live token count; absent
-     rates leave economics at 0, so the degradation onset gates alone.
+     rates - or all-zero rates, which the no-cost `*-token-plan` and
+     coding-plan models declare - leave economic pressure at zero, so
+     pressure comes entirely from context degradation. Midterm compaction
+     still requires saturated probability and the existing eligibility and
+     cooldown checks. The minimum-token floor applies in `decide()`, not in
+     `midtermEligible()`.
    The two combine by inclusion-exclusion (`1-(1-d)(1-e)`), then a
    `start=0.1`/`full=0.6`/`gamma=2` ramp yields the Bernoulli probability;
    the draw uses an injected RNG. Because economics is flat in token
@@ -136,7 +149,9 @@ compaction is on, makes the compaction itself prefix-stable:
    while pi sits idle, and the `input` hook when a cold prompt arrives
    before a turn. A fourth, mid-run point fires at the `turn_end`
    boundary, but only when the pressure is saturated (probability 1) and
-   the window is at least half full, so a long agentic run can compact
+   the window is at least `PI_CACHE_MIDTERM_MIN_PERCENT` (default 50)
+   percent full or past the degradation onset, so a long agentic run can
+   compact
    without waiting to settle (`PI_CACHE_MIDTERM`). It returns a boundary
    `compaction` draft (built by `src/midterm.ts` + `src/midterm-cut.ts`)
    plus `continue: true`, so pi applies the compaction and continues the
