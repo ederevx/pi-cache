@@ -400,3 +400,32 @@ test("constants: envPinnedIds lists rows whose env var is present", () => {
   assert(!pinned.includes("telemetry"), "absent vars not pinned");
   assertEq(pinned.length, 2);
 });
+
+test("options: degradation token budgets and the midterm percent resolve", () => {
+  withEnv(
+    {
+      PI_CACHE_PRESSURE_DEGRADE_START_TOKENS: undefined,
+      PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS: undefined,
+      PI_CACHE_MIDTERM_MIN_PERCENT: undefined,
+    },
+    () => {
+      const defaults = loadOptions();
+      assertEq(defaults.pressureDegradeStartTokens, 100_000, "start budget default");
+      assertEq(defaults.pressureDegradeFullTokens, 200_000, "full budget default");
+      assertEq(defaults.midtermMinPercent, 50, "midterm percent default");
+    },
+  );
+  withEnv(
+    {
+      PI_CACHE_PRESSURE_DEGRADE_START_TOKENS: "64000",
+      PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS: "128000",
+      PI_CACHE_MIDTERM_MIN_PERCENT: "25",
+    },
+    () => {
+      const overridden = loadOptions();
+      assertEq(overridden.pressureDegradeStartTokens, 64_000);
+      assertEq(overridden.pressureDegradeFullTokens, 128_000);
+      assertEq(overridden.midtermMinPercent, 25);
+    },
+  );
+});
