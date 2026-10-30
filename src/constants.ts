@@ -108,6 +108,12 @@ export interface PiCacheOptions {
   pressureDegradeStart: number;
   pressureDegradeFull: number;
   pressureDegradeGamma: number;
+  /** Absolute token cap on the degradation onset start (<=0 uncapped). */
+  pressureDegradeStartTokens: number;
+  /** Absolute token cap on degradation saturation (<=0 uncapped). */
+  pressureDegradeFullTokens: number;
+  /** Window occupancy percent the midterm gate also requires. */
+  midtermMinPercent: number;
 }
 
 export class OptionsLoader {
@@ -198,6 +204,12 @@ export class OptionsLoader {
       pressureDegradeStart: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_START", 0.5),
       pressureDegradeFull: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_FULL", 0.85),
       pressureDegradeGamma: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_GAMMA", 2),
+      // Provisional absolute budgets: a large advertised window would
+      // otherwise postpone quality pressure far past the context a model
+      // actually holds up on. Independently configurable; <=0 uncaps.
+      pressureDegradeStartTokens: this.envInt("PI_CACHE_PRESSURE_DEGRADE_START_TOKENS", 100_000),
+      pressureDegradeFullTokens: this.envInt("PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS", 200_000),
+      midtermMinPercent: this.envFloat("PI_CACHE_MIDTERM_MIN_PERCENT", 50),
     };
   }
 
