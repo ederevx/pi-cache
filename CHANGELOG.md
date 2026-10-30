@@ -3,6 +3,22 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.17.0] - 2026-10-30
+
+### Changed
+
+- Context degradation caps each onset point at an absolute token budget
+  (`pressureDegradeStartTokens`/`pressureDegradeFullTokens`, defaults
+  100 000/200 000; `<=0` leaves a point uncapped), so a large advertised
+  window no longer postpones quality pressure far past the context a model
+  holds up on. With the default fractions, a window at or below 200 000
+  tokens keeps its previous curve. The budgets are policy defaults, not a
+  measured universal limit, and they apply to paid models too.
+- The midterm compaction gate fires once the live count passes that onset as
+  well as at a share of the window, now `PI_CACHE_MIDTERM_MIN_PERCENT`
+  (default 50). Probability saturation, the minimum-context floor, the
+  cooldown, and the warm-cache floor are unchanged.
+
 ## [0.16.1] - 2026-10-29
 
 ### Fixed
