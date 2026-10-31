@@ -3,6 +3,26 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.18.1] - 2026-10-31
+
+### Fixed
+
+- The shared cache key is derived only for chat-completions bodies. pi-ai also
+  sets `prompt_cache_key` on long-tier compatible completions endpoints and on
+  every openai-responses target, whose head lives in `input`/`instructions`
+  rather than `messages`; there the key hashed model and tools alone, so
+  unrelated sessions merged into one bucket, and on Codex it disagreed with the
+  session id that drives the websocket request id. Those bodies now keep pi's
+  per-session key.
+
+### Changed
+
+- The shared-key setting and README state that the rewrite covers
+  chat-completions bodies and that one key carrying more than roughly 15
+  requests a minute needs partitioning, which a per-session key already
+  provides. The switch still ships off, and enabling it still waits on a
+  long-tier measurement of first-request cache gains.
+
 ## [0.18.0] - 2026-10-31
 
 ### Added
