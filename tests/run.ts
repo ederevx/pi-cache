@@ -68,6 +68,7 @@ import "./miss-classifier.test.ts";
 import "./settings.test.ts";
 import "./settings-switch.test.ts";
 import "./stats.test.ts";
+import "./calibration.test.ts";
 import "./extension.test.ts";
 
 // 2. Unit + end-to-end suite.
