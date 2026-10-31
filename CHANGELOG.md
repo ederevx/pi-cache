@@ -5,6 +5,8 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-31
+
 ### Changed
 
 - The absolute token budgets that used to cap the degradation onset became a
