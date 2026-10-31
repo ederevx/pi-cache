@@ -2,8 +2,8 @@
  * pi-cache — cache-relevant prefix head.
  *
  * One responsibility: the fingerprint (model, first two system/developer
- * contents, tools array) that the churn counter and the shared OpenAI
- * cache key must hash identically, so they cannot drift apart.
+ * contents, tools array) that the churn counter and the shared cache key
+ * must hash identically, so they cannot drift apart.
  */
 
 import { createHash } from "node:crypto";
