@@ -46,6 +46,9 @@ export interface AutocompactSignal {
   /** Milliseconds since the cache was last touched (last turn or a pi warm
    *  refresh); falls back to `msSinceLastTurn` when absent. */
   msSinceCacheTouch?(): number;
+  /** Active age (ms) of the live context since the last compaction boundary,
+   *  for the degradation model's time component; absent reads as no age. */
+  contextActiveMs?(): number | undefined;
   /** Number of times the prefix head changed this session (normalizer.churn). */
   headChurn(): number;
   /** Provider cache lifetime in ms when known (model.promptCache tier). */
@@ -60,6 +63,8 @@ export interface AutocompactSignal {
 interface CacheTiming {
   ttlMs?: number;
   msSinceCacheTouch?: number;
+  /** Active age of the live context, for the degradation time component. */
+  contextActiveMs?: number;
 }
 
 /** The context-usage fields the controller reads (pi's `ContextUsage`). */
@@ -256,8 +261,8 @@ export class AutocompactController {
     return this.cooldownElapsed();
   }
 
-  /** At the configured occupancy, or past the degradation onset (an absolute
-   *  token cap pulls the onset below a fraction of a large window). */
+  /** At the configured occupancy, or past the degradation onset (the research
+   *  floor on absolute length or the fractional ramp, whichever starts first). */
   private pastMidtermOnset(view: AutocompactView, sample: PressureSample): boolean {
     const percent = this.opts.midtermMinPercent ?? AutocompactController.DEFAULT_MIDTERM_MIN_PERCENT;
     if (AutocompactController.atLeastPercent(view, percent)) return true;
@@ -416,17 +421,21 @@ export class AutocompactController {
       input: usage.input,
       ttlMs: timing.ttlMs,
       msSinceCacheTouch: timing.msSinceCacheTouch,
+      contextActiveMs: timing.contextActiveMs,
     };
   }
 
-  /** The positive TTL and finite touch age the horizon may decay against. */
+  /** The positive TTL and finite touch age the horizon may decay against, and
+   *  the active context age the degradation time component reads. */
   private cacheTiming(signals?: AutocompactSignal): CacheTiming {
     const ttlMs = signals?.cacheTtlMs?.();
     const touch = signals?.msSinceCacheTouch?.() ?? signals?.msSinceLastTurn();
+    const active = signals?.contextActiveMs?.();
     return {
       ttlMs: typeof ttlMs === "number" && ttlMs > 0 ? ttlMs : undefined,
       msSinceCacheTouch:
         typeof touch === "number" && Number.isFinite(touch) ? touch : undefined,
+      contextActiveMs: typeof active === "number" && Number.isFinite(active) ? active : undefined,
     };
   }
 

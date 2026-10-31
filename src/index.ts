@@ -148,8 +148,10 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       start: opts.pressureDegradeStart,
       full: opts.pressureDegradeFull,
       gamma: opts.pressureDegradeGamma,
-      startTokens: opts.pressureDegradeStartTokens,
-      fullTokens: opts.pressureDegradeFullTokens,
+      floorStartTokens: opts.pressureDegradeFloorStartTokens,
+      floorFullTokens: opts.pressureDegradeFloorFullTokens,
+      floor: opts.pressureDegradeFloor,
+      halfLifeMs: opts.pressureDegradeHalfLifeMinutes * 60_000,
     }),
   });
   const fastcompact = new FastCompactionController({
@@ -227,6 +229,7 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
           : undefined,
       fallbackTtlSecondsOf: (ctx) =>
         modelTtl.secondsFor(ctx?.model?.provider, ctx?.model?.id, retention.effectiveLong()),
+      ageGapCapMs: opts.pressureDegradeAgeGapSeconds * 1000,
     },
     {
       lastUsage: () => ledger.lastUsage(),

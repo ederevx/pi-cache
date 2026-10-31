@@ -3,6 +3,39 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [Unreleased]
+
+### Changed
+
+- The absolute token budgets that used to cap the degradation onset became a
+  **minimum** on degradation pressure instead of a maximum. The new model
+  blends three reasons by inclusion-exclusion: a research floor on absolute
+  length (32 768 to 131 072 tokens, plateauing at 0.5, from RULER, NoLiMa and
+  Databricks), the uncapped fractional ramp toward the advertised window, and
+  — for windows too large for either to speak — the active age of the context
+  that is still live, with a 60-minute half-life. A 1M-token window therefore
+  reaches pressure 0.5 from length alone instead of saturating at 200K, and
+  keeps climbing to the window limit.
+- `PI_CACHE_PRESSURE_DEGRADE_START_TOKENS` and `_FULL_TOKENS` are deleted, not
+  renamed: an old value would have been silently reinterpreted as a floor
+  onset. They are replaced by `PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS`,
+  `_FLOOR_FULL_TOKENS`, `_FLOOR` and `_HALF_LIFE_MINUTES`. Set-and-forget
+  configuration that named the deleted variables is now ignored.
+- Active context age is measured from the last compaction's first kept entry
+  to the leaf, each entry gap capped at a short interval rather than at the
+  provider cache TTL, so a resumed session is charged one bounded stretch of
+  work instead of hours of accumulated context (`src/context-age.ts`,
+  `PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS`, default 300). The TTL
+  describes a cache, not activity.
+- A zero `PI_CACHE_PRESSURE_DEGRADE_FLOOR` removes only the floor's own
+  contribution; the age term that multiplies the same length evidence keeps
+  working. Non-finite values of any degradation setting fall back to the
+  default instead of turning the pressure into NaN, and the two occupancy
+  fractions are clamped to `[0,1]` so a negative `START` cannot move the
+  onset below zero tokens.
+- An unknown context window (0, NaN or infinite) no longer saturates the
+  fractional ramp; it contributes nothing, leaving the floor and the time term.
+
 ## [0.18.1] - 2026-10-31
 
 ### Fixed

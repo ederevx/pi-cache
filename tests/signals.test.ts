@@ -37,6 +37,32 @@ test("signals: cache TTL prefers the model tier over the fallback", () => {
   assertEq(s.cacheTtlMs(undefined), 300_000, "fallback when the model declares none");
 });
 
+test("signals: active age is capped by the gap cap, not the provider TTL", () => {
+  const minute = 60_000;
+  const branch = [
+    { id: "a", type: "message", timestamp: new Date(0).toISOString() },
+    { id: "b", type: "message", timestamp: new Date(10 * minute).toISOString() },
+    { id: "c", type: "message", timestamp: new Date(25 * minute).toISOString() },
+  ];
+  const ctx = {
+    model: { promptCache: { short: 3600 } },
+    sessionManager: { getBranch: () => branch },
+  };
+  const capped = new SessionSignals({ ...opts, ageGapCapMs: 5 * minute }, sources());
+  assertEq(capped.contextActiveMs(ctx), 10 * minute, "two gaps, each capped at five minutes");
+  const generous = new SessionSignals({ ...opts, ageGapCapMs: 60 * minute }, sources());
+  assertEq(generous.contextActiveMs(ctx), 25 * minute, "a wider cap counts the real gaps");
+  const fallback = new SessionSignals(opts, sources());
+  assertEq(fallback.contextActiveMs(ctx), 10 * minute, "the default cap is five minutes");
+  const broken = new SessionSignals({ ...opts, ageGapCapMs: Number.NaN }, sources());
+  assertEq(broken.contextActiveMs(ctx), 10 * minute, "a non-finite cap falls back");
+  assertEq(
+    new SessionSignals({ ...opts, ageGapCapMs: 5 * minute }, sources()).contextActiveMs(undefined),
+    undefined,
+    "no branch reads as no age"
+  );
+});
+
 test("signals: session id falls back safely", () => {
   const s = new SessionSignals(opts, sources());
   assertEq(s.sessionIdOf({ sessionManager: { getSessionId: () => "s1" } }), "s1");

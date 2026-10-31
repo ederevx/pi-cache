@@ -31,9 +31,11 @@ Cache-aware compaction has two layers, both on by default; the full trigger
 and retention semantics are in `docs/design.md`.
 
 - **Compaction pressure.** Auto-compaction fires on a probabilistic pressure
-  that blends context degradation with the expected cost of continuing
-  versus rewriting the prefix, checked at settle, at cache-TTL idle, before
-  a cold turn, and at a saturated turn boundary.
+  that blends context degradation (a research-based floor on absolute
+  length, a ramp toward the window limit, and the active age of the live
+  context for windows too large to trust) with the expected cost of
+  continuing versus rewriting the prefix, checked at settle, at cache-TTL
+  idle, before a cold turn, and at a saturated turn boundary.
 - **Fast compaction override.** When on, pi-cache answers every compaction
   reason, and a wanted `/tree` branch summary, with a byte-stable
   cache-aware override instead of pi's LLM summarizer.
