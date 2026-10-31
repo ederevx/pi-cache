@@ -1,0 +1,1784 @@
+{
+  "profile": {
+    "schemaVersion": 1,
+    "createdAt": "2026-10-31T02:27:36.732Z",
+    "model": "deepseek-v4.1-flash",
+    "providerBase": "https://code.verboo.ai/router/v1",
+    "benchmarkHash": "b1ae856153bd0550",
+    "protocolHash": "afcec14d91ee34f8",
+    "acceptableQualityLoss": 0.05,
+    "materialFullHistoryLoss": 0.05,
+    "plannedTasks": 8,
+    "observations": 80,
+    "transportFailureRate": 0,
+    "truncatedRate": 0.0875,
+    "points": [
+      {
+        "targetTokens": 32000,
+        "tasks": 8,
+        "fullSuccessRate": 0.875,
+        "digestSuccessRate": 0.5,
+        "digestMinusFull": -0.375,
+        "digestMinusFullCi": [
+          -0.9290985299969634,
+          0.6259288675209973
+        ],
+        "fullLossFromBaseline": null,
+        "fullLossFromBaselineCi": null,
+        "classification": "inconclusive"
+      },
+      {
+        "targetTokens": 64000,
+        "tasks": 8,
+        "fullSuccessRate": 0.875,
+        "digestSuccessRate": 0.5,
+        "digestMinusFull": -0.375,
+        "digestMinusFullCi": [
+          -0.8716915509430692,
+          0.5303290962183382
+        ],
+        "fullLossFromBaseline": 0,
+        "fullLossFromBaselineCi": [
+          -0.5606269267154858,
+          0.5606269267154858
+        ],
+        "classification": "inconclusive"
+      },
+      {
+        "targetTokens": 100000,
+        "tasks": 8,
+        "fullSuccessRate": 1,
+        "digestSuccessRate": 0.375,
+        "digestMinusFull": -0.625,
+        "digestMinusFullCi": [
+          -0.9697021695028525,
+          0.4323184776585549
+        ],
+        "fullLossFromBaseline": -0.125,
+        "fullLossFromBaselineCi": [
+          -0.5604532100198867,
+          0.6966566208284348
+        ],
+        "classification": "inconclusive"
+      },
+      {
+        "targetTokens": 128000,
+        "tasks": 8,
+        "fullSuccessRate": 1,
+        "digestSuccessRate": 0.5,
+        "digestMinusFull": -0.5,
+        "digestMinusFullCi": [
+          -0.9292722466925625,
+          0.4898991734080482
+        ],
+        "fullLossFromBaseline": -0.125,
+        "fullLossFromBaselineCi": [
+          -0.5604532100198867,
+          0.6966566208284348
+        ],
+        "classification": "inconclusive"
+      },
+      {
+        "targetTokens": 200000,
+        "tasks": 8,
+        "fullSuccessRate": 0.875,
+        "digestSuccessRate": 0.375,
+        "digestMinusFull": -0.5,
+        "digestMinusFullCi": [
+          -0.9695284528072534,
+          0.568348171771504
+        ],
+        "fullLossFromBaseline": 0,
+        "fullLossFromBaselineCi": [
+          -0.6964829041328358,
+          0.6964829041328358
+        ],
+        "classification": "inconclusive"
+      }
+    ],
+    "firstSupportedTriggerTokens": null,
+    "note": "live run: provider-reported usage, exact paired intervals, no extrapolation beyond tested lengths"
+  },
+  "observations": [
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 32221,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 12715,
+      "usage": {
+        "promptTokens": 31871,
+        "cachedTokens": 31744,
+        "completionTokens": 481
+      },
+      "promptTokens": 31871,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  if (!Array.isArray(list) || list.length === 0) return [];\n\n  const sorted = list\n    .map((iv) => iv.slice())\n    .sort((a, b) => a[0] - b[0]);\n\n  const merged = [sorted[0]];\n\n  for (let i = 1; i < sorted.length; i++) {\n    const current = sorted[i];\n    const last = merged[merged.length - 1];\n\n    if (current[0] <= last[1]) {\n      last[1] = Math.max(last[1], current[1]);\n    } else {\n      merged.push(current);\n    }\n  }\n\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 200211,
+      "leg": "full",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 134266,
+      "usage": {
+        "promptTokens": 198170,
+        "cachedTokens": 198144,
+        "completionTokens": 8000
+      },
+      "promptTokens": 198170,
+      "answer": "",
+      "gradeDetail": "no fenced code block in the answer",
+      "truncated": true
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 101710,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 13945,
+      "usage": {
+        "promptTokens": 100648,
+        "cachedTokens": 100352,
+        "completionTokens": 225
+      },
+      "promptTokens": 100648,
+      "answer": "```js\nexport function chunk(items, size) {\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 2464,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 85788,
+      "usage": {
+        "promptTokens": 2058,
+        "cachedTokens": 0,
+        "completionTokens": 5126
+      },
+      "promptTokens": 2058,
+      "answer": "```js\n'use strict';\n\nfunction chunk(items, size = 1) {\n  if (!Array.isArray(items)) {\n    throw new TypeError('chunk: expected an array');\n  }\n  if (!Number.isInteger(size) || size <= 0) {\n    throw new RangeError('chunk: size must be a positive integer');\n  }\n\n  const batches = [];\n  for (let i = 0; i < items.length; i += size) {\n    batches.push(items.slice(i, i + size));\n  }\n  return batches;\n}\n\nmodule.exports = chunk;\nmodule.exports.chunk = chunk;\nmodule.exports.batch = chunk;\nmodule.exports.default = chunk;\n```",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 65382,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 61046,
+      "usage": {
+        "promptTokens": 64711,
+        "cachedTokens": 64512,
+        "completionTokens": 3614
+      },
+      "promptTokens": 64711,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === \"number\") {\n    return Math.round(text * 100);\n  }\n\n  let input = String(text).trim();\n  let negative = false;\n\n  if (input.startsWith(\"(\") && input.endsWith(\")\")) {\n    negative = true;\n    input = input.slice(1, -1).trim();\n  }\n\n  if (input.startsWith(\"-\")) {\n    negative = true;\n    input = input.slice(1).trim();\n  } else if (input.startsWith(\"+\")) {\n    input = input.slice(1).trim();\n  }\n\n  const cleaned = input.replace(/[^\\d.,]/g, \"\");\n  if (cleaned === \"\") {\n    return 0;\n  }\n\n  const lastComma = cleaned.lastIndexOf(\",\");\n  c",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 64236,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 5188,
+      "usage": {
+        "promptTokens": 63544,
+        "cachedTokens": 63232,
+        "completionTokens": 269
+      },
+      "promptTokens": 63544,
+      "answer": "```js\nexport function chunk(items, size) {\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 129474,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 16593,
+      "usage": {
+        "promptTokens": 128140,
+        "cachedTokens": 128000,
+        "completionTokens": 404
+      },
+      "promptTokens": 128140,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list\n    .map((iv) => iv.slice())\n    .sort((a, b) => a[0] - b[0]);\n\n  const merged = [];\n  for (const iv of sorted) {\n    const last = merged[merged.length - 1];\n    if (last && iv[0] <= last[1]) {\n      if (iv[1] > last[1]) {\n        last[1] = iv[1];\n      }\n    } else {\n      merged.push(iv);\n    }\n  }\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 201741,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 24100,
+      "usage": {
+        "promptTokens": 199667,
+        "cachedTokens": 199168,
+        "completionTokens": 670
+      },
+      "promptTokens": 199667,
+      "answer": "```js\nexport function clampRatio(value) {\n  if (!Number.isFinite(value)) return 0;\n  const clamped = Math.min(1, Math.max(0, value));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 100883,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 54786,
+      "usage": {
+        "promptTokens": 99843,
+        "cachedTokens": 99328,
+        "completionTokens": 3232
+      },
+      "promptTokens": 99843,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === \"number\") {\n    if (!Number.isFinite(text)) throw new TypeError(\"Invalid price\");\n    return Math.round(text * 100);\n  }\n\n  if (typeof text !== \"string\") throw new TypeError(\"Invalid price\");\n\n  let s = text.trim();\n  if (!s) throw new TypeError(\"Invalid price\");\n\n  let negative = false;\n  if (/^\\(.*\\)$/.test(s)) {\n    negative = true;\n    s = s.slice(1, -1).trim();\n  }\n\n  // Keep digits, separators, and sign; drop currency symbols, labels, and whitespace.\n  s = s.replace(/[^0-9.,+\\-]/g, \"\");\n  if (!s) throw new TypeError(\"Invalid ",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 100802,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 13236,
+      "usage": {
+        "promptTokens": 99759,
+        "cachedTokens": 99584,
+        "completionTokens": 662
+      },
+      "promptTokens": 99759,
+      "answer": "```js\nexport function clampRatio(value) {\n  const clamped = Math.min(1, Math.max(0, value));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 2656,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 120910,
+      "usage": {
+        "promptTokens": 2216,
+        "cachedTokens": 0,
+        "completionTokens": 7234
+      },
+      "promptTokens": 2216,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === 'number') {\n    return Math.round(text * 100);\n  }\n\n  if (text === null) {\n    return Math.round(Number(text) * 100);\n  }\n\n  const input = String(text).trim();\n  if (!input) {\n    return Math.round(Number(input) * 100);\n  }\n\n  let negative = false;\n  let body = input;\n\n  if (/^\\(.*\\)$/.test(body)) {\n    negative = true;\n    body = body.slice(1, -1);\n  }\n\n  const cleaned = body.replace(/[^\\d.,+\\-\\s]/g, ' ');\n  const match = cleaned.match(/[+-]?\\s*(?:\\d[\\d.,\\s]*\\d|\\d|\\.\\d+)/);\n\n  if (!match) {\n    return Math.round(Number(input) * 10",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 2649,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 9897,
+      "usage": {
+        "promptTokens": 2217,
+        "cachedTokens": 0,
+        "completionTokens": 579
+      },
+      "promptTokens": 2217,
+      "answer": "```js\nexport function clampRatio(value) {\n  const numeric = Number(value);\n  if (!Number.isFinite(numeric)) return 0;\n\n  const clamped = Math.min(1, Math.max(0, numeric));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 2584,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 45816,
+      "usage": {
+        "promptTokens": 2154,
+        "cachedTokens": 1536,
+        "completionTokens": 2729
+      },
+      "promptTokens": 2154,
+      "answer": "```js\n'use strict';\n\nfunction chunk(items, size) {\n  if (!Array.isArray(items)) {\n    throw new TypeError('chunk expects an array');\n  }\n\n  if (!Number.isInteger(size) || size <= 0) {\n    throw new RangeError('chunk size must be a positive integer');\n  }\n\n  const batches = [];\n  for (let start = 0; start < items.length; start += size) {\n    batches.push(items.slice(start, start + size));\n  }\n\n  return batches;\n}\n\nmodule.exports = chunk;\nmodule.exports.chunk = chunk;\nmodule.exports.default = chunk;\n```",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 32670,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 7872,
+      "usage": {
+        "promptTokens": 32311,
+        "cachedTokens": 32000,
+        "completionTokens": 254
+      },
+      "promptTokens": 32311,
+      "answer": "```js\nexport function chunk(items, size) {\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 65196,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 21426,
+      "usage": {
+        "promptTokens": 64514,
+        "cachedTokens": 64512,
+        "completionTokens": 1248
+      },
+      "promptTokens": 64514,
+      "answer": "```js\nexport function clampRatio(value) {\n  const numeric = Number(value);\n  if (Number.isNaN(numeric)) return 0;\n  return Math.min(1, Math.max(0, Math.round(numeric * 1000) / 1000));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 200683,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 18461,
+      "usage": {
+        "promptTokens": 198631,
+        "cachedTokens": 126464,
+        "completionTokens": 248
+      },
+      "promptTokens": 198631,
+      "answer": "```js\nexport function chunk(items, size) {\n  if (!Number.isInteger(size) || size <= 0) return [];\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 129683,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 62569,
+      "usage": {
+        "promptTokens": 128352,
+        "cachedTokens": 128000,
+        "completionTokens": 3700
+      },
+      "promptTokens": 128352,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === \"number\") {\n    return Math.round(text * 100);\n  }\n\n  if (typeof text !== \"string\") {\n    text = String(text);\n  }\n\n  let s = text.trim();\n  if (!s) return NaN;\n\n  let negative = false;\n\n  if (/^\\(.*\\)$/.test(s)) {\n    negative = true;\n    s = s.slice(1, -1).trim();\n  }\n\n  if (s.includes(\"-\")) {\n    negative = true;\n    s = s.replace(/-/g, \"\");\n  }\n\n  s = s.replace(/[^\\d.,]/g, \"\");\n  if (!s) return NaN;\n\n  const lastComma = s.lastIndexOf(\",\");\n  const lastDot = s.lastIndexOf(\".\");\n  let decimalSeparator = null;\n\n  if (lastComma !==",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 2472,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 22013,
+      "usage": {
+        "promptTokens": 2076,
+        "cachedTokens": 0,
+        "completionTokens": 1306
+      },
+      "promptTokens": 2076,
+      "answer": "```js\nexport function clampRatio(value) {\n  const numeric = Number(value);\n\n  if (!Number.isFinite(numeric)) {\n    return numeric === Infinity ? 1 : 0;\n  }\n\n  const rounded = Math.round(numeric * 1000) / 1000;\n  return Math.min(1, Math.max(0, rounded));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 101127,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 16440,
+      "usage": {
+        "promptTokens": 100081,
+        "cachedTokens": 99840,
+        "completionTokens": 698
+      },
+      "promptTokens": 100081,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list.slice().sort((a, b) => a[0] - b[0]);\n  const merged = [];\n  for (const interval of sorted) {\n    const last = merged[merged.length - 1];\n    if (last && interval[0] <= last[1]) {\n      if (interval[1] > last[1]) last[1] = interval[1];\n    } else {\n      merged.push(interval.slice());\n    }\n  }\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 2588,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 70245,
+      "usage": {
+        "promptTokens": 2152,
+        "cachedTokens": 2048,
+        "completionTokens": 4187
+      },
+      "promptTokens": 2152,
+      "answer": "```js\n'use strict';\n\nfunction mergeIntervals(intervals) {\n  if (!Array.isArray(intervals) || intervals.length === 0) {\n    return [];\n  }\n\n  const sorted = intervals\n    .map((interval, index) => {\n      const isArray = Array.isArray(interval);\n      return {\n        interval,\n        index,\n        start: isArray ? interval[0] : interval.start,\n        end: isArray ? interval[1] : interval.end,\n      };\n    })\n    .sort((a, b) => {\n      if (a.start < b.start) return -1;\n      if (a.start > b.start) return 1;\n      if (a.end < b.end) return -1;\n      if (a.end > b.end) return 1;\n      return ",
+      "gradeDetail": "Command failed: node --test test/merge-intervals.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 200244,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 12295,
+      "usage": {
+        "promptTokens": 198179,
+        "cachedTokens": 128000,
+        "completionTokens": 442
+      },
+      "promptTokens": 198179,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list\n    .map((iv) => [iv[0], iv[1]])\n    .sort((a, b) => a[0] - b[0]);\n\n  const merged = [];\n  for (const [start, end] of sorted) {\n    const last = merged[merged.length - 1];\n    if (last && start <= last[1]) {\n      if (end > last[1]) last[1] = end;\n    } else {\n      merged.push([start, end]);\n    }\n  }\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 2468,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 65706,
+      "usage": {
+        "promptTokens": 2056,
+        "cachedTokens": 0,
+        "completionTokens": 3913
+      },
+      "promptTokens": 2056,
+      "answer": "```js\n/**\n * Merge overlapping or touching closed intervals.\n * The input array and its intervals are never mutated.\n *\n * @param {Array<[number, number]>} intervals\n * @returns {Array<[number, number]>}\n */\nexport function mergeIntervals(intervals) {\n  if (!Array.isArray(intervals)) {\n    throw new TypeError('intervals must be an array');\n  }\n\n  if (intervals.length === 0) return [];\n\n  const sorted = intervals\n    .map((interval) => {\n      if (!Array.isArray(interval) || interval.length < 2) {\n        throw new TypeError('each interval must be a [start, end] pair');\n      }\n      return [in",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 2584,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 58057,
+      "usage": {
+        "promptTokens": 2154,
+        "cachedTokens": 0,
+        "completionTokens": 3460
+      },
+      "promptTokens": 2154,
+      "answer": "```js\n'use strict';\n\n/**\n * Split an array into non-overlapping batches.\n *\n * Pure: the input array is never mutated.\n *\n * @template T\n * @param {readonly T[]} items\n * @param {number} [size=1]\n * @returns {T[][]}\n */\nfunction chunk(items, size = 1) {\n  if (!Array.isArray(items)) {\n    throw new TypeError('chunk: items must be an array');\n  }\n\n  if (!Number.isInteger(size) || size <= 0) {\n    throw new RangeError('chunk: size must be a positive integer');\n  }\n\n  const batches = [];\n\n  for (let i = 0; i < items.length; i += size) {\n    batches.push(items.slice(i, i + size));\n  }\n\n  return bat",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 128175,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 5810,
+      "usage": {
+        "promptTokens": 126849,
+        "cachedTokens": 126464,
+        "completionTokens": 160
+      },
+      "promptTokens": 126849,
+      "answer": "```js\nexport function chunk(items, size) {\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 33289,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 6081,
+      "usage": {
+        "promptTokens": 32945,
+        "cachedTokens": 32768,
+        "completionTokens": 323
+      },
+      "promptTokens": 32945,
+      "answer": "```js\nexport function clampRatio(value) {\n  const n = Number(value);\n  if (!Number.isFinite(n)) return 0;\n  return Math.min(1, Math.max(0, Math.round(n * 1000) / 1000));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 2584,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 55349,
+      "usage": {
+        "promptTokens": 2154,
+        "cachedTokens": 0,
+        "completionTokens": 3299
+      },
+      "promptTokens": 2154,
+      "answer": "```js\n'use strict';\n\n/**\n * Split an array into consecutive, non-overlapping batches.\n *\n * The input array is never mutated.\n *\n * @param {Array} items - The input array.\n * @param {number} size - Maximum size of each batch.\n * @returns {Array<Array>} The batches.\n */\nfunction chunk(items, size) {\n  if (!Array.isArray(items)) {\n    throw new TypeError('chunk expects an array');\n  }\n\n  if (!Number.isInteger(size) || size <= 0) {\n    throw new RangeError('chunk size must be a positive integer');\n  }\n\n  const batches = [];\n\n  for (let i = 0; i < items.length; i += size) {\n    batches.push(items.",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 1444,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 116128,
+      "usage": {
+        "promptTokens": 1232,
+        "cachedTokens": 1024,
+        "completionTokens": 6945
+      },
+      "promptTokens": 1232,
+      "answer": "```js\n'use strict';\n\nfunction hasOwn(obj, key) {\n  return Object.prototype.hasOwnProperty.call(obj, key);\n}\n\nfunction getStart(interval) {\n  if (Array.isArray(interval)) return interval[0];\n  if (interval && typeof interval === 'object') {\n    if (hasOwn(interval, 'start')) return interval.start;\n    if (hasOwn(interval, 'from')) return interval.from;\n    if (hasOwn(interval, 0)) return interval[0];\n  }\n  return undefined;\n}\n\nfunction getEnd(interval) {\n  if (Array.isArray(interval)) return interval[1];\n  if (interval && typeof interval === 'object') {\n    if (hasOwn(interval, 'end')) return i",
+      "gradeDetail": "Command failed: node --test test/merge-intervals.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 2649,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 32471,
+      "usage": {
+        "promptTokens": 2217,
+        "cachedTokens": 0,
+        "completionTokens": 1935
+      },
+      "promptTokens": 2217,
+      "answer": "```js\nexport function clampRatio(value) {\n  const ratio = Math.round(value * 1000) / 1000;\n  if (Number.isNaN(ratio)) {\n    return 0;\n  }\n  return Math.min(1, Math.max(0, ratio));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 2588,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 54614,
+      "usage": {
+        "promptTokens": 2152,
+        "cachedTokens": 0,
+        "completionTokens": 3255
+      },
+      "promptTokens": 2152,
+      "answer": "```js\n'use strict';\n\nfunction getStart(interval) {\n  return Array.isArray(interval) ? interval[0] : interval.start;\n}\n\nfunction getEnd(interval) {\n  return Array.isArray(interval) ? interval[1] : interval.end;\n}\n\nfunction cloneInterval(interval) {\n  return Array.isArray(interval)\n    ? [interval[0], interval[1]]\n    : { ...interval };\n}\n\nfunction setEnd(interval, end) {\n  if (Array.isArray(interval)) {\n    interval[1] = end;\n  } else {\n    interval.end = end;\n  }\n}\n\nfunction mergeIntervals(intervals) {\n  if (!Array.isArray(intervals) || intervals.length === 0) {\n    return [];\n  }\n\n  const sor",
+      "gradeDetail": "Command failed: node --test test/merge-intervals.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 2479,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 133594,
+      "usage": {
+        "promptTokens": 2075,
+        "cachedTokens": 0,
+        "completionTokens": 8000
+      },
+      "promptTokens": 2075,
+      "answer": "",
+      "gradeDetail": "no fenced code block in the answer",
+      "truncated": true
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 129154,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 28294,
+      "usage": {
+        "promptTokens": 127823,
+        "cachedTokens": 127488,
+        "completionTokens": 610
+      },
+      "promptTokens": 127823,
+      "answer": "```js\nexport function clampRatio(value) {\n  const numeric = Number(value);\n  if (!Number.isFinite(numeric)) return 0;\n  const clamped = Math.min(1, Math.max(0, numeric));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 2588,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 35702,
+      "usage": {
+        "promptTokens": 2152,
+        "cachedTokens": 0,
+        "completionTokens": 2130
+      },
+      "promptTokens": 2152,
+      "answer": "```js\n'use strict';\n\n/**\n * Merge overlapping or touching closed intervals.\n * The input array and its interval arrays are not mutated.\n *\n * @param {Array<[number, number]>} intervals\n * @returns {Array<[number, number]>}\n */\nfunction mergeIntervals(intervals) {\n  if (!Array.isArray(intervals) || intervals.length === 0) {\n    return [];\n  }\n\n  const sorted = intervals\n    .map((interval) => [interval[0], interval[1]])\n    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);\n\n  const merged = [sorted[0]];\n\n  for (let i = 1; i < sorted.length; i += 1) {\n    const current = sorted[i];\n    const last = m",
+      "gradeDetail": "Command failed: node --test test/merge-intervals.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 64020,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 13517,
+      "usage": {
+        "promptTokens": 63356,
+        "cachedTokens": 63232,
+        "completionTokens": 499
+      },
+      "promptTokens": 63356,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list\n    .slice()\n    .sort((a, b) => a[0] - b[0])\n    .map((iv) => iv.slice());\n\n  const merged = [];\n  for (const iv of sorted) {\n    const last = merged[merged.length - 1];\n    if (last && iv[0] <= last[1]) {\n      if (iv[1] > last[1]) last[1] = iv[1];\n    } else {\n      merged.push(iv);\n    }\n  }\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 2656,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 116026,
+      "usage": {
+        "promptTokens": 2216,
+        "cachedTokens": 0,
+        "completionTokens": 6940
+      },
+      "promptTokens": 2216,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === \"number\") {\n    return Math.round(text * 100);\n  }\n\n  if (typeof text !== \"string\") {\n    return NaN;\n  }\n\n  const match = text.match(/[-+]?(?:\\d{1,3}(?:[.,]\\d{3})+|\\d+)(?:[.,]\\d+)?/);\n  if (!match) {\n    return Math.round(Number(text) * 100);\n  }\n\n  let token = match[0];\n  const lastComma = token.lastIndexOf(\",\");\n  const lastDot = token.lastIndexOf(\".\");\n\n  if (lastComma !== -1 && lastDot !== -1) {\n    if (lastComma > lastDot) {\n      token = token.replace(/\\./g, \"\").replace(\",\", \".\");\n    } else {\n      token = token.replace(/,/",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 2649,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 20460,
+      "usage": {
+        "promptTokens": 2217,
+        "cachedTokens": 0,
+        "completionTokens": 1213
+      },
+      "promptTokens": 2217,
+      "answer": "```js\nexport function clampRatio(value) {\n  const numeric = Number(value);\n  if (Number.isNaN(numeric)) {\n    return 0;\n  }\n\n  const rounded = Math.round(numeric * 1000) / 1000;\n  return Math.min(1, Math.max(0, rounded));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 1455,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 132180,
+      "usage": {
+        "promptTokens": 1251,
+        "cachedTokens": 0,
+        "completionTokens": 7910
+      },
+      "promptTokens": 1251,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === \"number\") {\n    return Math.round(text * 100);\n  }\n\n  let raw = String(text).trim();\n  if (raw === \"\") return NaN;\n\n  let sign = 1;\n\n  // Accounting-style negatives: ($1,234.56)\n  if (/^\\(.*\\)$/.test(raw)) {\n    sign = -1;\n    raw = raw.slice(1, -1).trim();\n  }\n\n  // A negative sign may appear before a currency symbol or code.\n  if (/(^|[^\\d])-\\s*[\\$€£¥]?\\s*\\d/.test(raw)) {\n    sign *= -1;\n    raw = raw.replace(/-/g, \"\");\n  }\n\n  // Drop spaces used as thousands separators, e.g. \"1 234,56\".\n  raw = raw.replace(/(\\d)\\s+(?=\\d)/g, \"$1\"",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 33324,
+      "leg": "full",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 98839,
+      "usage": {
+        "promptTokens": 32973,
+        "cachedTokens": 32768,
+        "completionTokens": 5886
+      },
+      "promptTokens": 32973,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === 'number') {\n    return Number.isFinite(text) ? Math.round(text * 100) : NaN;\n  }\n  if (text == null) return NaN;\n\n  const raw = String(text).trim();\n  if (raw === '') return NaN;\n\n  const match = raw.match(/-?(?:\\d[\\d.,\\s]*\\d|\\d|[.,]\\d+)/);\n  if (!match) return NaN;\n\n  let amount = match[0].replace(/\\s/g, '');\n\n  const lastComma = amount.lastIndexOf(',');\n  const lastDot = amount.lastIndexOf('.');\n  let decimalSep = null;\n  let decimalIndex = -1;\n\n  if (lastComma !== -1 || lastDot !== -1) {\n    const candidates = [];\n    if (lastCo",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 2656,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 133728,
+      "usage": {
+        "promptTokens": 2216,
+        "cachedTokens": 0,
+        "completionTokens": 8000
+      },
+      "promptTokens": 2216,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === 'number') {\n    return Number.isFinite(text) ? Math.round(text * 100) : NaN;\n  }\n\n  let source = String(text ?? '').trim();\n  if (!source) return NaN;\n\n  source = source.replace(/[\\u2212\\u2013\\u2014]/g, '-');\n\n  let negative = false;\n  if (/^\\(.*\\)$/.test(source)) {\n    negative = true;\n    source = source.slice(1, -1).trim();\n  }\n\n  if (/^\\s*-/.test(source)) {\n    negative = true;\n    source = source.replace(/^\\s*-/, '');\n  } else if (/-\\s*$/.test(source)) {\n    negative = true;\n    source = source.replace(/-\\s*$/, '');\n  }\n\n  con",
+      "gradeDetail": "Command failed: node --test test/parse-price.test.js / ",
+      "truncated": true
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 1448,
+      "leg": "digest",
+      "repeat": 0,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 18863,
+      "usage": {
+        "promptTokens": 1252,
+        "cachedTokens": 0,
+        "completionTokens": 1118
+      },
+      "promptTokens": 1252,
+      "answer": "```js\nexport function clampRatio(value) {\n  if (Number.isNaN(value)) return 0;\n\n  const clamped = Math.min(1, Math.max(0, value));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 1440,
+      "leg": "digest",
+      "repeat": 0,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 90582,
+      "usage": {
+        "promptTokens": 1234,
+        "cachedTokens": 0,
+        "completionTokens": 5412
+      },
+      "promptTokens": 1234,
+      "answer": "```js\n'use strict';\n\nfunction chunk(items, size) {\n  if (size === undefined) size = 1;\n  if (!Number.isFinite(size)) return [];\n  size = Math.floor(size);\n  if (size < 1) return [];\n\n  const batches = [];\n  for (let i = 0; i < items.length; i += size) {\n    batches.push(items.slice(i, i + size));\n  }\n  return batches;\n}\n\nmodule.exports = chunk;\nmodule.exports.chunk = chunk;\nmodule.exports.batch = chunk;\nmodule.exports.default = chunk;\n```",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 32221,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 12795,
+      "usage": {
+        "promptTokens": 31871,
+        "cachedTokens": 31744,
+        "completionTokens": 728
+      },
+      "promptTokens": 31871,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list\n    .map((iv) => [iv[0], iv[1]])\n    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);\n\n  const merged = [];\n\n  for (const interval of sorted) {\n    const last = merged[merged.length - 1];\n\n    if (last && interval[0] <= last[1]) {\n      if (interval[1] > last[1]) {\n        last[1] = interval[1];\n      }\n    } else {\n      merged.push(interval);\n    }\n  }\n\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 129154,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 33147,
+      "usage": {
+        "promptTokens": 127823,
+        "cachedTokens": 127488,
+        "completionTokens": 1944
+      },
+      "promptTokens": 127823,
+      "answer": "```js\nexport function clampRatio(value) {\n  const ratio = Number(value);\n  if (!Number.isFinite(ratio)) {\n    return ratio === Infinity ? 1 : 0;\n  }\n\n  return Math.min(1, Math.max(0, Math.round(ratio * 1000) / 1000));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 200244,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 23504,
+      "usage": {
+        "promptTokens": 198179,
+        "cachedTokens": 197632,
+        "completionTokens": 610
+      },
+      "promptTokens": 198179,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list.slice().sort((a, b) => a[0] - b[0]);\n  const merged = [];\n\n  for (const interval of sorted) {\n    const start = interval[0];\n    const end = interval[1];\n    const last = merged[merged.length - 1];\n\n    if (last && start <= last[1]) {\n      if (end > last[1]) last[1] = end;\n    } else {\n      merged.push([start, end]);\n    }\n  }\n\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 2584,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 114339,
+      "usage": {
+        "promptTokens": 2154,
+        "cachedTokens": 2048,
+        "completionTokens": 6840
+      },
+      "promptTokens": 2154,
+      "answer": "```js\n'use strict';\n\nfunction chunk(items, size = 1) {\n  if (!Array.isArray(items)) {\n    throw new TypeError('chunk expected an array');\n  }\n\n  const batchSize = Math.trunc(size);\n  if (!Number.isFinite(batchSize) || batchSize <= 0) {\n    return [];\n  }\n\n  const batches = [];\n  for (let i = 0; i < items.length; i += batchSize) {\n    batches.push(items.slice(i, i + batchSize));\n  }\n\n  return batches;\n}\n\nmodule.exports = chunk;\nmodule.exports.chunk = chunk;\nmodule.exports.default = chunk;\n```",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 2464,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 47623,
+      "usage": {
+        "promptTokens": 2058,
+        "cachedTokens": 0,
+        "completionTokens": 2835
+      },
+      "promptTokens": 2058,
+      "answer": "```js\n'use strict';\n\n/**\n * src/chunk.js\n *\n * Batching helper. Splits `items` into consecutive, non-overlapping\n * batches of at most `size` elements each.\n *\n * Contract:\n *   - Pure: the input array is never mutated.\n *   - Non-overlapping: each element appears in exactly one batch.\n *   - Each batch is a fresh array (mutation of a batch cannot leak back\n *     into the source array or into any other batch).\n */\n\nfunction chunk(items, size) {\n  if (!Array.isArray(items)) {\n    throw new TypeError('chunk: items must be an array');\n  }\n\n  const batchSize = Math.floor(Number(size));\n  if (!Num",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 2656,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 94673,
+      "usage": {
+        "promptTokens": 2216,
+        "cachedTokens": 2048,
+        "completionTokens": 5658
+      },
+      "promptTokens": 2216,
+      "answer": "```js\nfunction normalizeAmount(text) {\n  if (typeof text === 'number') {\n    return text;\n  }\n\n  let source = String(text).trim();\n  let negative = /^\\s*\\(.*\\)\\s*$/.test(source);\n\n  let cleaned = source.replace(/[^0-9,.\\-+]/g, '');\n  if (cleaned.includes('-')) negative = true;\n\n  cleaned = cleaned.replace(/[-+()]/g, '');\n  if (!cleaned || !/\\d/.test(cleaned)) return NaN;\n\n  const lastComma = cleaned.lastIndexOf(',');\n  const lastDot = cleaned.lastIndexOf('.');\n  let normalized;\n\n  if (lastComma !== -1 && lastDot !== -1) {\n    const decimalIndex = Math.max(lastComma, lastDot);\n    const integer",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 200211,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 70400,
+      "usage": {
+        "promptTokens": 198170,
+        "cachedTokens": 128000,
+        "completionTokens": 4163
+      },
+      "promptTokens": 198170,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === 'number') return Math.round(text * 100);\n  if (text == null) return 0;\n\n  let s = String(text).trim();\n  if (s === '') return 0;\n\n  let negative = false;\n  if (/^\\(.*\\)$/.test(s)) {\n    negative = true;\n    s = s.slice(1, -1);\n  }\n\n  s = s.replace(/[^\\d.,+\\-]/g, '');\n  if (!/\\d/.test(s)) return NaN;\n\n  negative = negative || /^-/.test(s);\n  s = s.replace(/[+\\-]/g, '');\n\n  const dotCount = (s.match(/\\./g) || []).length;\n  const commaCount = (s.match(/,/g) || []).length;\n  const lastDot = s.lastIndexOf('.');\n  const lastComma = s.las",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 2472,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 10757,
+      "usage": {
+        "promptTokens": 2076,
+        "cachedTokens": 2048,
+        "completionTokens": 630
+      },
+      "promptTokens": 2076,
+      "answer": "```js\nexport function clampRatio(value) {\n  if (Number.isNaN(value)) {\n    return 0;\n  }\n\n  const rounded = Math.round(value * 1000) / 1000;\n  return Math.min(1, Math.max(0, rounded));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 200683,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 21711,
+      "usage": {
+        "promptTokens": 198631,
+        "cachedTokens": 0,
+        "completionTokens": 322
+      },
+      "promptTokens": 198631,
+      "answer": "```js\nexport function chunk(items, size) {\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 1448,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 30513,
+      "usage": {
+        "promptTokens": 1252,
+        "cachedTokens": 1024,
+        "completionTokens": 1815
+      },
+      "promptTokens": 1252,
+      "answer": "```js\nexport function clampRatio(value) {\n  const numeric = Number(value);\n  if (Number.isNaN(numeric)) return 0;\n  return Math.min(1, Math.max(0, Math.round(numeric * 1000) / 1000));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 2656,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 124752,
+      "usage": {
+        "promptTokens": 2216,
+        "cachedTokens": 2048,
+        "completionTokens": 7462
+      },
+      "promptTokens": 2216,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === 'number') {\n    return Number.isFinite(text) ? Math.round(text * 100) : NaN;\n  }\n\n  if (typeof text !== 'string') {\n    return NaN;\n  }\n\n  let value = text.trim();\n  if (!value) {\n    return NaN;\n  }\n\n  let negative = false;\n\n  // Accounting-style negatives: (1,234.56)\n  if (value.includes('(') && value.includes(')')) {\n    negative = true;\n    value = value.replace(/[()]/g, '');\n  }\n\n  // Keep only characters that can be part of a price amount.\n  value = value.replace(/[^\\d.,+\\-]/g, '');\n  if (!value) {\n    return NaN;\n  }\n\n  if (",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 2649,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 17870,
+      "usage": {
+        "promptTokens": 2217,
+        "cachedTokens": 0,
+        "completionTokens": 1057
+      },
+      "promptTokens": 2217,
+      "answer": "```js\nexport function clampRatio(value) {\n  if (!Number.isFinite(value)) {\n    return value === Infinity ? 1 : 0;\n  }\n\n  const clamped = Math.min(1, Math.max(0, value));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 2588,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 37734,
+      "usage": {
+        "promptTokens": 2152,
+        "cachedTokens": 2048,
+        "completionTokens": 2252
+      },
+      "promptTokens": 2152,
+      "answer": "```js\n'use strict';\n\n/**\n * Merge overlapping or adjacent intervals without mutating the input.\n *\n * @param {Array<[number, number]>} intervals\n * @returns {Array<[number, number]>}\n */\nfunction mergeIntervals(intervals) {\n  if (!Array.isArray(intervals) || intervals.length === 0) {\n    return [];\n  }\n\n  const sorted = intervals\n    .map((interval) => [interval[0], interval[1]])\n    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);\n\n  const merged = [[sorted[0][0], sorted[0][1]]];\n\n  for (let i = 1; i < sorted.length; i += 1) {\n    const current = sorted[i];\n    const last = merged[merged.length -",
+      "gradeDetail": "Command failed: node --test test/merge-intervals.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 101127,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 11150,
+      "usage": {
+        "promptTokens": 100081,
+        "cachedTokens": 99840,
+        "completionTokens": 622
+      },
+      "promptTokens": 100081,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list\n    .map((iv) => iv.slice())\n    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);\n\n  const merged = [];\n  for (const iv of sorted) {\n    const last = merged[merged.length - 1];\n    if (last && iv[0] <= last[1]) {\n      if (iv[1] > last[1]) last[1] = iv[1];\n      for (let i = 2; i < iv.length; i++) {\n        if (i >= last.length) last.push(iv[i]);\n      }\n    } else {\n      merged.push(iv);\n    }\n  }\n\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 2468,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 61865,
+      "usage": {
+        "promptTokens": 2056,
+        "cachedTokens": 0,
+        "completionTokens": 3691
+      },
+      "promptTokens": 2056,
+      "answer": "```js\nexport function mergeIntervals(intervals) {\n  if (!Array.isArray(intervals) || intervals.length === 0) return [];\n\n  const sorted = intervals\n    .map((interval) => [interval[0], interval[1]])\n    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);\n\n  const merged = [sorted[0]];\n\n  for (let i = 1; i < sorted.length; i += 1) {\n    const current = sorted[i];\n    const last = merged[merged.length - 1];\n\n    if (current[0] <= last[1]) {\n      if (current[1] > last[1]) {\n        last[1] = current[1];\n      }\n    } else {\n      merged.push(current);\n    }\n  }\n\n  return merged;\n}\n\nexport const merge =",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 2649,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 13254,
+      "usage": {
+        "promptTokens": 2217,
+        "cachedTokens": 0,
+        "completionTokens": 776
+      },
+      "promptTokens": 2217,
+      "answer": "```js\nexport function clampRatio(value) {\n  if (!Number.isFinite(value)) {\n    return value === Infinity ? 1 : 0;\n  }\n\n  const rounded = Math.round(value * 1000) / 1000;\n  return Math.min(1, Math.max(0, rounded));\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 65196,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 5377,
+      "usage": {
+        "promptTokens": 64514,
+        "cachedTokens": 64256,
+        "completionTokens": 239
+      },
+      "promptTokens": 64514,
+      "answer": "```js\nexport function clampRatio(value) {\n  const clamped = Math.min(1, Math.max(0, value));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 129683,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 34851,
+      "usage": {
+        "promptTokens": 128352,
+        "cachedTokens": 128000,
+        "completionTokens": 2046
+      },
+      "promptTokens": 128352,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === 'number') {\n    return Number.isFinite(text) ? Math.round(text * 100) : NaN;\n  }\n\n  if (text == null) return NaN;\n\n  let s = String(text).trim();\n  if (s === '') return NaN;\n\n  let negative = false;\n  if (/^\\(.*\\)$/.test(s)) {\n    negative = true;\n    s = s.slice(1, -1);\n  }\n\n  s = s.replace(/[^\\d.,+\\-]/g, '');\n  if (s === '') return NaN;\n\n  if (s.includes('-')) negative = !negative;\n  s = s.replace(/[+\\-]/g, '');\n\n  const lastComma = s.lastIndexOf(',');\n  const lastDot = s.lastIndexOf('.');\n  let decimalSeparator = null;\n\n  if (la",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 101710,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 9441,
+      "usage": {
+        "promptTokens": 100648,
+        "cachedTokens": 100352,
+        "completionTokens": 226
+      },
+      "promptTokens": 100648,
+      "answer": "```js\nexport function chunk(items, size) {\n  if (!Number.isInteger(size) || size < 1) {\n    return [];\n  }\n\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 2584,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 106989,
+      "usage": {
+        "promptTokens": 2154,
+        "cachedTokens": 0,
+        "completionTokens": 6398
+      },
+      "promptTokens": 2154,
+      "answer": "```js\n'use strict';\n\nfunction chunk(array, size = 1) {\n  if (!Array.isArray(array)) {\n    throw new TypeError('chunk expects an array');\n  }\n\n  const batchSize = Math.floor(size);\n  if (!Number.isFinite(batchSize) || batchSize < 1) {\n    return [];\n  }\n\n  const batches = [];\n  for (let i = 0; i < array.length; i += batchSize) {\n    batches.push(array.slice(i, i + batchSize));\n  }\n  return batches;\n}\n\nmodule.exports = chunk;\nmodule.exports.chunk = chunk;\nmodule.exports.batch = chunk;\nmodule.exports.default = chunk;\n```",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 1440,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 44664,
+      "usage": {
+        "promptTokens": 1234,
+        "cachedTokens": 1024,
+        "completionTokens": 2658
+      },
+      "promptTokens": 1234,
+      "answer": "```js\n'use strict';\n\n/**\n * Split an array into consecutive, non-overlapping batches.\n *\n * The input array is never mutated.\n *\n * @param {Array} items\n * @param {number} size\n * @returns {Array<Array>}\n */\nfunction chunk(items, size) {\n  if (!Array.isArray(items)) {\n    throw new TypeError('chunk: items must be an array');\n  }\n\n  if (!Number.isInteger(size) || size <= 0) {\n    throw new RangeError('chunk: size must be a positive integer');\n  }\n\n  const batches = [];\n\n  for (let start = 0; start < items.length; start += size) {\n    batches.push(items.slice(start, start + size));\n  }\n\n  return",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 64020,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 10353,
+      "usage": {
+        "promptTokens": 63356,
+        "cachedTokens": 62976,
+        "completionTokens": 583
+      },
+      "promptTokens": 63356,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list.slice().sort((a, b) => a[0] - b[0]);\n  const merged = [];\n\n  for (const iv of sorted) {\n    const last = merged[merged.length - 1];\n    if (last && iv[0] <= last[1]) {\n      last[1] = Math.max(last[1], iv[1]);\n    } else {\n      merged.push(iv.slice());\n    }\n  }\n\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 2588,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 102344,
+      "usage": {
+        "promptTokens": 2152,
+        "cachedTokens": 0,
+        "completionTokens": 6119
+      },
+      "promptTokens": 2152,
+      "answer": "```js\n'use strict';\n\nfunction mergeIntervals(intervals) {\n  if (!Array.isArray(intervals) || intervals.length === 0) {\n    return [];\n  }\n\n  const objects = !Array.isArray(intervals[0]);\n  const startOf = (interval) => (objects ? interval.start : interval[0]);\n  const endOf = (interval) => (objects ? interval.end : interval[1]);\n  const make = (start, end) => (objects ? { start, end } : [start, end]);\n\n  const sorted = intervals\n    .slice()\n    .sort((a, b) => startOf(a) - startOf(b));\n\n  const merged = [];\n  let current = make(startOf(sorted[0]), endOf(sorted[0]));\n\n  for (let i = 1; i < sor",
+      "gradeDetail": "Command failed: node --test test/merge-intervals.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 2584,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 52056,
+      "usage": {
+        "promptTokens": 2154,
+        "cachedTokens": 0,
+        "completionTokens": 3100
+      },
+      "promptTokens": 2154,
+      "answer": "```js\n'use strict';\n\n/**\n * Split an array into consecutive, non-overlapping batches of at most `size`.\n * This helper is pure: the input array is never mutated.\n *\n * @param {Array} items\n * @param {number} size\n * @returns {Array<Array>}\n */\nfunction chunk(items, size) {\n  if (!Array.isArray(items)) {\n    throw new TypeError('chunk expects an array');\n  }\n\n  if (!Number.isInteger(size) || size <= 0) {\n    throw new RangeError('chunk size must be a positive integer');\n  }\n\n  const batches = [];\n\n  for (let start = 0; start < items.length; start += size) {\n    batches.push(items.slice(start, s",
+      "gradeDetail": "Command failed: node --test test/chunk-items.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 2656,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 133621,
+      "usage": {
+        "promptTokens": 2216,
+        "cachedTokens": 0,
+        "completionTokens": 8000
+      },
+      "promptTokens": 2216,
+      "answer": "",
+      "gradeDetail": "no fenced code block in the answer",
+      "truncated": true
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 100802,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 6963,
+      "usage": {
+        "promptTokens": 100359,
+        "cachedTokens": 512,
+        "completionTokens": 370
+      },
+      "promptTokens": 100359,
+      "answer": "```js\nexport function clampRatio(value) {\n  if (!Number.isFinite(value)) return 0;\n  const clamped = Math.min(1, Math.max(0, value));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 1444,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 121790,
+      "usage": {
+        "promptTokens": 1232,
+        "cachedTokens": 0,
+        "completionTokens": 7287
+      },
+      "promptTokens": 1232,
+      "answer": "```js\n'use strict';\n\nfunction isObjectInterval(interval) {\n  return interval !== null &&\n    typeof interval === 'object' &&\n    !Array.isArray(interval) &&\n    'start' in interval &&\n    'end' in interval;\n}\n\nfunction cloneInterval(interval) {\n  if (Array.isArray(interval)) {\n    return interval.slice();\n  }\n\n  if (isObjectInterval(interval)) {\n    return { ...interval };\n  }\n\n  return interval;\n}\n\nfunction startOf(interval) {\n  return Array.isArray(interval) ? interval[0] : interval.start;\n}\n\nfunction endOf(interval) {\n  return Array.isArray(interval) ? interval[1] : interval.end;\n}\n\nfunctio",
+      "gradeDetail": "Command failed: node --test test/merge-intervals.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 64236,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 6332,
+      "usage": {
+        "promptTokens": 63544,
+        "cachedTokens": 63232,
+        "completionTokens": 105
+      },
+      "promptTokens": 63544,
+      "answer": "```js\nexport function chunk(items, size) {\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 2479,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 133601,
+      "usage": {
+        "promptTokens": 2075,
+        "cachedTokens": 0,
+        "completionTokens": 8000
+      },
+      "promptTokens": 2075,
+      "answer": "",
+      "gradeDetail": "no fenced code block in the answer",
+      "truncated": true
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 201741,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 5795,
+      "usage": {
+        "promptTokens": 200324,
+        "cachedTokens": 98304,
+        "completionTokens": 151
+      },
+      "promptTokens": 200324,
+      "answer": "```js\nexport function clampRatio(value) {\n  const clamped = Math.min(1, Math.max(0, value));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 1455,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 128942,
+      "usage": {
+        "promptTokens": 1251,
+        "cachedTokens": 0,
+        "completionTokens": 7716
+      },
+      "promptTokens": 1251,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === 'number') {\n    return Math.round(text * 100);\n  }\n\n  if (typeof text !== 'string') {\n    const value = Number(text);\n    return Number.isFinite(value) ? Math.round(value * 100) : NaN;\n  }\n\n  let s = text.trim();\n  if (s === '') {\n    return 0;\n  }\n\n  s = s.replace(/[−–—]/g, '-');\n\n  let negative = false;\n\n  if (s.startsWith('(') && s.endsWith(')')) {\n    negative = true;\n    s = s.slice(1, -1).trim();\n  }\n\n  if (/^[^\\d]*-/.test(s) || /-[^\\d]*$/.test(s)) {\n    negative = true;\n  }\n\n  s = s.replace(/[+-]/g, '').replace(/[^\\d.,]/g, '",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 129474,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 19590,
+      "usage": {
+        "promptTokens": 128140,
+        "cachedTokens": 99840,
+        "completionTokens": 426
+      },
+      "promptTokens": 128140,
+      "answer": "```js\nexport function mergeIntervals(list) {\n  const sorted = list.slice().sort((a, b) => a[0] - b[0]);\n  const merged = [];\n  for (const iv of sorted) {\n    const last = merged[merged.length - 1];\n    if (last && iv[0] <= last[1]) {\n      if (iv[1] > last[1]) last[1] = iv[1];\n    } else {\n      merged.push([iv[0], iv[1]]);\n    }\n  }\n  return merged;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 33324,
+      "leg": "full",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 133984,
+      "usage": {
+        "promptTokens": 32973,
+        "cachedTokens": 32768,
+        "completionTokens": 8000
+      },
+      "promptTokens": 32973,
+      "answer": "",
+      "gradeDetail": "no fenced code block in the answer",
+      "truncated": true
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 33289,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 8652,
+      "usage": {
+        "promptTokens": 33507,
+        "cachedTokens": 32768,
+        "completionTokens": 482
+      },
+      "promptTokens": 33507,
+      "answer": "```js\nexport function clampRatio(value) {\n  const numeric = Number(value);\n  if (Number.isNaN(numeric)) return 0;\n  const clamped = Math.min(1, Math.max(0, numeric));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "clamp-ratio",
+      "fixtureKind": "tail",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 2649,
+      "leg": "digest",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 21261,
+      "usage": {
+        "promptTokens": 2217,
+        "cachedTokens": 0,
+        "completionTokens": 1262
+      },
+      "promptTokens": 2217,
+      "answer": "```js\nexport function clampRatio(value) {\n  const numeric = Number(value);\n  if (!Number.isFinite(numeric)) {\n    return numeric === Infinity ? 1 : 0;\n  }\n  const clamped = Math.min(1, Math.max(0, numeric));\n  return Math.round(clamped * 1000) / 1000;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "merge-intervals",
+      "fixtureKind": "history",
+      "targetTokens": 200000,
+      "estimatedPromptTokens": 2588,
+      "leg": "digest",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 58142,
+      "usage": {
+        "promptTokens": 2152,
+        "cachedTokens": 0,
+        "completionTokens": 3466
+      },
+      "promptTokens": 2152,
+      "answer": "```js\n'use strict';\n\n/**\n * Merge overlapping or touching intervals without mutating the input.\n *\n * @param {Array<[number, number]>} intervals\n * @returns {Array<[number, number]>}\n */\nfunction mergeIntervals(intervals) {\n  if (!Array.isArray(intervals) || intervals.length === 0) {\n    return [];\n  }\n\n  const normalized = intervals.map((interval) => {\n    if (Array.isArray(interval)) {\n      return [interval[0], interval[1]];\n    }\n\n    if (interval && typeof interval === 'object') {\n      return [interval.start, interval.end];\n    }\n\n    throw new TypeError('Each interval must be an array o",
+      "gradeDetail": "Command failed: node --test test/merge-intervals.test.js / ",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 64000,
+      "estimatedPromptTokens": 65382,
+      "leg": "full",
+      "repeat": 1,
+      "success": false,
+      "transportFailure": false,
+      "wallMs": 134066,
+      "usage": {
+        "promptTokens": 64711,
+        "cachedTokens": 64512,
+        "completionTokens": 8000
+      },
+      "promptTokens": 64711,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (text == null) return NaN;\n\n  let s = String(text).trim();\n  if (!s) return NaN;\n\n  let negative = false;\n\n  if (/^\\(.*\\)$/.test(s)) {\n    negative = true;\n    s = s.slice(1, -1).trim();\n  }\n\n  s = s.replace(/[−–—]/g, '-');\n  s = s.replace(/[^\\d.,+\\-]/g, '');\n\n  if (!s || !/\\d/.test",
+      "gradeDetail": "Command failed: node --test test/parse-price.test.js / ",
+      "truncated": true
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "parse-price",
+      "fixtureKind": "tail",
+      "targetTokens": 100000,
+      "estimatedPromptTokens": 100883,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 109746,
+      "usage": {
+        "promptTokens": 99843,
+        "cachedTokens": 99328,
+        "completionTokens": 6530
+      },
+      "promptTokens": 99843,
+      "answer": "```js\nexport function parsePrice(text) {\n  if (typeof text === 'number') {\n    return Math.round(text * 100);\n  }\n  if (text == null) {\n    return NaN;\n  }\n\n  let s = String(text).trim();\n  if (!s) {\n    return NaN;\n  }\n\n  const negativeByParens = /^\\(.*\\)$/.test(s);\n  if (negativeByParens) {\n    s = s.slice(1, -1);\n  }\n\n  const match = s.match(/[+-]?(?:\\d[\\d.,\\u00A0\\u202F\\s]*|[.,]\\d[\\d.,\\u00A0\\u202F\\s]*)/);\n  if (!match) {\n    return NaN;\n  }\n\n  let numeric = match[0].replace(/[\\s\\u00A0\\u202F]/g, '');\n  const negative = negativeByParens || s.includes('-') || numeric.startsWith('-');\n  numeric",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 32000,
+      "estimatedPromptTokens": 32670,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 3672,
+      "usage": {
+        "promptTokens": 32311,
+        "cachedTokens": 31744,
+        "completionTokens": 110
+      },
+      "promptTokens": 32311,
+      "answer": "```js\nexport function chunk(items, size) {\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    },
+    {
+      "model": "deepseek-v4.1-flash",
+      "fixtureId": "chunk-items",
+      "fixtureKind": "history",
+      "targetTokens": 128000,
+      "estimatedPromptTokens": 128175,
+      "leg": "full",
+      "repeat": 1,
+      "success": true,
+      "transportFailure": false,
+      "wallMs": 4918,
+      "usage": {
+        "promptTokens": 126849,
+        "cachedTokens": 100352,
+        "completionTokens": 244
+      },
+      "promptTokens": 126849,
+      "answer": "```js\nexport function chunk(items, size) {\n  const out = [];\n  for (let i = 0; i < items.length; i += size) {\n    out.push(items.slice(i, i + size));\n  }\n  return out;\n}\n```",
+      "gradeDetail": "test passed",
+      "truncated": false
+    }
+  ]
+}
