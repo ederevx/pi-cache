@@ -48,3 +48,32 @@ test("cache-key: disabled keeps pi's own key", () => {
   sharer.apply(p);
   assertEq(p.prompt_cache_key, "session-uuid");
 });
+
+test("cache-key: responses-shaped bodies keep their own keys", () => {
+  const sharer = new CacheKeySharer(true);
+  // openai-responses carries the system prompt in `input`, Codex in
+  // `instructions`; neither has `messages`, so a head hash would cover
+  // model + tools alone and merge unrelated sessions.
+  const a = {
+    model: "gpt-5",
+    prompt_cache_key: "session-a",
+    input: [{ role: "user", content: "project a" }],
+  };
+  const b = {
+    model: "gpt-5",
+    prompt_cache_key: "session-b",
+    instructions: "codex harness",
+    input: [{ role: "user", content: "project b" }],
+  };
+  sharer.apply(a);
+  sharer.apply(b);
+  assertEq(a.prompt_cache_key, "session-a", "no messages array, no rewrite");
+  assertEq(b.prompt_cache_key, "session-b", "distinct projects stay distinct");
+});
+
+test("cache-key: an empty messages array still derives a key", () => {
+  const sharer = new CacheKeySharer(true);
+  const p = { model: "gpt-5", prompt_cache_key: "session-uuid", messages: [] };
+  sharer.apply(p);
+  assertMatches(p.prompt_cache_key as string, /^pi-cache-[0-9a-f]{24}$/);
+});

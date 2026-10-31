@@ -1,16 +1,18 @@
 /**
- * pi-cache — shared OpenAI prompt_cache_key derivation.
+ * pi-cache — shared prompt_cache_key derivation.
  *
  * One responsibility: when opted in, replace pi's per-session
  * `prompt_cache_key` with a key derived from the request's cache-relevant
  * prefix head (model + leading system/developer content + tools), so
  * sibling sessions whose prefixes start identically route into the same
- * OpenAI cache bucket and share a warm prefix instead of each going cold.
+ * cache bucket and share a warm prefix instead of each going cold.
  * The key is stable while the head is stable and changes with the head, so
- * a bucket never outlives the prefix that keyed it. Only payloads that
- * already carry a prompt_cache_key are touched — that field's presence is
- * pi-ai's own proof the target is api.openai.com (or a long-retention
- * compatible endpoint).
+ * a bucket never outlives the prefix that keyed it.
+ *
+ * pi-ai also sets the key on long-tier compatible completions endpoints
+ * and on every openai-responses target, whose head lives in `input` /
+ * `instructions` rather than `messages`; only chat-completions bodies are
+ * rewritten, so those keep their per-session key.
  */
 
 import { PrefixHead } from "./prefix-head.ts";
@@ -30,13 +32,14 @@ export class CacheKeySharer {
 
   /**
    * Replace an existing prompt_cache_key with the head-derived shared key.
-   * Payloads without one (openrouter, anthropic-direct) are untouched.
+   * Payloads without one, or without a `messages` array, are untouched.
    */
   apply(payload: unknown): void {
     if (!this.enabledOn) return;
     if (!payload || typeof payload !== "object") return;
     const body = payload as Record<string, unknown>;
     if (typeof body.prompt_cache_key !== "string") return;
+    if (!Array.isArray(body.messages)) return;
     body.prompt_cache_key = `pi-cache-${this.headHash(body)}`;
   }
 
