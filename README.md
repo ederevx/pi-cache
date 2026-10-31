@@ -94,8 +94,11 @@ option to its built-in default; env-pinned rows keep the env value.
   canonicalized so stable regions stay byte-stable.
 - **Retention override** — per-request rewrite upgrading every marker to
   the 1h tier (`PI_CACHE_RETENTION_OVERRIDE`).
-- **Shared key** — the OpenAI `prompt_cache_key` derived from the prefix
-  head so sibling sessions share a warm bucket (`PI_CACHE_SHARED_KEY`).
+- **Shared key** — the chat-completions `prompt_cache_key` derived from
+  the prefix head so sibling sessions share a warm bucket
+  (`PI_CACHE_SHARED_KEY`); above ~15 requests a minute on one key the
+  provider's overflow routing can scatter siblings and cost the session's
+  own suffix.
 - **Force warm** — pi's warming decision kept warm when its own
   economics justify it and a real turn exists (`PI_CACHE_FORCE_WARM`);
   the warming schedule follows the tier the rewrite actually put on the

@@ -33,7 +33,7 @@ export interface PiCacheOptions {
   retentionOverride: boolean;
   /** Canonicalize skill/project listings in the system prompt (default on). */
   canonicalize: boolean;
-  /** Derive OpenAI prompt_cache_key from the prefix head (default off). */
+  /** Derive the chat-completions prompt_cache_key from the prefix head (default off). */
   sharedKey: boolean;
   /** Force pi's cache-warming decision to "warm" (default off). */
   forceWarm: boolean;

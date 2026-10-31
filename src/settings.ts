@@ -97,7 +97,7 @@ export class SettingsPresenter {
       row("anchor", "Breakpoint anchor", "Pin a fourth Anthropic breakpoint on stable mid-history", on(live.anchor)),
       row("retentionOverride", "Long retention override", "Rewrite cache markers to the 1h/24h tier per request", on(live.retentionOverride)),
       row("canonicalize", "Canonicalize listings", "Sort skill and AGENTS.md listings in the system prompt", on(live.canonicalize)),
-      row("sharedKey", "Shared cache key", "Derive OpenAI prompt_cache_key from the prefix head so siblings share a bucket", on(live.sharedKey)),
+      row("sharedKey", "Shared cache key", "Derive the chat-completions prompt_cache_key from the prefix head so siblings share a bucket (may reduce hits above ~15 RPM per key)", on(live.sharedKey)),
       row("forceWarm", "Force warming", "Answer every cache-warming decision with warm when pi's own economics still justify it", on(live.forceWarm)),
       row("missDiagnosis", "Miss diagnosis", "Show the miss taxonomy (cold-start, idle-expiry, replica-flap, partial) in /cache-stats", on(live.missDiagnosis)),
       row("advisory", "Compaction advisory", "Note warm-cache compactions that re-write the prefix", on(live.advisory)),
