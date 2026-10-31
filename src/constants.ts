@@ -108,10 +108,16 @@ export interface PiCacheOptions {
   pressureDegradeStart: number;
   pressureDegradeFull: number;
   pressureDegradeGamma: number;
-  /** Absolute token cap on the degradation onset start (<=0 uncapped). */
-  pressureDegradeStartTokens: number;
-  /** Absolute token cap on degradation saturation (<=0 uncapped). */
-  pressureDegradeFullTokens: number;
+  /** Live-token onset of the research floor on absolute length (<=0 off). */
+  pressureDegradeFloorStartTokens: number;
+  /** Live-token plateau of the research floor on absolute length. */
+  pressureDegradeFloorFullTokens: number;
+  /** The floor's plateau in [0,1): most absolute length alone can claim. */
+  pressureDegradeFloor: number;
+  /** Active-age half-life (minutes) for windows too large to trust (<=0 off). */
+  pressureDegradeHalfLifeMinutes: number;
+  /** Most active time (seconds) a single entry gap may claim. */
+  pressureDegradeAgeGapSeconds: number;
   /** Window occupancy percent the midterm gate also requires. */
   midtermMinPercent: number;
 }
@@ -204,11 +210,33 @@ export class OptionsLoader {
       pressureDegradeStart: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_START", 0.5),
       pressureDegradeFull: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_FULL", 0.85),
       pressureDegradeGamma: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_GAMMA", 2),
-      // Provisional absolute budgets: a large advertised window would
-      // otherwise postpone quality pressure far past the context a model
-      // actually holds up on. Independently configurable; <=0 uncaps.
-      pressureDegradeStartTokens: this.envInt("PI_CACHE_PRESSURE_DEGRADE_START_TOKENS", 100_000),
-      pressureDegradeFullTokens: this.envInt("PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS", 200_000),
+      // The research floor on absolute length: a minimum on degradation
+      // pressure from 32K to 128K tokens, plateauing at 0.5. At 32K RULER
+      // leaves half of seventeen long-context models satisfactory and NoLiMa
+      // puts eleven of thirteen below half their short-context baseline; the
+      // evidence reaches 128K (Databricks, and NoLiMa's two-model appendix),
+      // so the plateau claims no more than that.
+      pressureDegradeFloorStartTokens: this.envInt(
+        "PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS",
+        32_768,
+      ),
+      pressureDegradeFloorFullTokens: this.envInt(
+        "PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_TOKENS",
+        131_072,
+      ),
+      pressureDegradeFloor: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_FLOOR", 0.5),
+      // Active-age half-life for windows too large for occupancy to speak.
+      // Unvalidated policy default: no cited work measures wall-clock age.
+      pressureDegradeHalfLifeMinutes: this.envFloat(
+        "PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES",
+        60,
+      ),
+      // One gap never claims more than a short stretch of work: timestamps
+      // cannot distinguish a slow session from a resumed one.
+      pressureDegradeAgeGapSeconds: this.envFloat(
+        "PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS",
+        300,
+      ),
       midtermMinPercent: this.envFloat("PI_CACHE_MIDTERM_MIN_PERCENT", 50),
     };
   }
