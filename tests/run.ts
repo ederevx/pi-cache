@@ -60,6 +60,7 @@ import "./trigger.test.ts";
 import "./autocompact.test.ts";
 import "./economics.test.ts";
 import "./context-degradation.test.ts";
+import "./context-age.test.ts";
 import "./pressure.test.ts";
 import "./fastcompact.test.ts";
 import "./kept-window.test.ts";
