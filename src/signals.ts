@@ -19,6 +19,7 @@
 
 import type { CostRates } from "./economics.ts";
 import type { AutocompactSignal } from "./autocompact.ts";
+import { ContextAge, type AgeEntry } from "./context-age.ts";
 
 /** The model fields pi exposes on the handler context. */
 export interface ModelView {
@@ -33,7 +34,11 @@ export interface ModelView {
 /** The context fields the signals read. */
 export interface SessionContextView {
   model?: ModelView;
-  sessionManager?: { getSessionId?: () => string };
+  sessionManager?: {
+    getSessionId?: () => string;
+    /** Root-to-leaf branch, for the active-age measure. */
+    getBranch?: () => readonly AgeEntry[];
+  };
 }
 
 /** Option values the signals own (never read from the environment here). */
@@ -58,6 +63,11 @@ export interface SessionSignalsOptions {
    *  consulted before the static env-mirror flag so TTL-tier selection
    *  follows the wire when a per-request override is active. */
   retentionLongOf?: () => boolean | undefined;
+  /** The most active time a single entry gap may claim (ms). Idle and
+   *  resumed stretches are the reason it exists; the provider TTL is a cache
+   *  property, not an activity one, so it is deliberately not used here.
+   *  Non-finite or <= 0 falls back to `ContextAge.DEFAULT_GAP_CAP_MS`. */
+  ageGapCapMs?: number;
 }
 
 /** The collaborator state the signals read, owned by their own classes. */
@@ -72,6 +82,9 @@ export interface SignalSources {
 }
 
 export class SessionSignals {
+  /** Stateless age measure; the branch and the gap cap are read per call. */
+  private readonly contextAge = new ContextAge();
+
   constructor(
     private readonly opts: SessionSignalsOptions,
     private readonly sources: SignalSources,
@@ -150,10 +163,39 @@ export class SessionSignals {
       lastRequestUsage: () => this.sources.lastRequestUsage?.(),
       msSinceLastTurn: () => this.sources.msSinceLastTurn(),
       msSinceCacheTouch: () => this.msSinceCacheTouch(),
+      contextActiveMs: () => this.contextActiveMs(ctx),
       headChurn: () => this.sources.headChurn(),
       cacheTtlMs: () => this.cacheTtlMs(ctx),
       costRates: (tokens?: number) => this.costRates(ctx, tokens),
     };
+  }
+
+  /**
+   * Active age (ms) of the context that is still live: the entry gaps since
+   * the last compaction boundary, each capped at the configured gap cap so an
+   * idle or resumed stretch is charged as one short interval rather than as
+   * hours. `undefined` when the branch cannot be read, which leaves the time
+   * component at zero.
+   */
+  contextActiveMs(ctx: SessionContextView | undefined): number | undefined {
+    const branch = this.branchOf(ctx);
+    if (!branch) return undefined;
+    const cap = this.opts.ageGapCapMs;
+    return this.contextAge.activeMs(
+      branch,
+      typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? cap : ContextAge.DEFAULT_GAP_CAP_MS,
+    );
+  }
+
+  /** The session branch, or undefined when pi does not expose one. */
+  private branchOf(ctx: SessionContextView | undefined): readonly AgeEntry[] | undefined {
+    const manager = ctx?.sessionManager;
+    try {
+      const branch = manager?.getBranch?.();
+      return Array.isArray(branch) ? branch : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

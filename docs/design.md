@@ -104,22 +104,72 @@ compaction is on, makes the compaction itself prefix-stable:
 
 1. `CompactionPressure` (`src/pressure.ts`) blends two independent
    reasons into a `[0,1]` pressure:
-   - *Context degradation* (`src/context-degradation.ts`): the occupancy
-     at which long-context answer quality starts to fall (RULER/NoLiMa),
-     as a `start`/`full`/`gamma` onset (default 0.5/0.85/2) whose token
-     points are each capped at an absolute budget (`startTokens`/
-     `fullTokens`, default 100 000/200 000; <=0 leaves that point
-     uncapped). A large advertised window otherwise postpones quality
-     pressure far past the context a model holds up on, so the budgets keep
-     a 1M-token window compacting around the frontier ~200K class. With the
-     default fractional thresholds and token budgets, windows at or below
-     200,000 tokens retain their previous degradation curve. The budgets are
-     provisional policy, not a measured universal limit. The true onset is
-     model- and task-dependent, so it stays a tunable guard;
-     `bench/calibration/` measures it as paired full-versus-compacted
-     continuation success for one configuration at a time, and reports
-     `inconclusive` rather than a number when the evidence does not resolve
-     it.
+   - *Context degradation* (`src/context-degradation.ts`): three reasons
+     that an either-suffices blend combines, so the pressure is bounded in
+     `[0,1]` and monotone in both arguments:
+     - *A research floor on absolute length.* Degradation is monotone in
+       length and starts well below the advertised window, so an absolute
+       token count is evidence even when the window says nothing:
+       `floor * clamp((x - floorStartTokens) / (floorFullTokens -
+       floorStartTokens))`, `lambda` below. Defaults 32 768 / 131 072 / 0.5.
+       This is a **minimum** on the pressure, never a ceiling: length alone
+       plateaus at `floor`, because the true onset is model- and
+       task-dependent. 32 768 is the length at which RULER (arXiv
+       2404.06654, COLM 2024) leaves only half of seventeen long-context
+       models satisfactory, and at which NoLiMa (arXiv 2502.05167, ICML
+       2025) puts eleven of thirteen below half their short-context
+       baseline; 131 072 is the largest length the evidence reaches, so the
+       floor stops climbing rather than extrapolate (Databricks, arXiv
+       2411.03538, finds only a handful of models consistent above 64K, and
+       Chroma's "Context Rot" finds the decline non-uniform and strongly
+       model- and task-dependent). `floor`, `floorStartTokens` and
+       `floorFullTokens` are
+       `PI_CACHE_PRESSURE_DEGRADE_FLOOR`, `..._FLOOR_START_TOKENS` and
+       `..._FLOOR_FULL_TOKENS`; `floor <= 0` disables the floor, and
+       `floorStartTokens <= 0` disables the length evidence altogether. The
+       rise itself is independent of `floor`: a zero floor removes only the
+       floor's own contribution, never the age term that multiplies the same
+       evidence.
+     - *The fractional ramp toward the window limit.*
+       `clamp((x - start*W) / max(1e-9, (full - start)*W))^gamma` with
+       `start`/`full`/`gamma` (default 0.5/0.85/2; `PI_CACHE_PRESSURE_
+       DEGRADE_START`, `..._FULL`, `..._GAMMA`) is what carries the pressure
+       from the floor all the way to the window limit. It is uncapped, so a
+       window small enough to trust keeps exactly the curve it had, and an
+       unknown window (`contextWindow` 0, NaN or infinite, which pi uses for
+       virtual models with unset limits) contributes nothing rather than
+       saturating.
+     - *Active context age, for windows too large to trust.* A window counts
+       as unlimited when its size is unknown, or when the fractional ramp
+       could not start until past `floorFullTokens` (`start*W >=
+       floorFullTokens`, i.e. W >= 262 144 by default). Then
+       `lambda * (1 - 2^(-a/T))` adds pressure with `a` the active age and
+       `T` the half-life (`PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES`,
+       default 60; `<= 0` disables). It is multiplied by `lambda` so time
+       alone cannot create pressure below the length evidence, and it is
+       capped by the inclusion-exclusion blend, so it approaches but never
+       reaches 1 on its own.
+     `a` is the sum of gaps between the timestamps of the branch entries
+     from the last compaction's `firstKeptEntryId` to the leaf, each gap
+     capped at a short interval (`PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS`,
+     default 300; `src/context-age.ts`). Session age, wall-clock time since
+     the last compaction, and idle time are deliberately excluded: a
+     compaction resets what is live, the kept tail is older than the
+     compaction that kept it, and idle time adds no tokens. The gap cap is
+     not the provider cache TTL: the TTL says how long a prefix stays warm,
+     which is a cache property, while a gap says only that no entry was
+     appended for that long — a slow session and a resumed one look the
+     same. So a long gap is charged as one bounded stretch of work rather
+     than as hours of accumulated context. The gap from the leaf to "now" is
+     never counted, so a future or skewed timestamp cannot inflate it; a
+     missing branch or an unparseable timestamp fails closed to an age of 0.
+     `floor`, `halfLifeMs`, and the fractional `start`/`full`/`gamma` are
+     **unvalidated policy defaults**: the research supports a decline, not
+     these particular numbers; the floor bound and the shape of the curve are
+     ours, and it measures length, not wall-clock age. `bench/calibration/` is where a measured
+     answer comes from: it runs paired full-versus-compacted continuations
+     for one configuration at a time and reports `inconclusive` rather than
+     a number when the evidence does not resolve it.
    - *Expected cost* (`src/economics.ts`): continuing reads the prefix for
      an expected horizon `1/(1-continuation)` capped at `maxRequests`,
      while compacting pays one rewrite of the retained `keepFraction` plus
@@ -154,8 +204,9 @@ compaction is on, makes the compaction itself prefix-stable:
    before a turn. A fourth, mid-run point fires at the `turn_end`
    boundary, but only when the pressure is saturated (probability 1) and
    the window is at least `PI_CACHE_MIDTERM_MIN_PERCENT` (default 50)
-   percent full or past the degradation onset, so a long agentic run can
-   compact
+   percent full or past the degradation onset (the research floor on
+   absolute length or the fractional ramp, whichever starts first), so a
+   long agentic run can compact
    without waiting to settle (`PI_CACHE_MIDTERM`). It returns a boundary
    `compaction` draft (built by `src/midterm.ts` + `src/midterm-cut.ts`)
    plus `continue: true`, so pi applies the compaction and continues the
@@ -526,8 +577,12 @@ can never delete a file outside the store.
 
 ## Calibrating the degradation onset
 
-The 100 000/200 000 token budgets are policy defaults with no measurement
-behind them. `bench/calibration/` is the measurement: for one pinned
+The floor's 32 768/131 072 anchors come from the literature cited above
+(RULER, NoLiMa, Databricks): the length at which most models lose their
+short-context quality, and the largest length those evaluations reach. The
+floor's height (0.5), the active-age half-life (60 min) and the fractional
+`start`/`full`/`gamma` are policy defaults with no measurement behind them,
+and none of the cited work measures wall-clock age at all. `bench/calibration/` is the measurement: for one pinned
 configuration it runs every task twice from the same repository state, once
 with the whole history and once with the span pi-cache would drop replaced by
 the digest `SpanDigest` produces for it, both legs sharing the continuation
@@ -562,8 +617,11 @@ list and window were set for the run and are not part of the artifact.
 
 What the pilot establishes and what it does not. No material full-history loss
 was established between 32k and 200k in this underpowered pilot, so no
-quality-driven trigger was found at any tested length, and the budgets stay
-unvalidated defaults. The digest leg - the closed-book ablation, without the
+quality-driven trigger was found at any tested length. That does not
+contradict the floor: eight pairs per length cannot resolve a five-point
+margin, as the power note below says, and the floor's anchors come from the
+literature rather than from this pilot. The floor's height and the half-life
+remain unvalidated defaults. The digest leg - the closed-book ablation, without the
 transcript pointer the fast path writes - trails by 33 to 67 points, and the
 trail is not spread evenly: on the two fixtures whose target source exists
 only in the dropped span it passed 2 of 20 usable continuations against 20 of
