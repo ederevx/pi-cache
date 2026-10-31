@@ -67,6 +67,11 @@ const CLEAN = {
   PI_CACHE_PRESSURE_DEGRADE_START: undefined,
   PI_CACHE_PRESSURE_DEGRADE_FULL: undefined,
   PI_CACHE_PRESSURE_DEGRADE_GAMMA: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_TOKENS: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_FLOOR: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES: undefined,
+  PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS: undefined,
   PI_CACHE_PRESSURE_COLD_FLOOR: undefined,
   PI_CACHE_TTL_SECONDS: undefined,
   PI_CACHE_TTL_PROFILES: undefined,
@@ -401,30 +406,42 @@ test("constants: envPinnedIds lists rows whose env var is present", () => {
   assertEq(pinned.length, 2);
 });
 
-test("options: degradation token budgets and the midterm percent resolve", () => {
+test("options: the degradation floor and the midterm percent resolve", () => {
   withEnv(
     {
-      PI_CACHE_PRESSURE_DEGRADE_START_TOKENS: undefined,
-      PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS: undefined,
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS: undefined,
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_TOKENS: undefined,
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR: undefined,
+      PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES: undefined,
+      PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS: undefined,
       PI_CACHE_MIDTERM_MIN_PERCENT: undefined,
     },
     () => {
       const defaults = loadOptions();
-      assertEq(defaults.pressureDegradeStartTokens, 100_000, "start budget default");
-      assertEq(defaults.pressureDegradeFullTokens, 200_000, "full budget default");
+      assertEq(defaults.pressureDegradeFloorStartTokens, 32_768, "floor onset default");
+      assertEq(defaults.pressureDegradeFloorFullTokens, 131_072, "floor plateau default");
+      assertEq(defaults.pressureDegradeFloor, 0.5, "floor default");
+      assertEq(defaults.pressureDegradeHalfLifeMinutes, 60, "half-life default");
+      assertEq(defaults.pressureDegradeAgeGapSeconds, 300, "age gap cap default");
       assertEq(defaults.midtermMinPercent, 50, "midterm percent default");
     },
   );
   withEnv(
     {
-      PI_CACHE_PRESSURE_DEGRADE_START_TOKENS: "64000",
-      PI_CACHE_PRESSURE_DEGRADE_FULL_TOKENS: "128000",
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS: "64000",
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_TOKENS: "128000",
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR: "0.25",
+      PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES: "30",
+      PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS: "120",
       PI_CACHE_MIDTERM_MIN_PERCENT: "25",
     },
     () => {
       const overridden = loadOptions();
-      assertEq(overridden.pressureDegradeStartTokens, 64_000);
-      assertEq(overridden.pressureDegradeFullTokens, 128_000);
+      assertEq(overridden.pressureDegradeFloorStartTokens, 64_000);
+      assertEq(overridden.pressureDegradeFloorFullTokens, 128_000);
+      assertEq(overridden.pressureDegradeFloor, 0.25);
+      assertEq(overridden.pressureDegradeHalfLifeMinutes, 30);
+      assertEq(overridden.pressureDegradeAgeGapSeconds, 120);
       assertEq(overridden.midtermMinPercent, 25);
     },
   );
