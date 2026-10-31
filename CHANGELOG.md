@@ -8,7 +8,7 @@ git tag, and the `version` in `package.json` matches the newest tag.
 ### Added
 
 - A calibration harness under `bench/calibration` measures where quality
-  actually falls away instead of assuming it: paired fixture runs at four
+  actually falls away instead of assuming it: paired fixture runs at five
   context lengths on both a full-history leg and a compaction leg, an exact
   binomial interval on each paired contrast, a familywise split over the nine
   contrasts with no interim look, and a classifier that answers `safe`,
