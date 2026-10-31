@@ -3,6 +3,29 @@
 All notable changes to pi-cache are documented here. Each section maps to a
 git tag, and the `version` in `package.json` matches the newest tag.
 
+## [0.18.0] - 2026-10-31
+
+### Added
+
+- A calibration harness under `bench/calibration` measures where quality
+  actually falls away instead of assuming it: paired fixture runs at four
+  context lengths on both a full-history leg and a compaction leg, an exact
+  binomial interval on each paired contrast, a familywise split over the nine
+  contrasts with no interim look, and a classifier that answers `safe`,
+  `harmful`, `trigger` or `inconclusive`. A grade is void when the fixture's
+  test file moved before the run or was changed by the answer during it, and
+  an empty completion is recorded `unusable` rather than counted as a wrong
+  answer. Each run writes a profile fingerprint (grading version, lengths,
+  alpha, margins, estimator, request limits, seed, repeats) and a store that
+  `recompute` can re-derive under current rules.
+
+### Changed
+
+- The degradation onset constants remain policy defaults. The harness
+  records what the pilot showed and what it did not: four fixtures and
+  independent draws from them cannot establish an onset, and about a hundred
+  independent tasks would be needed.
+
 ## [0.17.0] - 2026-10-30
 
 ### Changed
