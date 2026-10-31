@@ -25,6 +25,8 @@ function baseSignals() {
     lastRequestUsage: undefined as
       | (() => { input: number; cacheRead: number; cacheWrite: number } | undefined)
       | undefined,
+    /** Absent by default: no active context age, so no time component. */
+    contextActiveMs: undefined as (() => number | undefined) | undefined,
     headChurn: () => 0,
   };
 }
@@ -233,9 +235,9 @@ test("autocompact: midterm needs a saturated pressure at a half-full window", ()
     "half full + saturated pressure is eligible",
   );
   assertEq(
-    c.midtermEligible({ tokens: 80_000, contextWindow: 200_000, percent: 40 }, signals({ costRates })),
+    c.midtermEligible({ tokens: 20_000, contextWindow: 200_000, percent: 10 }, signals({ costRates })),
     false,
-    "below half full is never eligible",
+    "below the 32K research floor onset is never eligible",
   );
   assertEq(
     c.midtermEligible({ tokens: 100_000, contextWindow: 200_000, percent: 50 }, signals()),
@@ -290,16 +292,35 @@ test("autocompact: midterm fires past the degradation onset below the percent ga
   });
   const c = new AutocompactController({ ...opts, midterm: true, pressure: model });
   c.noteTurn();
-  // 25% of a 1M window is under the 50% gate but past the 100K capped onset,
-  // and the degradation ramp is already saturated there.
-  assertEq(c.midtermEligible({ tokens: 250_000, contextWindow: 1_000_000 }, signals()), true);
+  // 25% of a 1M window is under the 50% gate but past the 32K research floor
+  // onset, and four active hours carry the time term to saturation there.
+  const aged = signals({ contextActiveMs: () => 4 * 60 * 60 * 1000 });
+  assertEq(c.midtermEligible({ tokens: 250_000, contextWindow: 1_000_000 }, aged), true);
+  // Without the age the floor alone (0.5) cannot saturate the ramp.
+  assertEq(c.midtermEligible({ tokens: 250_000, contextWindow: 1_000_000 }, signals()), false);
   // Below the onset the percent gate cannot be satisfied either.
-  assertEq(c.midtermEligible({ tokens: 60_000, contextWindow: 1_000_000 }, signals()), false);
+  assertEq(c.midtermEligible({ tokens: 60_000, contextWindow: 1_000_000 }, aged), false);
+});
+
+test("autocompact: the active context age reaches the pressure sample", () => {
+  const model = new CompactionPressure({
+    degradation: new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1 }),
+    random: () => 0,
+  });
+  const c = new AutocompactController({ ...opts, midterm: true, pressure: model });
+  c.noteTurn();
+  const aged = signals({ contextActiveMs: () => 60 * 60 * 1000 });
+  // 1 - (1 - 0.5) * (1 - 0.5) = 0.75 after one half-life at a saturated floor.
+  assertEq(
+    c.currentPressure({ tokens: 200_000, contextWindow: 1_000_000 }, baseSignals().lastUsage(), aged)
+      ?.degradation,
+    0.75,
+  );
 });
 
 test("autocompact: midterm still needs a saturated probability", () => {
   const model = new CompactionPressure({
-    degradation: new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1, startTokens: 0 }),
+    degradation: new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1, floor: 0 }),
     random: () => 0,
   });
   const c = new AutocompactController({ ...opts, midterm: true, pressure: model });
