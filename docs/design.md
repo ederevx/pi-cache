@@ -115,7 +115,11 @@ compaction is on, makes the compaction itself prefix-stable:
      default fractional thresholds and token budgets, windows at or below
      200,000 tokens retain their previous degradation curve. The budgets are
      provisional policy, not a measured universal limit. The true onset is
-     model- and task-dependent, so it stays a tunable guard.
+     model- and task-dependent, so it stays a tunable guard;
+     `bench/calibration/` measures it as paired full-versus-compacted
+     continuation success for one configuration at a time, and reports
+     `inconclusive` rather than a number when the evidence does not resolve
+     it.
    - *Expected cost* (`src/economics.ts`): continuing reads the prefix for
      an expected horizon `1/(1-continuation)` capped at `maxRequests`,
      while compacting pays one rewrite of the retained `keepFraction` plus
@@ -519,3 +523,72 @@ can never delete a file outside the store.
   pad (providers say padding is wasted write spend).
 - Sticky-routing breakage from opening-message edits -> treat the first
   system + first user message as frozen content.
+
+## Calibrating the degradation onset
+
+The 100 000/200 000 token budgets are policy defaults with no measurement
+behind them. `bench/calibration/` is the measurement: for one pinned
+configuration it runs every task twice from the same repository state, once
+with the whole history and once with the span pi-cache would drop replaced by
+the digest `SpanDigest` produces for it, both legs sharing the continuation
+prompt, the output limit and the grading. Two contrasts come out of it:
+
+    delta(L) = digest success(L) - full success(L)
+    B(L)     = full success(32k) - full success(L)
+
+A quality-driven trigger needs both halves - material loss in the full leg
+and a digest leg that is not worse - and the classifier answers `safe`,
+`harmful`, `trigger` or `inconclusive` per length, with a five-point
+non-inferiority margin, exact binomial intervals and a familywise split over
+the nine contrasts, with no interim look. It never extrapolates past the
+largest tested length and never fits a curve through the points.
+
+Pilot, 2026-10-31: `deepseek-v4.1-flash` through an OpenAI-compatible router
+with all cost rates zero and a 1 048 576 advertised window; four fixtures x
+two repeats x five lengths x two legs = 80 continuations, no transport
+failures, five cells unusable because the completion came back empty (a
+budget spent on reasoning, nothing to grade) and 8.8% of cells stopped at the
+output limit. The stored profile carries the model, endpoint, seed, repeats,
+the token estimator, the request limits and both margins; the router's price
+list and window were set for the run and are not part of the artifact.
+
+| length  | pairs | full  | digest | delta  | class        |
+|---------|-------|-------|--------|--------|--------------|
+| 32 000  | 7     | 1.000 | 0.500  | -0.571 | inconclusive |
+| 64 000  | 6     | 0.875 | 0.667  | -0.333 | inconclusive |
+| 100 000 | 8     | 1.000 | 0.375  | -0.625 | inconclusive |
+| 128 000 | 8     | 1.000 | 0.500  | -0.500 | inconclusive |
+| 200 000 | 6     | 1.000 | 0.429  | -0.667 | inconclusive |
+
+What the pilot establishes and what it does not. No material full-history loss
+was established between 32k and 200k in this underpowered pilot, so no
+quality-driven trigger was found at any tested length, and the budgets stay
+unvalidated defaults. The digest leg - the closed-book ablation, without the
+transcript pointer the fast path writes - trails by 33 to 67 points, and the
+trail is not spread evenly: on the two fixtures whose target source exists
+only in the dropped span it passed 2 of 20 usable continuations against 20 of
+20 for the full leg, while on the two fixtures whose source survives in the
+kept tail it passed 16 of 17 against 17 of 18, indistinguishable at this size.
+That points at what extraction keeps rather than at context length; a pilot
+this size cannot establish the absence of a length effect.
+
+The classification is conditional on these four fixtures and on independent
+continuation draws from them. A repeat is a second draw from the same task,
+not a second task, so the intervals say nothing about the spread of coding
+tasks at large and a repetition count cannot stand in for one. Dropping
+unusable cells leaves complete-case rates: they describe the cells that had an
+answer to grade, and nothing here rules out the output budget selecting which
+cells those are, which is why the unusable share is printed beside the rates.
+
+The power is the honest limit of the pilot. Eight pairs per length cannot
+resolve a five-point margin in either direction: with two exact intervals
+combined, not even 0 of 8 against 8 of 8 reaches an answer, an answer first
+appears at nine pairs and a trigger at eleven. "Inconclusive" at every length
+is therefore a property of this design, not a finding about the model, and the
+confirmation run needs on the order of a hundred independent tasks - which
+this change deliberately does not attempt.
+
+Prefix reuse is visible in the same records - the router reported between 0
+and 199 168 cached input tokens on the full-leg requests - but it is provider
+cache accounting, not a measure of pi-cache, so it is recorded and not
+interpreted.
