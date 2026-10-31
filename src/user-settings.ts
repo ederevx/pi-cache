@@ -25,7 +25,7 @@ export interface UserSettings {
   retentionOverride?: boolean;
   /** Canonicalize skill/project listings in the system prompt. */
   canonicalize?: boolean;
-  /** Derive OpenAI prompt_cache_key from the prefix head. */
+  /** Derive the chat-completions prompt_cache_key from the prefix head. */
   sharedKey?: boolean;
   /** Force pi's cache-warming decision to "warm". */
   forceWarm?: boolean;
