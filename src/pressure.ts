@@ -9,13 +9,17 @@
  * The pressure is NOT a context-window occupancy ramp. Economics cancels
  * occupancy out of the comparison (see economics.ts), so a warm prefix with
  * few expected requests stays at zero even when large, while a cold prefix
- * or one past the degradation onset rises. The economics horizon itself is
- * discounted by the time since the cache was last touched against the
- * model's TTL, so a near-expiry prefix is compared over fewer warm
- * requests. Rates and TTL come from the model in use — pi's catalog, or a
- * freshly pulled model-list snapshot for models that endpoint prices. The two
- * reasons are combined by inclusion-exclusion (either suffices). The draw
- * uses an injected RNG so callers stay deterministic in tests.
+ * or one past the degradation onset rises. Degradation itself blends a
+ * research-based floor on absolute length, the fractional ramp toward the
+ * window limit, and — for windows too large for either to speak — the
+ * active age of the live context (see context-degradation.ts). The
+ * economics horizon itself is discounted by the time since the cache was
+ * last touched against the model's TTL, so a near-expiry prefix is compared
+ * over fewer warm requests. Rates and TTL come from the model in use —
+ * pi's catalog, or a freshly pulled model-list snapshot for models that
+ * endpoint prices. The two reasons are combined by inclusion-exclusion
+ * (either suffices). The draw uses an injected RNG so callers stay
+ * deterministic in tests.
  */
 
 import { CacheEconomics, type CostRates } from "./economics.ts";
@@ -53,6 +57,9 @@ export interface PressureSample {
   ttlMs?: number;
   /** Age (ms) of the last confirmed cache touch. */
   msSinceCacheTouch?: number;
+  /** Active age (ms) of the live context, for the time component of the
+   *  degradation model on windows too large for occupancy to speak. */
+  contextActiveMs?: number;
 }
 
 /** A draw-free pressure reading: everything but the Bernoulli draw. */
@@ -132,7 +139,7 @@ export class CompactionPressure {
 
   /** Context-degradation pressure from the active model's onset. */
   private degradationFor(input: PressureSample): number {
-    return this.opts.degradation.pressure(input.tokens, input.contextWindow);
+    return this.opts.degradation.pressure(input.tokens, input.contextWindow, input.contextActiveMs);
   }
 
   /** Expected-cost pressure when rates are known, else 0. */

@@ -18,6 +18,14 @@ function pressure(random: () => number = () => 0) {
   return new CompactionPressure({ random });
 }
 
+/** The fractional ramp alone, for tests that isolate the occupancy shape. */
+function rampOnly(random: () => number = () => 0) {
+  return new CompactionPressure({
+    degradation: new ContextDegradation({ floor: 0 }),
+    random,
+  });
+}
+
 test("pressure: zero below the degradation onset and without rates", () => {
   const p = pressure();
   const verdict = p.sample({ tokens: 20_000, contextWindow: 200_000, coldness: 1 });
@@ -27,7 +35,7 @@ test("pressure: zero below the degradation onset and without rates", () => {
 });
 
 test("pressure: degradation alone rises with occupancy", () => {
-  const p = pressure();
+  const p = rampOnly();
   const at = (tokens: number) => p.sample({ tokens, contextWindow: 200_000 }).degradation;
   assertEq(at(100_000), 0, "at the onset start");
   assert(at(120_000) > 0, "past the onset start");
@@ -36,7 +44,7 @@ test("pressure: degradation alone rises with occupancy", () => {
 });
 
 test("pressure: economics does not scale with token count", () => {
-  const p = pressure();
+  const p = rampOnly();
   // Both occupancies stay below the 0.5 degradation onset, so only economics varies.
   const small = p.sample({ tokens: 20_000, contextWindow: 200_000, coldness: 1, rates });
   const large = p.sample({ tokens: 80_000, contextWindow: 200_000, coldness: 1, rates });
@@ -50,7 +58,7 @@ test("pressure: economics does not scale with token count", () => {
 });
 
 test("pressure: a warm low-horizon prefix does not pressure", () => {
-  const p = pressure();
+  const p = rampOnly();
   const verdict = p.sample({ tokens: 120_000, contextWindow: 200_000, coldness: 0, rates });
   assertEq(verdict.economics, 0, "a warm prefix has not amortized its rewrite");
   assert(verdict.pressure > 0, "only the small degradation component remains");
@@ -95,8 +103,15 @@ test("pressure: a negative degradation gamma stays bounded", () => {
 });
 
 test("pressure: the injected RNG drives the draw", () => {
-  const always = new CompactionPressure({ start: 0, full: 0.2, gamma: 1, random: () => 0 });
-  const never = new CompactionPressure({ start: 0, full: 0.2, gamma: 1, random: () => 0.999999 });
+  const degradation = new ContextDegradation({ floor: 0 });
+  const always = new CompactionPressure({ start: 0, full: 0.2, gamma: 1, degradation, random: () => 0 });
+  const never = new CompactionPressure({
+    start: 0,
+    full: 0.2,
+    gamma: 1,
+    degradation,
+    random: () => 0.999999,
+  });
   const sample = { tokens: 120_000, contextWindow: 200_000 };
   const intermediate = always.sample(sample).probability;
   assert(intermediate > 0 && intermediate < 1, `intermediate probability ${intermediate}`);
@@ -147,23 +162,39 @@ test("pressure: either reason alone can saturate the ramp", () => {
   const economics = new CacheEconomics({ continuationProbability: 0.6 });
   const economicsOnly = new CompactionPressure({
     economics,
-    degradation: new ContextDegradation({ start: 10, full: 11, startTokens: 0, fullTokens: 0 }),
+    degradation: new ContextDegradation({ start: 10, full: 11, floor: 0 }),
     random: () => 0,
   }).sample({ tokens: 120_000, contextWindow: 200_000, coldness: 1, rates });
   assert(economicsOnly.degradation === 0, "degradation disabled");
   assertEq(economicsOnly.probability, 1, "economics saturates alone");
 });
 
-test("pressure: degradationOnset follows the token cap", () => {
+test("pressure: degradationOnset follows the earlier of floor and ramp", () => {
   const p = pressure();
-  assertEq(p.degradationOnset(200_000), 100_000, "a 200K window keeps its fraction");
-  assertEq(p.degradationOnset(1_000_000), 100_000, "a 1M window starts at the cap");
+  assertEq(p.degradationOnset(200_000), 32_768, "a 200K window starts at the research floor");
+  assertEq(p.degradationOnset(1_000_000), 32_768, "so does a 1M window");
+  assertEq(
+    new CompactionPressure({
+      degradation: new ContextDegradation({ floor: 0 }),
+      random: () => 0,
+    }).degradationOnset(1_000_000),
+    32_768,
+    "a zero floor keeps the length onset: the age term still reads it",
+  );
+  assertEq(
+    new CompactionPressure({
+      degradation: new ContextDegradation({ floor: 0, halfLifeMs: 0 }),
+      random: () => 0,
+    }).degradationOnset(1_000_000),
+    500_000,
+    "with floor and age both off only the fractional ramp remains",
+  );
 });
 
 test("pressure: zero rates leave degradation as the only reason", () => {
   const zero = { input: 0, cacheRead: 0, cacheWrite: 0 };
   const verdict = pressure().sample({
-    tokens: 250_000,
+    tokens: 900_000,
     contextWindow: 1_000_000,
     coldness: 1,
     rates: zero,
