@@ -1,24 +1,29 @@
 /**
- * pi-cache — ledger + sink tests.
- * CacheLedger must own rows and totals, and the FileRecordSink must
- * persist JSONL rehydratable across process instances with dedup by the
- * globally-unique row id.
+ * pi-cache — ledger tests.
+ * The ledger owns rows, totals and the retention window across reloads
+ * and concurrent writers; the row-extras builder assembles the optional
+ * per-row cache state from the session signals; the file sink owns the
+ * bytes — append, atomic rewrite, baseline header and backup.
  */
 
 import { test, assert, assertEq, assertDeepEq, scratchDir, waitFor } from "./harness.ts";
 import { CacheLedger } from "../src/ledger.ts";
 import { FileRecordSink } from "../src/sink.ts";
+import { BackupStore } from "../src/backup-store.ts";
+import { RowExtrasBuilder, type RowExtrasSignals } from "../src/row-extras.ts";
+import type { SessionContextView } from "../src/signals.ts";
 import type {
   LedgerSnapshot,
+  RecordExtras,
   RecordSink,
   SinkCommit,
   UsageRow,
   UsageTotals,
 } from "../src/ledger.ts";
 import { join } from "node:path";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 
-/** In-memory sink for pure ledger behavior tests. */
+/** In-memory sink so the ledger needs no files. */
 class MemorySink implements RecordSink {
   baseline: UsageTotals = { input: 0, cacheRead: 0, cacheWrite: 0, n: 0 };
   rows: UsageRow[] = [];
@@ -49,6 +54,23 @@ const usage = {
   cacheWrite: 250,
   totalTokens: 2200,
 };
+
+/** A usage row with the given sequence number, for window-shaped sinks. */
+function windowRow(i: number, ts = i): UsageRow {
+  return {
+    id: `r${i}`,
+    seq: i,
+    ts,
+    pid: 1,
+    session: "s",
+    model: "m",
+    input: 1,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 1,
+  };
+}
 
 test("ledger: records rows with unique monotonic ids", () => {
   const sink = new MemorySink();
@@ -139,53 +161,39 @@ test("ledger: torn/corrupt ledger lines are skipped", () => {
   assertEq(ledger.totals().n, 1, "only the valid line loads");
 });
 
-test("ledger: retention bounds the file but keeps lifetime totals", () => {
+test("ledger: retention bounds the file and keeps lifetime totals", () => {
   const sink = new MemorySink();
   const now = Date.now();
-  sink.rows = [0, 1, 2, 3, 4].map((i) => ({
-    id: `r${i}`,
-    seq: i,
-    ts: now + i,
-    pid: 1,
-    session: "s",
-    model: "m",
-    input: 1,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 1,
-  }));
+  sink.rows = [0, 1, 2, 3, 4].map((i) => windowRow(i, now + i));
   const ledger = new CacheLedger(sink, true, 2);
   assertEq(ledger.totals().n, 5, "lifetime counts every recorded row");
   assertEq(ledger.retainedTotals().n, 2, "retained window is bounded");
   assertEq(sink.rows.length, 2, "file rewritten to the retained window");
   assertDeepEq(sink.rows.map((r) => r.id), ["r3", "r4"]);
   assertEq(sink.baseline.n, 3, "evicted rows folded into the baseline");
-});
 
-test("ledger: retention bounds the file during a long session", () => {
-  const sink = new MemorySink();
-  const ledger = new CacheLedger(sink, true, 2);
-  for (let i = 0; i < 6; i++) ledger.record(usage, "m", "s");
-  assertEq(sink.rows.length, 2, "file bounded without waiting for close");
-  assertEq(ledger.retainedTotals().n, 2, "in-memory window retained");
-  assertEq(ledger.sessionTotals().n, 2, "session window stays bounded");
-  assertEq(sink.baseline.n, 4, "evicted rows counted once in the baseline");
-  assertEq(ledger.totals().n, 6, "lifetime reaches past the window");
-  assertEq(ledger.totals().input, 6000, "lifetime token sums are complete");
-});
+  // A long session bounds the file as it records, not only at close.
+  const live = new MemorySink();
+  const recording = new CacheLedger(live, true, 2);
+  for (let i = 0; i < 6; i++) recording.record(usage, "m", "s");
+  assertEq(live.rows.length, 2, "file bounded without waiting for close");
+  assertEq(recording.retainedTotals().n, 2, "in-memory window retained");
+  assertEq(recording.sessionTotals().n, 2, "session window stays bounded");
+  assertEq(live.baseline.n, 4, "evicted rows counted once in the baseline");
+  assertEq(recording.totals().n, 6, "lifetime reaches past the window");
+  assertEq(recording.totals().input, 6000, "lifetime token sums are complete");
 
-test("ledger: compact rewrites only when rows were dropped", () => {
-  const sink = new MemorySink();
-  const ledger = new CacheLedger(sink, true, 2);
-  ledger.record(usage, "m", "s");
-  ledger.record(usage, "m", "s");
-  assertEq(ledger.compact(), false, "within the window: no rewrite");
-  ledger.record(usage, "m", "s");
-  assertEq(ledger.compact(), true, "over the window: rewrite");
-  assertEq(ledger.totals().n, 3, "lifetime is not capped by the window");
-  assertEq(sink.rows.length, 2);
-  assertEq(sink.baseline.n, 1);
+  // compact() rewrites only when rows were dropped.
+  const compacted = new MemorySink();
+  const compacting = new CacheLedger(compacted, true, 2);
+  compacting.record(usage, "m", "s");
+  compacting.record(usage, "m", "s");
+  assertEq(compacting.compact(), false, "within the window: no rewrite");
+  compacting.record(usage, "m", "s");
+  assertEq(compacting.compact(), true, "over the window: rewrite");
+  assertEq(compacting.totals().n, 3, "lifetime is not capped by the window");
+  assertEq(compacted.rows.length, 2);
+  assertEq(compacted.baseline.n, 1);
 });
 
 test("ledger: flush resolves through the sink", async () => {
@@ -252,34 +260,38 @@ test("ledger: close flushes and bounds the file", async () => {
   assertEq(ledger.totals().n, 3, "close never drops a lifetime count");
 });
 
-test("ledger: record with extras carries the cache-state fields", () => {
-  const sink = new MemorySink();
-  const ledger = new CacheLedger(sink, true);
-  ledger.record(usage, "m", "s", {
+test("ledger: rows carry the cache-state extras only when recorded", () => {
+  const extras: RecordExtras = {
     cacheTtlMs: 300_000,
     piTtlMs: 300_000,
     retentionLong: false,
     warm: true,
     msSinceCacheTouch: 42_000,
-  });
-  assertEq(sink.rows.length, 1);
-  assertEq(sink.rows[0].cacheTtlMs, 300_000);
-  assertEq(sink.rows[0].piTtlMs, 300_000);
-  assertEq(sink.rows[0].retentionLong, false);
-  assertEq(sink.rows[0].warm, true);
-  assertEq(sink.rows[0].msSinceCacheTouch, 42_000);
-});
-
-test("ledger: record without extras keeps the old schema", () => {
-  const sink = new MemorySink();
-  const ledger = new CacheLedger(sink, true);
-  ledger.record(usage, "m", "s");
-  const row = sink.rows[0];
-  assertEq(row.cacheTtlMs, undefined, "no cacheTtlMs");
-  assertEq(row.piTtlMs, undefined, "no piTtlMs");
-  assertEq(row.retentionLong, undefined, "no retentionLong");
-  assertEq(row.warm, undefined, "no warm");
-  assertEq(row.msSinceCacheTouch, undefined, "no msSinceCacheTouch");
+  };
+  const rows: Array<[string, RecordExtras, RecordExtras]> = [
+    ["with extras", extras, extras],
+    [
+      "without extras",
+      {},
+      {
+        cacheTtlMs: undefined,
+        piTtlMs: undefined,
+        retentionLong: undefined,
+        warm: undefined,
+        msSinceCacheTouch: undefined,
+      },
+    ],
+  ];
+  for (const [label, recorded, expected] of rows) {
+    const sink = new MemorySink();
+    const ledger = new CacheLedger(sink, true);
+    ledger.record(usage, "m", "s", recorded);
+    assertEq(sink.rows.length, 1, `${label}: one row`);
+    const row = sink.rows[0] as Record<string, unknown>;
+    for (const key of ["cacheTtlMs", "piTtlMs", "retentionLong", "warm", "msSinceCacheTouch"]) {
+      assertEq(row[key], (expected as Record<string, unknown>)[key], `${label}: ${key}`);
+    }
+  }
 });
 
 test("ledger: old-schema rows rehydrate alongside extended rows", async () => {
@@ -314,7 +326,7 @@ test("ledger: old-schema rows rehydrate alongside extended rows", async () => {
   assertEq(parsed[1].cacheTtlMs, 300_000, "new row carries extras");
 });
 
-test("ledger: warm rows are recorded but never masquerade as turns", () => {
+test("ledger: warm refresh rows never masquerade as turns", () => {
   const sink = new MemorySink();
   const ledger = new CacheLedger(sink, true);
   ledger.useSession("s");
@@ -328,9 +340,12 @@ test("ledger: warm rows are recorded but never masquerade as turns", () => {
   assert(ledger.msSinceLastTurn() >= turnGap, "warm rows do not reset the turn clock");
   assertEq(ledger.lastUsage()?.input, 100, "lastUsage is the real turn");
   assertEq(ledger.lastRowId(), sink.rows[0].id, "window key skips warm rows");
+  // The request-scoped view is what reads the refresh row.
+  assertEq(ledger.lastRequestUsage()?.input, 5000, "lastRequestUsage reads the warm row");
+  assertEq(ledger.lastRequestUsage()?.cacheRead, 50_000, "warm refresh carries its usage");
 });
 
-test("ledger: cache-warm turn rows still advance the compaction window", () => {
+test("ledger: refresh rows stay out of the compaction window", () => {
   const sink = new MemorySink();
   const ledger = new CacheLedger(sink, true);
   ledger.useSession("s");
@@ -347,23 +362,152 @@ test("ledger: cache-warm turn rows still advance the compaction window", () => {
   assertEq(sink.rows[3].kind, "warm", "refresh rows are kind warm");
   assertEq(ledger.lastRowId(), sink.rows[2].id, "refresh rows never move the window key");
   assertEq(ledger.lastUsage()?.input, 30, "refresh rows never move the turn view");
+
+  // A refresh with nothing to record is a silent no-op.
+  const empty = new MemorySink();
+  const disabled = new CacheLedger(empty, false);
+  disabled.recordWarm(undefined, "m");
+  disabled.recordWarm({ input: 1, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 1 }, "m");
+  assertEq(empty.rows.length, 0, "disabled or empty usage records nothing");
 });
 
-test("ledger: recordWarm of nothing records nothing", () => {
-  const sink = new MemorySink();
-  const ledger = new CacheLedger(sink, false);
-  ledger.recordWarm(undefined, "m");
-  ledger.recordWarm({ input: 1, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 1 }, "m");
-  assertEq(sink.rows.length, 0, "disabled or empty usage records nothing");
+const rowCtx = undefined as SessionContextView | undefined;
+
+function rowSignals(overrides: Partial<RowExtrasSignals> = {}): RowExtrasSignals {
+  return {
+    cacheTtlMs: () => 300_000,
+    piTtlMs: () => 300_000,
+    retentionLong: () => false,
+    msSinceCacheTouch: () => 30_000,
+    ...overrides,
+  };
+}
+
+test("ledger: row extras assemble every field from the signals", () => {
+  const extras = new RowExtrasBuilder(rowSignals()).build(rowCtx);
+  assertEq(extras.cacheTtlMs, 300_000);
+  assertEq(extras.piTtlMs, 300_000);
+  assertEq(extras.retentionLong, false);
+  assertEq(extras.msSinceCacheTouch, 30_000);
+  assertEq(extras.warm, true, "touch within TTL is warm");
 });
 
-test("ledger: lastRequestUsage sees warm rows lastUsage skips", () => {
-  const sink = new MemorySink();
-  const ledger = new CacheLedger(sink, true);
-  ledger.useSession("s");
-  ledger.record({ ...usage, input: 100, cacheRead: 900 }, "m");
-  ledger.recordWarm({ input: 5000, output: 1, cacheRead: 50_000, cacheWrite: 0, totalTokens: 55_001 }, "m");
-  assertEq(ledger.lastUsage()?.input, 100, "turn-scoped view skips the warm row");
-  assertEq(ledger.lastRequestUsage()?.input, 5000, "request view reads the warm row");
-  assertEq(ledger.lastRequestUsage()?.cacheRead, 50_000, "warm refresh carries its usage");
+test("ledger: row extras draw the warm boundary strictly below the TTL", () => {
+  const rows: Array<[string, number, boolean]> = [
+    ["touch just under the TTL", 299_999, true],
+    ["touch exactly at the TTL", 300_000, false],
+    ["touch past the TTL", 300_001, false],
+  ];
+  for (const [label, touch, expected] of rows) {
+    const extras = new RowExtrasBuilder(rowSignals({ msSinceCacheTouch: () => touch })).build(rowCtx);
+    assertEq(extras.warm, expected, label);
+  }
+});
+
+test("ledger: row extras omit a field a signal cannot supply", () => {
+  const rows: Array<[string, Partial<RowExtrasSignals>, Record<string, number | undefined>]> = [
+    [
+      "an untouched session omits the touch fields",
+      { msSinceCacheTouch: () => Number.POSITIVE_INFINITY },
+      { msSinceCacheTouch: undefined, warm: undefined, cacheTtlMs: 300_000 },
+    ],
+    [
+      "an absent pi tier is omitted, not zeroed",
+      { piTtlMs: () => undefined },
+      { piTtlMs: undefined, cacheTtlMs: 300_000 },
+    ],
+  ];
+  for (const [label, overrides, expected] of rows) {
+    const extras = new RowExtrasBuilder(rowSignals(overrides)).build(rowCtx) as Record<
+      string,
+      number | undefined
+    >;
+    for (const [key, value] of Object.entries(expected)) {
+      assertEq(extras[key], value, `${label}: ${key}`);
+    }
+  }
+});
+
+test("ledger: row extras degrade only the field whose signal fails", () => {
+  const extras = new RowExtrasBuilder(
+    rowSignals({
+      piTtlMs: () => {
+        throw new Error("signal failure");
+      },
+    }),
+  ).build(rowCtx);
+  assertEq(extras.piTtlMs, undefined, "failed field omitted");
+  assertEq(extras.cacheTtlMs, 300_000, "healthy fields survive");
+  assertEq(extras.warm, true, "warm still computed");
+});
+
+function zero(): UsageTotals {
+  return { input: 0, cacheRead: 0, cacheWrite: 0, n: 0 };
+}
+
+function snapshot(rows: UsageRow[], baseline?: UsageTotals): LedgerSnapshot {
+  return { baseline: baseline ?? zero(), rows };
+}
+
+/** Count retained backups without exposing a test-only method. */
+function backupCount(dir: string): number {
+  try {
+    return readdirSync(dir).filter((name) => name.endsWith(".jsonl")).length;
+  } catch {
+    return 0;
+  }
+}
+
+test("ledger: sink append/flush/load round-trip", async () => {
+  const file = join(scratchDir(), "sink-roundtrip.jsonl");
+  const sink = new FileRecordSink(file);
+  assertEq(sink.append(windowRow(1)), true, "first append commits");
+  assertEq(sink.append(windowRow(2)), true, "second append commits");
+  await sink.flush();
+  assertEq(sink.load().rows.length, 2);
+});
+
+test("ledger: sink rewrite is atomic, leaves no temp, and preserves the mode", () => {
+  const dir = join(scratchDir(), "sink-rewrite");
+  const file = join(dir, "ledger.jsonl");
+  const sink = new FileRecordSink(file);
+  sink.rewrite(snapshot([windowRow(1)]));
+  assertEq(sink.load().rows.length, 1);
+  assertEq(readdirSync(dir).filter((name) => name.includes(".tmp")).length, 0, "no temp left");
+  const first = statSync(file).mode & 0o777;
+  sink.rewrite(snapshot([windowRow(1), windowRow(2)]));
+  assertEq(statSync(file).mode & 0o777, first, "mode preserved");
+});
+
+test("ledger: sink append fails closed under lock contention, never unlocked", () => {
+  const dir = join(scratchDir(), "sink-lock");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, "ledger.jsonl");
+  writeFileSync(`${file}.lock`, "held", { mode: 0o600 });
+  const sink = new FileRecordSink(file);
+  assertEq(sink.append(windowRow(1)), false, "contended append reports failure");
+  assertEq(sink.load().rows.length, 0, "no row written outside the lock");
+});
+
+test("ledger: sink baseline header round-trips and is never a usage row", () => {
+  const file = join(scratchDir(), "sink-baseline.jsonl");
+  const sink = new FileRecordSink(file);
+  sink.rewrite(snapshot([windowRow(1)], { input: 100, cacheRead: 50, cacheWrite: 5, n: 7 }));
+  const loaded = sink.load();
+  assertEq(loaded.baseline.n, 7, "baseline count rehydrates");
+  assertEq(loaded.baseline.input, 100, "baseline input rehydrates");
+  assertEq(loaded.rows.length, 1, "only usage rows load as rows");
+  assert(statSync(file).size > 0, "file written");
+});
+
+test("ledger: sink captures a bounded backup when a rewrite shrinks the file", () => {
+  const dir = join(scratchDir(), "sink-backup");
+  const file = join(dir, "ledger.jsonl");
+  const backups = new BackupStore(join(dir, "backups"), { keep: 3, ttlMs: 0, maxBytes: 0 });
+  const sink = new FileRecordSink(file, backups);
+  sink.rewrite(snapshot([windowRow(1), windowRow(2), windowRow(3)]));
+  assertEq(backupCount(join(dir, "backups")), 0, "growth writes do not back up");
+  sink.rewrite(snapshot([windowRow(1)]));
+  assertEq(backupCount(join(dir, "backups")), 1, "shrinking rewrite captures the pre-image");
+  assertEq(sink.load().rows.length, 1);
 });

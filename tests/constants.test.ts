@@ -162,89 +162,92 @@ test("constants: boolean env parsing", () => {
       assertEq(opts.midterm, false);
       assertEq(opts.fastCompact, false);
       assertEq(opts.fastBranchSummary, false);
+      // Every enabled/disabled spelling pi-cache accepts.
+      const spellings: Array<[string, boolean]> = [
+        ["1", true],
+        ["on", true],
+        ["yes", true],
+        ["0", false],
+        ["off", false],
+        ["no", false],
+        ["false", false],
+      ];
+      for (const [raw, expected] of spellings) {
+        withEnv({ PI_CACHE_TELEMETRY: raw }, () => {
+          assertEq(loadOptions().telemetry, expected, `PI_CACHE_TELEMETRY=${raw}`);
+        });
+      }
     },
   );
 });
 
-test("constants: 'on' is an enabled boolean env value", () => {
-  withEnv(
-    { ...CLEAN, PI_CACHE_SETTINGS: settingsPath("on"), PI_CACHE_TELEMETRY: "on" },
-    () => {
-      assertEq(loadOptions().telemetry, true);
+test("constants: the owned settings file drives every switch and env wins over it", () => {
+  const rows: Array<{
+    label: string;
+    stored: Record<string, boolean>;
+    env?: Record<string, string>;
+    expected: Record<string, boolean>;
+  }> = [
+    { label: "a stored switch off", stored: { fastCompaction: false }, expected: { fastCompact: false } },
+    { label: "a stored switch on", stored: { fastCompaction: true }, expected: { fastCompact: true } },
+    {
+      label: "env overrides a stored switch",
+      stored: { fastCompaction: false },
+      env: { PI_CACHE_FAST_COMPACT: "1" },
+      expected: { fastCompact: true },
     },
-  );
-});
-
-test("constants: owned settings file drives the fast-compaction switch", () => {
-  const file = settingsPath("switch");
-  writeFileSync(file, JSON.stringify({ fastCompaction: false }));
-  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file }, () => {
-    assertEq(loadOptions().fastCompact, false);
-  });
-  writeFileSync(file, JSON.stringify({ fastCompaction: true }));
-  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file }, () => {
-    assertEq(loadOptions().fastCompact, true);
-  });
-});
-
-test("constants: env overrides the owned settings switch", () => {
-  const file = settingsPath("override");
-  writeFileSync(file, JSON.stringify({ fastCompaction: false }));
-  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file, PI_CACHE_FAST_COMPACT: "1" }, () => {
-    assertEq(loadOptions().fastCompact, true);
-  });
-});
-
-test("constants: owned settings drive every option", () => {
-  const file = settingsPath("all-owned");
-  writeFileSync(
-    file,
-    JSON.stringify({
-      telemetry: false,
-      dedupTools: false,
-      anchor: false,
-      retentionOverride: false,
-      canonicalize: false,
-      sharedKey: false,
-      forceWarm: false,
-      advisory: false,
-      autoCompact: false,
-    }),
-  );
-  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file }, () => {
-    const opts = loadOptions();
-    assertEq(opts.telemetry, false);
-    assertEq(opts.dedupTools, false);
-    assertEq(opts.anchor, false);
-    assertEq(opts.retentionOverride, false);
-    assertEq(opts.canonicalize, false);
-    assertEq(opts.sharedKey, false);
-    assertEq(opts.forceWarm, false);
-    assertEq(opts.advisory, false);
-    assertEq(opts.autoCompact, false);
-  });
-});
-
-test("constants: env overrides an owned option", () => {
-  const file = settingsPath("option-override");
-  writeFileSync(file, JSON.stringify({ telemetry: false, autoCompact: false }));
-  withEnv(
-    { ...CLEAN, PI_CACHE_SETTINGS: file, PI_CACHE_TELEMETRY: "1", PI_CACHE_AUTO_COMPACT: "1" },
-    () => {
-      const opts = loadOptions();
-      assertEq(opts.telemetry, true, "env wins over stored");
-      assertEq(opts.autoCompact, true, "env wins over stored");
+    {
+      label: "every switch reads the stored file",
+      stored: {
+        telemetry: false,
+        dedupTools: false,
+        anchor: false,
+        retentionOverride: false,
+        canonicalize: false,
+        sharedKey: false,
+        forceWarm: false,
+        advisory: false,
+        autoCompact: false,
+      },
+      expected: {
+        telemetry: false,
+        dedupTools: false,
+        anchor: false,
+        retentionOverride: false,
+        canonicalize: false,
+        sharedKey: false,
+        forceWarm: false,
+        advisory: false,
+        autoCompact: false,
+      },
     },
-  );
+    {
+      label: "env wins over several stored options",
+      stored: { telemetry: false, autoCompact: false },
+      env: { PI_CACHE_TELEMETRY: "1", PI_CACHE_AUTO_COMPACT: "1" },
+      expected: { telemetry: true, autoCompact: true },
+    },
+  ];
+  for (const [index, row] of rows.entries()) {
+    const file = settingsPath(`precedence-${index}`);
+    writeFileSync(file, JSON.stringify(row.stored));
+    withEnv({ ...CLEAN, PI_CACHE_SETTINGS: file, ...row.env }, () => {
+      const opts = loadOptions() as unknown as Record<string, unknown>;
+      for (const [key, expected] of Object.entries(row.expected)) {
+        assertEq(opts[key], expected, `${row.label}: ${key}`);
+      }
+    });
+  }
 });
 
 test("constants: the model-parameter endpoint and its timings are configured", () => {
   withEnv({ ...CLEAN, PI_CACHE_SETTINGS: settingsPath("params") }, () => {
     const opts = loadOptions();
     assert(opts.modelParamsUrl.endsWith("/models"), "default model-list endpoint");
-    assert(opts.modelParamsMaxAgeMs > 0, "freshness bound default");
-    assert(opts.modelParamsRetryMs > 0, "retry gap default");
-    assert(opts.modelParamsTimeoutMs > 0, "fetch timeout default");
+    assertEq(opts.modelParamsUrl, "https://openrouter.ai/api/v1/models", "default endpoint");
+    assertEq(opts.modelParamsMaxAgeMs, 300_000, "default freshness bound");
+    assertEq(opts.modelParamsRetryMs, 60_000, "default retry gap");
+    assertEq(opts.modelParamsTimeoutMs, 5_000, "default timeout");
     assertEq(opts.modelParamsMaxModels, 5000, "catalog size cap default");
     assertEq(opts.cacheTtlProfiles.length, 6, "default TTL profiles");
   });
@@ -273,56 +276,43 @@ test("constants: the model-parameter endpoint and its timings are configured", (
       assertEq(loadOptions().modelParamsUrl, "", "an empty value disables the pull");
     },
   );
-});
-
-test("constants: model-parameter timings fall back outside their bounds", () => {
-  withEnv({ ...CLEAN, PI_CACHE_SETTINGS: settingsPath("params-bounds") }, () => {
-    const opts = loadOptions();
-    assertEq(opts.modelParamsUrl, "https://openrouter.ai/api/v1/models", "default endpoint");
-    assertEq(opts.modelParamsMaxAgeMs, 300_000, "default freshness bound");
-    assertEq(opts.modelParamsRetryMs, 60_000, "default retry gap");
-    assertEq(opts.modelParamsTimeoutMs, 5_000, "default timeout");
-  });
-  withEnv(
-    {
-      ...CLEAN,
-      PI_CACHE_SETTINGS: settingsPath("params-negative"),
-      PI_CACHE_MODEL_PARAMS_MAX_AGE_MS: "-1",
-      PI_CACHE_MODEL_PARAMS_RETRY_MS: "-5",
-      PI_CACHE_MODEL_PARAMS_TIMEOUT_MS: "0",
-      PI_CACHE_MODEL_PARAMS_MAX_MODELS: "0",
-    },
-    () => {
-      const opts = loadOptions();
-      assertEq(opts.modelParamsMaxAgeMs, 300_000, "a negative age stales every snapshot");
-      assertEq(opts.modelParamsRetryMs, 60_000, "a negative retry drops the throttle");
-      assertEq(opts.modelParamsTimeoutMs, 5_000, "a zero timeout fires at once");
-      assertEq(opts.modelParamsMaxModels, 5000, "a zero cap would drop every model");
-    },
-  );
-  withEnv(
-    {
-      ...CLEAN,
-      PI_CACHE_SETTINGS: settingsPath("params-zero"),
-      PI_CACHE_MODEL_PARAMS_MAX_AGE_MS: "0",
-      PI_CACHE_MODEL_PARAMS_RETRY_MS: "0",
-    },
-    () => {
-      const opts = loadOptions();
-      assertEq(opts.modelParamsMaxAgeMs, 0, "a zero age is a legal always-refresh bound");
-      assertEq(opts.modelParamsRetryMs, 0, "a zero retry gap is legal");
-    },
-  );
-  withEnv(
-    {
-      ...CLEAN,
-      PI_CACHE_SETTINGS: settingsPath("params-overflow"),
-      PI_CACHE_MODEL_PARAMS_TIMEOUT_MS: "2147483648",
-    },
-    () => {
-      assertEq(loadOptions().modelParamsTimeoutMs, 5_000, "an out-of-range delay clamps to 1 ms");
-    },
-  );
+  // Timings outside their bounds fall back to the documented defaults; a
+  // zero age or retry gap is legal.
+  const bounds: Array<[string, Record<string, string>, Record<string, number>]> = [
+    [
+      "a negative age stales every snapshot",
+      {
+        PI_CACHE_MODEL_PARAMS_MAX_AGE_MS: "-1",
+        PI_CACHE_MODEL_PARAMS_RETRY_MS: "-5",
+        PI_CACHE_MODEL_PARAMS_TIMEOUT_MS: "0",
+        PI_CACHE_MODEL_PARAMS_MAX_MODELS: "0",
+      },
+      {
+        modelParamsMaxAgeMs: 300_000,
+        modelParamsRetryMs: 60_000,
+        modelParamsTimeoutMs: 5_000,
+        modelParamsMaxModels: 5000,
+      },
+    ],
+    [
+      "a zero age is a legal always-refresh bound",
+      { PI_CACHE_MODEL_PARAMS_MAX_AGE_MS: "0", PI_CACHE_MODEL_PARAMS_RETRY_MS: "0" },
+      { modelParamsMaxAgeMs: 0, modelParamsRetryMs: 0 },
+    ],
+    [
+      "an out-of-range delay falls back",
+      { PI_CACHE_MODEL_PARAMS_TIMEOUT_MS: "2147483648" },
+      { modelParamsTimeoutMs: 5_000 },
+    ],
+  ];
+  for (const [index, [label, env, expected]] of bounds.entries()) {
+    withEnv({ ...CLEAN, PI_CACHE_SETTINGS: settingsPath(`params-bounds-${index}`), ...env }, () => {
+      const opts = loadOptions() as unknown as Record<string, unknown>;
+      for (const [key, value] of Object.entries(expected)) {
+        assertEq(opts[key], value, `${label}: ${key}`);
+      }
+    });
+  }
 });
 
 test("constants: ledger path override", () => {

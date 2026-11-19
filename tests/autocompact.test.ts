@@ -31,43 +31,58 @@ function baseSignals() {
   };
 }
 
-test("autocompact: disabled never compacts", () => {
-  const c = new AutocompactController({ ...opts, enabled: false });
-  assertEq(c.decide(90, signals()).shouldCompact, false);
-});
-
-test("autocompact: no usage yet blocks", () => {
-  const c = new AutocompactController(opts);
-  c.noteTurn();
-  const verdict = c.decide(90, signals({ lastUsage: () => undefined }));
-  assertEq(verdict.shouldCompact, false);
-  assertEq(verdict.reason, "no usage yet");
-});
-
-test("autocompact: warm cache blocks", () => {
-  const c = new AutocompactController(opts);
-  c.noteTurn();
-  const verdict = c.decide(90, signals({ lastUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }) }));
-  assertEq(verdict.shouldCompact, false);
-  assertEq(verdict.reason, "cache warm");
-  assertEq(verdict.coldness, 0, "a majority-hit request is coldness 0");
-});
-
-test("autocompact: cold but context below threshold blocks", () => {
-  const c = new AutocompactController(opts);
-  c.noteTurn();
-  const verdict = c.decide(50, signals());
-  assertEq(verdict.shouldCompact, false);
-  assertEq(verdict.reason, "context below threshold");
-  assertEq(verdict.coldness, 1, "a ~0% hit request is coldness 1");
-});
-
-test("autocompact: cold + high context compacts", () => {
-  const c = new AutocompactController(opts);
-  c.noteTurn();
-  const verdict = c.decide(85, signals());
-  assertEq(verdict.shouldCompact, true);
-  assertEq(verdict.reason, "cold window + context threshold");
+test("autocompact: the enable, usage, warmth and context gates open in order", () => {
+  const gates: Array<{
+    label: string;
+    enabled?: boolean;
+    signals: ReturnType<typeof signals>;
+    percent: number;
+    compact: boolean;
+    reason?: string;
+    coldness?: number;
+  }> = [
+    { label: "disabled never compacts", enabled: false, signals: signals(), percent: 90, compact: false },
+    {
+      label: "no usage yet blocks",
+      signals: signals({ lastUsage: () => undefined }),
+      percent: 90,
+      compact: false,
+      reason: "no usage yet",
+    },
+    {
+      label: "warm cache blocks",
+      signals: signals({ lastUsage: () => ({ input: 100, cacheRead: 900, cacheWrite: 0 }) }),
+      percent: 90,
+      compact: false,
+      reason: "cache warm",
+      coldness: 0,
+    },
+    {
+      label: "cold but context below threshold blocks",
+      signals: signals(),
+      percent: 50,
+      compact: false,
+      reason: "context below threshold",
+      coldness: 1,
+    },
+    {
+      label: "cold + high context compacts",
+      signals: signals(),
+      percent: 85,
+      compact: true,
+      reason: "cold window + context threshold",
+    },
+  ];
+  for (const gate of gates) {
+    const c = new AutocompactController({ ...opts, enabled: gate.enabled ?? true });
+    c.noteTurn();
+    const verdict = c.decide(gate.percent, gate.signals);
+    assertEq(verdict.shouldCompact, gate.compact, gate.label);
+    if (gate.reason !== undefined) assertEq(verdict.reason, gate.reason, `${gate.label}: reason`);
+    if (gate.coldness !== undefined) {
+      assertEq(verdict.coldness, gate.coldness, `${gate.label}: coldness`);
+    }
+  }
 });
 
 test("autocompact: the TTL idle ramp raises coldness", () => {
@@ -142,25 +157,21 @@ test("autocompact: pressure draw fires at high tokens", () => {
   assert(verdict.probability === 1, "saturated pressure probability");
 });
 
-test("autocompact: pressure does not fire below the minimum context", () => {
+test("autocompact: the minimum-context floor gates the pressure draw", () => {
   const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
   const pressure = new CompactionPressure({ random: () => 0 });
-  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, minTokens: 50_000 });
-  c.noteTurn();
-  const tiny = c.decide({ tokens: 470, contextWindow: 1_048_576, percent: 0.045 }, signals({ costRates }));
-  assertEq(tiny.shouldCompact, false);
-  assertEq(tiny.reason, "context below minimum");
-  const grown = c.decide({ tokens: 200_000, contextWindow: 1_048_576, percent: 19 }, signals({ costRates }));
-  assertEq(grown.shouldCompact, true, "above the floor the cold pressure still fires");
-});
-
-test("autocompact: a non-positive minimum context disables the floor", () => {
-  const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
-  const pressure = new CompactionPressure({ random: () => 0 });
-  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, minTokens: 0 });
-  c.noteTurn();
-  const verdict = c.decide({ tokens: 470, contextWindow: 1_048_576, percent: 0.045 }, signals({ costRates }));
-  assertEq(verdict.shouldCompact, true);
+  const rows: Array<[string, number, number, number, boolean, string?]> = [
+    ["a tiny context below the floor never compacts", 50_000, 470, 0.045, false, "context below minimum"],
+    ["above the floor the cold pressure still fires", 50_000, 200_000, 19, true],
+    ["a non-positive floor is disabled", 0, 470, 0.045, true],
+  ];
+  for (const [label, minTokens, tokens, percent, compact, reason] of rows) {
+    const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, minTokens });
+    c.noteTurn();
+    const verdict = c.decide({ tokens, contextWindow: 1_048_576, percent }, signals({ costRates }));
+    assertEq(verdict.shouldCompact, compact, label);
+    if (reason !== undefined) assertEq(verdict.reason, reason, `${label}: reason`);
+  }
 });
 
 test("autocompact: pressure draw can decline below the ramp", () => {
@@ -223,8 +234,14 @@ test("autocompact: fast compaction triggers on warm token pressure", () => {
 });
 
 test("autocompact: midterm needs a saturated pressure at a half-full window", () => {
+  let draws = 0;
   const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
-  const pressure = new CompactionPressure({ random: () => 0.99 });
+  const pressure = new CompactionPressure({
+    random: () => {
+      draws++;
+      return 0.99;
+    },
+  });
   const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: true });
   c.noteTurn();
   // Cold economics at the degradation onset saturate the pressure, so the
@@ -244,6 +261,7 @@ test("autocompact: midterm needs a saturated pressure at a half-full window", ()
     false,
     "without cost rates the pressure never saturates",
   );
+  assertEq(draws, 0, "the predicate reads the probability, never an RNG draw");
   const off = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: false });
   off.noteTurn();
   assertEq(
@@ -251,25 +269,6 @@ test("autocompact: midterm needs a saturated pressure at a half-full window", ()
     false,
     "the midterm switch gates the predicate",
   );
-});
-
-test("autocompact: the midterm predicate consumes no RNG draw", () => {
-  let draws = 0;
-  const costRates = () => ({ input: 0.8, cacheRead: 0.2, cacheWrite: 0 });
-  const pressure = new CompactionPressure({
-    random: () => {
-      draws++;
-      return 0.99;
-    },
-  });
-  const c = new AutocompactController({ ...opts, cacheNeutral: true, pressure, midterm: true });
-  c.noteTurn();
-  assertEq(
-    c.midtermEligible({ tokens: 100_000, contextWindow: 200_000, percent: 50 }, signals({ costRates })),
-    true,
-    "predicate reads the probability, not a draw",
-  );
-  assertEq(draws, 0, "no RNG touched");
 });
 
 test("autocompact: decide reads the freshest request, not just the last turn", () => {
@@ -300,6 +299,21 @@ test("autocompact: midterm fires past the degradation onset below the percent ga
   assertEq(c.midtermEligible({ tokens: 250_000, contextWindow: 1_000_000 }, signals()), false);
   // Below the onset the percent gate cannot be satisfied either.
   assertEq(c.midtermEligible({ tokens: 60_000, contextWindow: 1_000_000 }, aged), false);
+
+  // 15% clears a 10% configured gate but the degradation ramp has not started,
+  // so the probability is 0 and the midterm trigger stays off.
+  const rampOnly = new CompactionPressure({
+    degradation: new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1, floor: 0 }),
+    random: () => 0,
+  });
+  const low = new AutocompactController({
+    ...opts,
+    midterm: true,
+    midtermMinPercent: 10,
+    pressure: rampOnly,
+  });
+  low.noteTurn();
+  assertEq(low.midtermEligible({ tokens: 150_000, contextWindow: 1_000_000 }, signals()), false);
 });
 
 test("autocompact: the active context age reaches the pressure sample", () => {
@@ -316,23 +330,4 @@ test("autocompact: the active context age reaches the pressure sample", () => {
       ?.degradation,
     0.75,
   );
-});
-
-test("autocompact: midterm still needs a saturated probability", () => {
-  const model = new CompactionPressure({
-    degradation: new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1, floor: 0 }),
-    random: () => 0,
-  });
-  const c = new AutocompactController({ ...opts, midterm: true, pressure: model });
-  c.noteTurn();
-  // 15% clears a 10% configured gate but the degradation ramp has not started,
-  // so the probability is 0 and the midterm trigger stays off.
-  const low = new AutocompactController({
-    ...opts,
-    midterm: true,
-    midtermMinPercent: 10,
-    pressure: model,
-  });
-  low.noteTurn();
-  assertEq(low.midtermEligible({ tokens: 150_000, contextWindow: 1_000_000 }, signals()), false);
 });

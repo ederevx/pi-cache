@@ -17,24 +17,58 @@ function rampOnly(start = 0.5, full = 0.85, gamma = 1) {
   return new ContextDegradation({ start, full, gamma, floor: 0 });
 }
 
-test("degradation: zero at/below start and one at/above full", () => {
-  const model = rampOnly(0.5, 0.85, 1);
-  assertEq(model.pressure(0, 200_000), 0);
-  assertEq(model.pressure(100_000, 200_000), 0, "exactly at start");
-  assertEq(model.pressure(170_000, 200_000), 1, "exactly at full");
-  assertEq(model.pressure(200_000, 200_000), 1, "clamped above full");
-});
+test("degradation: pressure stays finite, bounded and monotone on junk input", () => {
+  const exact: Array<[string, ContextDegradation, number, number, number | undefined, number]> = [
+    ["zero at zero tokens", rampOnly(0.5, 0.85, 1), 0, 200_000, undefined, 0],
+    ["zero exactly at the onset", rampOnly(0.5, 0.85, 1), 100_000, 200_000, undefined, 0],
+    ["one exactly at the full point", rampOnly(0.5, 0.85, 1), 170_000, 200_000, undefined, 1],
+    ["clamped above the full point", rampOnly(0.5, 0.85, 1), 200_000, 200_000, undefined, 1],
+    ["equal thresholds collapse to a step", rampOnly(0.5, 0.5, 2), 100_000, 200_000, undefined, 0],
+    ["one token above that step", rampOnly(0.5, 0.5, 2), 100_001, 200_000, undefined, 1],
+  ];
+  for (const [label, model, tokens, window, activeMs, expected] of exact) {
+    assertEq(model.pressure(tokens, window, activeMs), expected, label);
+  }
 
-test("degradation: monotone and clamped in [0,1]", () => {
-  const model = rampOnly(0.2, 0.6);
-  const a = model.pressure(60_000, 200_000);
-  const b = model.pressure(80_000, 200_000);
-  const c = model.pressure(100_000, 200_000);
-  assert(a < b && b < c, "rising through the onset");
-  assert(
-    [a, b, c].every((v) => v >= 0 && v <= 1),
-    "bounded",
-  );
+  const rising = [60_000, 80_000, 100_000].map((tokens) => rampOnly(0.2, 0.6).pressure(tokens, 200_000));
+  assert(rising[0] < rising[1] && rising[1] < rising[2], "rising through the onset");
+  assert(rising.every((value) => value >= 0 && value <= 1), "bounded");
+
+  const model = new ContextDegradation();
+  for (const activeMs of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0]) {
+    const value = model.pressure(150_000, 1_000_000, activeMs);
+    assert(Number.isFinite(value) && value >= 0 && value <= 1, `age ${activeMs} -> ${value}`);
+  }
+  for (const tokens of [Number.NaN, -1, Number.POSITIVE_INFINITY]) {
+    const value = model.pressure(tokens, 1_000_000, HOUR);
+    assert(Number.isFinite(value) && value >= 0 && value <= 1, `tokens ${tokens} -> ${value}`);
+  }
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const key of [
+      "start",
+      "full",
+      "gamma",
+      "floor",
+      "floorStartTokens",
+      "floorFullTokens",
+      "halfLifeMs",
+    ] as const) {
+      const configured = new ContextDegradation({ [key]: bad } as never);
+      const value = configured.pressure(150_000, 1_000_000, HOUR);
+      assert(Number.isFinite(value) && value >= 0 && value <= 1, `${key}=${bad} -> ${value}`);
+      assert(Number.isFinite(configured.onset(1_000_000)), `${key}=${bad} onset`);
+      if (key === "floorStartTokens") {
+        assertEq(configured.onset(1_000_000), 32_768, `${key}=${bad} keeps the default onset`);
+      }
+    }
+  }
+
+  const reversed = rampOnly(0.8, 0.2, 2);
+  const below = reversed.pressure(150_000, 200_000);
+  const above = reversed.pressure(190_000, 200_000);
+  assert(Number.isFinite(below) && Number.isFinite(above), "reversed thresholds stay finite");
+  assert(below <= above, "still monotone");
+  assert(below >= 0 && above <= 1, "bounded");
 });
 
 test("degradation: gamma biases the ramp toward the top", () => {
@@ -54,7 +88,7 @@ test("degradation: a negative gamma stays bounded", () => {
   assert(Number.isFinite(above) && above >= 0 && above <= 1, `bounded ${above}`);
 });
 
-test("degradation: the research floor rises from 32K and plateaus at 0.5", () => {
+test("degradation: the research floor rises from 32K and never ceilings the ramp", () => {
   const model = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 1 });
   assertEq(model.pressure(32_768, 200_000), 0, "zero at the floor onset");
   const midpoint = (32_768 + 131_072) / 2;
@@ -62,15 +96,13 @@ test("degradation: the research floor rises from 32K and plateaus at 0.5", () =>
   assertEq(model.pressure(131_072, 1_000_000), 0.5, "plateau at the second anchor");
   assertEq(model.pressure(200_000, 1_000_000), 0.5, "and beyond it");
   assertEq(model.pressure(131_072, 10_000_000), 0.5, "a huge window changes nothing");
-});
 
-test("degradation: the floor is a minimum, never a ceiling", () => {
   // A 200K window: the ramp starts at 100K, so between 100K and 170K the
   // combined pressure must be at least both parts, and it reaches 1 at the
   // ramp's full point even though the floor alone plateaus at 0.5.
-  const model = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 2 });
+  const combined = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 2 });
   for (const tokens of [40_000, 80_000, 100_000, 130_000, 170_000, 200_000]) {
-    const pressure = model.pressure(tokens, 200_000);
+    const pressure = combined.pressure(tokens, 200_000);
     const floor = Math.min(0.5, (0.5 * (tokens - 32_768)) / (131_072 - 32_768));
     const rampSpan = 170_000 - 100_000;
     const ramp =
@@ -78,35 +110,31 @@ test("degradation: the floor is a minimum, never a ceiling", () => {
     assert(pressure >= floor - 1e-12, `>= floor at ${tokens} (${pressure} vs ${floor})`);
     assert(pressure >= ramp - 1e-12, `>= ramp at ${tokens} (${pressure} vs ${ramp})`);
   }
-  assertEq(model.pressure(170_000, 200_000), 1, "the ramp still saturates the window");
+  assertEq(combined.pressure(170_000, 200_000), 1, "the ramp still saturates the window");
 });
 
-test("degradation: a large window keeps climbing to the window limit", () => {
+test("degradation: the ramp and the onset follow the window size", () => {
   const model = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 2 });
+  // A large window: the floor plateaus while the ramp keeps climbing.
   assertEq(model.pressure(150_000, 1_000_000), 0.5, "floor plateau, ramp still 0");
   const midRamp = model.pressure(600_000, 1_000_000);
   const nearFull = model.pressure(840_000, 1_000_000);
   assert(midRamp > 0.5 && nearFull > midRamp, "rising toward the window limit");
   assertEq(model.pressure(850_000, 1_000_000), 1, "saturates at the fractional full");
-});
 
-test("degradation: a small window keeps exactly the fractional curve", () => {
   // W = 32K: the ramp starts at 16K, before the floor's onset, and the floor
   // can never engage within the window, so nothing changed for such models.
-  const model = new ContextDegradation({ start: 0.5, full: 0.85, gamma: 2 });
   const ramp = rampOnly(0.5, 0.85, 2);
   for (const tokens of [0, 16_000, 24_000, 31_000]) {
     assertEq(model.pressure(tokens, 32_000), ramp.pressure(tokens, 32_000), `at ${tokens}`);
   }
   assertEq(model.onset(32_000), 16_000, "the ramp's onset is earlier");
-});
 
-test("degradation: the onset is the earlier of the floor and the ramp", () => {
-  const model = new ContextDegradation();
-  assertEq(model.onset(200_000), 32_768, "a 200K window starts at the floor");
-  assertEq(model.onset(1_000_000), 32_768, "so does a 1M window");
-  assertEq(model.onset(32_000), 16_000, "a small window starts at the ramp");
-  assertEq(model.onset(Number.POSITIVE_INFINITY), 32_768, "an unknown window starts at the floor");
+  const fresh = new ContextDegradation();
+  assertEq(fresh.onset(200_000), 32_768, "a 200K window starts at the floor");
+  assertEq(fresh.onset(1_000_000), 32_768, "so does a 1M window");
+  assertEq(fresh.onset(32_000), 16_000, "a small window starts at the ramp");
+  assertEq(fresh.onset(Number.POSITIVE_INFINITY), 32_768, "an unknown window starts at the floor");
   // A zero floor alone keeps the length onset: the age term still reads the
   // length evidence it multiplies. Only switching the age term off as well
   // leaves the ramp on its own.
@@ -149,12 +177,11 @@ test("degradation: the time ramp is a half-life, not a cliff", () => {
   assert(quarter > 0 && quarter < 0.25, `half an hour is a partial climb (${quarter})`);
   assert(model.pressure(150_000, 1_000_000, 10 * HOUR) > 0.9, "approaches but never passes 1");
   assert(model.pressure(150_000, 1_000_000, 10 * HOUR) < 1, "bounded below 1 by the floor");
-});
 
-test("degradation: no time pressure below the floor's onset", () => {
-  const model = new ContextDegradation();
-  assertEq(model.pressure(20_000, 1_000_000, 100 * HOUR), 0, "length evidence is 0");
-  assertEq(model.pressure(32_768, 1_000_000, 100 * HOUR), 0, "exactly at the onset");
+  // Below the floor's onset there is no length evidence, so no time pressure.
+  const fresh = new ContextDegradation();
+  assertEq(fresh.pressure(20_000, 1_000_000, 100 * HOUR), 0, "length evidence is 0");
+  assertEq(fresh.pressure(32_768, 1_000_000, 100 * HOUR), 0, "exactly at the onset");
 });
 
 test("degradation: a disabled half-life leaves time at zero", () => {
@@ -165,18 +192,6 @@ test("degradation: a disabled half-life leaves time at zero", () => {
   // A non-finite half-life is not a way to disable it: it falls back to the
   // default instead of silently turning the time component off.
   assertEq(new ContextDegradation({ halfLifeMs: Number.NaN }).pressure(150_000, 1_000_000, HOUR), 0.75);
-});
-
-test("degradation: junk ages and token counts stay bounded", () => {
-  const model = new ContextDegradation();
-  for (const activeMs of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0]) {
-    const value = model.pressure(150_000, 1_000_000, activeMs);
-    assert(Number.isFinite(value) && value >= 0 && value <= 1, `age ${activeMs} -> ${value}`);
-  }
-  for (const tokens of [Number.NaN, -1, Number.POSITIVE_INFINITY]) {
-    const value = model.pressure(tokens, 1_000_000, HOUR);
-    assert(Number.isFinite(value) && value >= 0 && value <= 1, `tokens ${tokens} -> ${value}`);
-  }
 });
 
 test("degradation: monotone in tokens at a fixed age, and in age at fixed tokens", () => {
@@ -210,20 +225,6 @@ test("degradation: a zero floor does not silence the age term", () => {
   assertEq(model.onset(1_000_000), 32_768, "the length onset still governs both");
 });
 
-test("degradation: a non-finite setting degrades to the default, never NaN", () => {
-  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
-    for (const key of ["start", "full", "gamma", "floor", "floorStartTokens", "floorFullTokens", "halfLifeMs"] as const) {
-      const model = new ContextDegradation({ [key]: bad } as never);
-      const value = model.pressure(150_000, 1_000_000, HOUR);
-      assert(Number.isFinite(value) && value >= 0 && value <= 1, `${key}=${bad} -> ${value}`);
-      assert(Number.isFinite(model.onset(1_000_000)), `${key}=${bad} onset`);
-      if (key === "floorStartTokens") {
-        assertEq(model.onset(1_000_000), 32_768, `${key}=${bad} keeps the default onset`);
-      }
-    }
-  }
-});
-
 test("degradation: the occupancy fractions are clamped to [0,1]", () => {
   // A negative start used to make the pressure nonzero at zero tokens and
   // onset() negative; start > 1 turned the unlimited test on far too early.
@@ -244,19 +245,4 @@ test("degradation: the occupancy fractions are clamped to [0,1]", () => {
     0,
     "a reversed pair collapses to the clamped start",
   );
-});
-
-test("degradation: equal or reversed thresholds stay finite and monotone", () => {
-  // Equal points collapse to a single step: still zero at the onset itself,
-  // saturated immediately above it.
-  const equal = rampOnly(0.5, 0.5, 2);
-  assertEq(equal.pressure(100_000, 200_000), 0, "at the single step");
-  assertEq(equal.pressure(100_001, 200_000), 1, "one step above it");
-
-  const reversed = rampOnly(0.8, 0.2, 2);
-  const below = reversed.pressure(150_000, 200_000);
-  const above = reversed.pressure(190_000, 200_000);
-  assert(Number.isFinite(below) && Number.isFinite(above), "finite");
-  assert(below <= above, "still monotone");
-  assert(below >= 0 && above <= 1, "bounded");
 });
