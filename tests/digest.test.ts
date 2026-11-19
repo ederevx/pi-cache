@@ -48,13 +48,6 @@ test("digest: renders files and turn lines with tool names", () => {
   assert(lines[4]!.includes("!: npm test"), "bash command recorded");
 });
 
-test("digest: caps turns and counts the rest", () => {
-  const d = new SpanDigest({ maxTurns: 2 });
-  const body = d.build([user("one"), user("two"), user("three")], [], undefined);
-  assert(body.includes("Turns (2 shown, 1 more omitted):"), "turn cap header");
-  assert(!body.includes("three"), "omitted turn absent");
-});
-
 test("digest: truncates snippets deterministically with ellipsis", () => {
   const d = new SpanDigest({ maxSnippetChars: 10 });
   const body = d.build([user("0123456789abc")], [], undefined);
@@ -172,69 +165,70 @@ test("digest: the last assistant text wins over the preamble", () => {
   assert(!body.includes("Let me look"), "preamble dropped");
 });
 
-test("digest: commands dedupe, cap, and count the rest", () => {
-  const d = new SpanDigest({ maxCommandsPerTurn: 2 });
-  const body = d.build(
+test("digest: every section cap bounds its own section and counts the rest", () => {
+  const turns = new SpanDigest({ maxTurns: 2 }).build([user("one"), user("two"), user("three")], [], undefined);
+  assert(turns.includes("Turns (2 shown, 1 more omitted):"), "turn cap header");
+  assert(!turns.includes("three"), "omitted turn absent");
+
+  const commands = new SpanDigest({ maxCommandsPerTurn: 2 }).build(
     [user("go"), bashCall("ls a"), bashCall("ls a"), bashCall("cat b"), bashCall("pwd")],
     [],
     undefined,
   );
-  assert(body.includes("$: ls a; cat b (+1)"), "distinct commands kept, extras counted");
-});
+  assert(commands.includes("$: ls a; cat b (+1)"), "distinct commands kept, extras counted");
 
-test("digest: the error excerpt comes from a matching middle line", () => {
-  const d = new SpanDigest();
-  const body = d.build(
-    [user("check"), result("bash", "all good\nno such file or directory\ntrailing", true)],
+  const chars = new SpanDigest({ maxAssistantChars: 10, maxCommandChars: 6 }).build(
+    [user("q"), bashCall("abcdefghij"), textAssistant("0123456789abc")],
     [],
     undefined,
   );
-  assert(body.includes("E: no such file or directory"), "matching line, not the first");
+  assert(chars.includes("$: abcdef…"), "command capped");
+  assert(chars.includes("A: 0123456789…"), "assistant capped");
 });
 
-test("digest: a flagged result without a matching line falls back to its first non-empty line", () => {
+test("digest: the error excerpt names the failure and counts the rest", () => {
   const d = new SpanDigest();
-  const body = d.build([user("check"), result("read", "\n\nfile contents\nmore", true)], [], undefined);
-  assert(body.includes("E: file contents"), "first non-empty line");
-});
-
-test("digest: a read result mentioning error produces no E field", () => {
-  const d = new SpanDigest();
-  const body = d.build([user("read it"), result("read", "const error = new Error('x');")], [], undefined);
-  assert(!body.includes("E:"), "only bash results are text-scanned");
-  assert(body.includes("tools:") === false, "no tool names on a result-only turn");
-});
-
-test("digest: an un-flagged bash result naming a failure still yields E", () => {
-  const d = new SpanDigest();
-  const body = d.build([user("check"), result("bash", "ls: cannot access x: No such file")], [], undefined);
-  assert(body.includes("E: ls: cannot access x: No such file"), "text scan covers bash");
-});
-
-test("digest: further errors are counted, not inlined", () => {
-  const d = new SpanDigest();
-  const body = d.build(
-    [user("go"), result("bash", "first failed", true), result("bash", "second failed", true)],
-    [],
-    undefined,
-  );
-  assert(body.includes("E: first failed (+1)"), "first kept, rest counted");
-  assert(!body.includes("second failed"), "later error absent");
-});
-
-test("digest: empty flagged failures count as further errors", () => {
-  const d = new SpanDigest();
-  const body = d.build(
-    [user("go"), result("bash", "first failed", true), result("read", "", true)],
-    [],
-    undefined,
-  );
-  assert(body.includes("E: first failed (+1)"), "all failures counted");
-});
-
-test("digest: assistant and command caps are enforced", () => {
-  const d = new SpanDigest({ maxAssistantChars: 10, maxCommandChars: 6 });
-  const body = d.build([user("q"), bashCall("abcdefghij"), textAssistant("0123456789abc")], [], undefined);
-  assert(body.includes("$: abcdef…"), "command capped");
-  assert(body.includes("A: 0123456789…"), "assistant capped");
+  const rows: Array<[string, unknown[], string[], string[]]> = [
+    [
+      "a matching middle line, not the first",
+      [user("check"), result("bash", "all good\nno such file or directory\ntrailing", true)],
+      ["E: no such file or directory"],
+      [],
+    ],
+    [
+      "a flagged result with no matching line falls back to its first non-empty line",
+      [user("check"), result("read", "\n\nfile contents\nmore", true)],
+      ["E: file contents"],
+      [],
+    ],
+    [
+      "a read result mentioning error yields no E field",
+      [user("read it"), result("read", "const error = new Error('x');")],
+      [],
+      ["E:", "tools:"],
+    ],
+    [
+      "an un-flagged bash result naming a failure still yields E",
+      [user("check"), result("bash", "ls: cannot access x: No such file")],
+      ["E: ls: cannot access x: No such file"],
+      [],
+    ],
+    [
+      "further errors are counted, not inlined",
+      [user("go"), result("bash", "first failed", true), result("bash", "second failed", true)],
+      ["E: first failed (+1)"],
+      ["second failed"],
+    ],
+    [
+      "an empty flagged failure still counts as a further error",
+      [user("go"), result("bash", "first failed", true), result("read", "", true)],
+      ["E: first failed (+1)"],
+      [],
+    ],
+  ];
+  for (const [label, messages, present, absent] of rows) {
+    const body = d.build(messages, [], undefined);
+    for (const fragment of present) assert(body.includes(fragment), `${label}: ${fragment}`);
+    for (const fragment of absent) assert(!body.includes(fragment), `${label}: no ${fragment}`);
+  }
 });

@@ -1,8 +1,11 @@
 /**
- * pi-cache — fresh model-parameter tests.
+ * pi-cache — model-parameter and cache-lifetime tests.
  * The live pull must win, the last-good snapshot must cover an inaccessible
  * endpoint, malformed/hostile pricing must never produce a rate, and a
- * snapshot must never price a request from another endpoint.
+ * snapshot must never price a request from another endpoint. The model in
+ * use must map onto its documented provider TTL so the coldness ramp and
+ * idle timer measure against the real lifetime, and the profile table must
+ * be replaceable without a code change.
  */
 
 import { test, assert, assertEq, scratchDir } from "./harness.ts";
@@ -10,6 +13,8 @@ import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { OpenRouterModelParams, type FetchResponseLike } from "../src/model-params.ts";
 import { ParamsStore } from "../src/params-store.ts";
+import { ModelTtl, type TtlProfile } from "../src/model-ttl.ts";
+import { OptionsLoader } from "../src/constants.ts";
 
 const URL_BASE = "https://openrouter.ai/api/v1/models";
 
@@ -274,4 +279,63 @@ test("model-params: the catalog cap bounds the entries loaded from disk", async 
   }, new ParamsStore(path, 2));
   const ids = ["a", "b", "c", "d"].filter((id) => capped.ratesFor(id) !== undefined);
   assertEq(ids.length, 2, "only the cap's worth of entries load");
+});
+
+const defaults = (): readonly TtlProfile[] => new OptionsLoader({}).load().cacheTtlProfiles;
+const ttl = new ModelTtl(defaults());
+
+test("model-params: provider cache lifetimes come from the profile table", () => {
+  const rows: Array<[string, string | undefined, string | undefined, boolean | undefined, number | undefined]> = [
+    ["anthropic", "anthropic", "", undefined, 300],
+    ["anthropic long tier", "anthropic", "", true, 3600],
+    ["openai", "openai", "gpt-4o", undefined, 1800],
+    ["z-ai", "z-ai", "glm-4.6", undefined, 120],
+    ["deepseek", "deepseek", "deepseek-chat", undefined, 1800],
+    ["deepseek long tier", "deepseek", "deepseek-chat", true, 1800],
+    ["google", "google", "gemini-2.5-flash", undefined, 300],
+    ["moonshot", "moonshot", "kimi-k2", undefined, 300],
+    ["a generic provider matches the model-id prefix", undefined, "anthropic/", undefined, 300],
+    ["openrouter prefixes to z-ai", "openrouter", "z-ai/glm-4.6", undefined, 120],
+    ["openrouter prefixes to openai", "openrouter", "openai/gpt-4o", undefined, 1800],
+    ["an unknown model defers to the caller's static fallback", "meta", "llama-4", undefined, undefined],
+    ["no provider and no model defers", undefined, undefined, undefined, undefined],
+  ];
+  for (const [label, provider, model, long, expected] of rows) {
+    assertEq(ttl.secondsFor(provider, model, long), expected, label);
+  }
+});
+
+test("model-params: the TTL profile table is configuration, not code", () => {
+  const profiles = new OptionsLoader({
+    PI_CACHE_TTL_PROFILES: "Meta=900;some-gateway,other=60,7200",
+  }).load().cacheTtlProfiles;
+  const custom = new ModelTtl(profiles);
+  assertEq(custom.secondsFor("meta", "llama-4"), 900);
+  assertEq(custom.secondsFor("meta", "llama-4", true), 900, "a single lifetime covers both tiers");
+  assertEq(custom.secondsFor("some-gateway", ""), 60);
+  assertEq(custom.secondsFor("other", "", true), 7200);
+  assertEq(custom.secondsFor("anthropic", ""), undefined, "the override replaces the table");
+});
+
+test("model-params: a malformed TTL override keeps the default table", () => {
+  const rows = [
+    "anthropic",
+    "anthropic=",
+    "anthropic=0",
+    "anthropic=1800junk",
+    "=300",
+    "a=1,2,3",
+    "a=1;b",
+  ];
+  for (const raw of rows) {
+    const profiles = new OptionsLoader({ PI_CACHE_TTL_PROFILES: raw }).load().cacheTtlProfiles;
+    assertEq(profiles.length, 6, `default table kept for ${JSON.stringify(raw)}`);
+    assertEq(new ModelTtl(profiles).secondsFor("anthropic", ""), 300, `defaults answer for ${JSON.stringify(raw)}`);
+  }
+});
+
+test("model-params: an empty TTL override declares no profile", () => {
+  const profiles = new OptionsLoader({ PI_CACHE_TTL_PROFILES: "  " }).load().cacheTtlProfiles;
+  assertEq(profiles.length, 0, "no profile parsed");
+  assertEq(new ModelTtl(profiles).secondsFor("anthropic", ""), undefined, "nothing to match");
 });
