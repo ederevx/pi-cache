@@ -5,6 +5,14 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-11-19
+
+### Changed
+
+- The install section gives the unpinned source, says a bare `pi update`
+  updates Pi itself rather than the package, and documents the refusal the
+  manual installer already made when a package entry exists.
+
 ## [0.19.2] - 2026-11-19
 
 ### Fixed

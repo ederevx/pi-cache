@@ -29,14 +29,15 @@ sources=("$repo_root"/src/*.ts)
   exit 1
 }
 
-# The one-loader guard: a pinned pi package already loads this repo's
+# The one-loader guard: a pi package entry already loads this repo's
 # extension (src/index.ts) from its own clone, and a manual copy beside
 # it aborts every new pi session with tool-conflict errors. The manual
 # installer therefore refuses outright whenever a packages entry installs
-# pi-cache - a git pin, or a local path that is this checkout (whatever
-# its directory is called: a worktree or a renamed clone still counts)
-# or another copy of the package. Uninstall the manual copy or drop the
-# pin first; nothing on disk has been touched by the refusal.
+# pi-cache - a git entry, pinned or not, or a local path that is this
+# checkout (whatever its directory is called: a worktree or a renamed
+# clone still counts) or another copy of the package. Uninstall the manual
+# copy or remove the package entry first; nothing on disk has been touched
+# by the refusal.
 settings="$pi_home/settings.json"
 if [[ -f "$settings" ]]; then
   python_bin=""
@@ -72,8 +73,8 @@ PYGUARD
       echo "install: pi-cache is installed as a pi package ($pinned)." >&2
       echo "  A manual install would load its extension twice and abort every" >&2
       echo "  new session with tool-conflict errors. Update the package instead:" >&2
-      echo "  pi update git:github.com/ederevx/pi-cache  (or drop the pin before" >&2
-      echo "  a manual install; scripts/uninstall.sh removes a manual copy)." >&2
+      echo "  pi update git:github.com/ederevx/pi-cache  (or run pi remove" >&2
+      echo "  git:github.com/ederevx/pi-cache before a manual install)." >&2
       exit 1
     fi
   fi

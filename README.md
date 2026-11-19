@@ -3,12 +3,15 @@
 Adds cache-aware request transforms, compaction, and cache-usage
 telemetry to pi.
 
-## Installation
+## Install
 
-As a pi package (see `docs/packages.md`):
+```bash
+pi install git:github.com/ederevx/pi-cache
+```
 
-    pi install git:github.com/ederevx/pi-cache@v0.17.0
-    pi -e /absolute/path/to/pi-cache      # try a local checkout for one run
+Unpinned, it follows the default branch on `pi update --extensions`; append
+`@<tag>` to pin a release tag, and install another tag to move the pin. To try
+a local checkout for one run, use `pi -e /absolute/path/to/pi-cache`.
 
 The repo declares its extension in `package.json` under the `pi` key
 (`pi.extensions` -> `./src/index.ts`) and lists the bundled pi core
@@ -17,11 +20,15 @@ packages as `peerDependencies` and marks them optional in
 vendor the host's bundled packages. There is no build step and no
 third-party runtime dependency; pi loads `src/*.ts` in place.
 
-As a flat extension copy:
+As a flat extension copy, instead of the package:
 
-    bash scripts/install.sh
+```bash
+bash scripts/install.sh
+```
 
-Re-run to refresh owned copies in place (idempotent; the manifest at
+The script refuses while a pi-cache package entry exists; run
+`pi remove git:github.com/ederevx/pi-cache` first. Re-run to refresh owned
+copies in place (idempotent; the manifest at
 `~/.pi/agent/.pi-cache/manifest.json` records exactly what it owns).
 Then run `/reload` in pi (or restart). No config file needed.
 
