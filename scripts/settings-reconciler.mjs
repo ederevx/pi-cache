@@ -32,11 +32,21 @@ export class SettingsReconciler {
 	 *  @param version the version being installed (prefers its pin)
 	 *  @param packageName directory name the package installs under
 	 *  @param repoRoot this checkout's root, so a local entry that
-	 *  resolves here is recognized whatever the directory is called */
-	constructor(settingsPath, version, packageName, repoRoot = "") {
+	 *  resolves here is recognized whatever the directory is called
+	 *  @param resolver the canonical form of a path; a test hands in its
+	 *  own answers, so two spellings of one checkout are proved to mean
+	 *  one package without creating an alias on the host */
+	constructor(
+		settingsPath,
+		version,
+		packageName,
+		repoRoot = "",
+		resolver = realpathSync,
+	) {
 		this.settingsPath = settingsPath;
 		this.version = version;
 		this.packageName = packageName;
+		this.resolver = resolver;
 		this.repoRoot = repoRoot ? this.realPath(repoRoot) : "";
 	}
 
@@ -73,7 +83,7 @@ export class SettingsReconciler {
 	 *  be resolved is compared as given. */
 	realPath(value) {
 		try {
-			return realpathSync(value);
+			return this.resolver(value);
 		} catch {
 			return resolve(value);
 		}

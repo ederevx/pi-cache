@@ -5,6 +5,31 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-11-19
+
+### Changed
+
+- No test creates a link any more. The installer round-trip's alias case is
+  a physical renamed copy whose own scripts run the installer, and the
+  canonical-alias equivalence is asked of the code's own seam: the installer
+  guard and the settings reconciler each take their resolver as an argument,
+  so a case writes down what two spellings mean instead of staging an alias
+  on the host. `tests/link_guard.py` fails the lint step if any test source
+  creates a symlink, junction, or reparse point, and `tests/install_guard_test.py`
+  covers the guard's decisions with the resolver injected.
+- The installer's one-loader decision moves into `scripts/install_guard.py`,
+  which `scripts/install.sh` runs, so a test asks the same code the
+  installer asks. The comparison reads both the shell's `/c/...` spelling
+  and a `C:/...` one as one path.
+
+### Fixed
+
+- The tool schemas import `Type` from `typebox` instead of relying on the
+  pi-ai compat re-export, and `typebox` is declared as an optional peer.
+  The suite now loads against the deployed pi packages (1.5.0, TypeBox
+  1.3.27) instead of failing at module link time, and registration is
+  asserted to produce object schemas for both tools.
+
 ## [0.19.3] - 2026-11-19
 
 ### Changed

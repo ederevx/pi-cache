@@ -10,7 +10,7 @@
  * coalesce instead of stacking.
  */
 
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { CacheStateContext, CacheStateReader, CacheStateSnapshot } from "./cache-state.ts";
 

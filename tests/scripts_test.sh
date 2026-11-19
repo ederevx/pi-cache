@@ -15,6 +15,20 @@ fail() {
   exit 1
 }
 
+write_settings() {
+  # $1: the settings file. Entries arrive in SETTINGS_ENTRY_<n> variables,
+  # so python escapes the JSON (a Windows path's backslashes included)
+  # and a bash-style path keeps its spelling instead of being converted
+  # on the way to the interpreter.
+  python3 - "$1" <<'PY_SETTINGS'
+import json, os, sys
+keys = sorted(key for key in os.environ if key.startswith("SETTINGS_ENTRY_"))
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump({"packages": [os.environ[key] for key in keys]}, handle, indent=2)
+    handle.write("\n")
+PY_SETTINGS
+}
+
 echo "== install =="
 bash "$repo/scripts/install.sh" || fail "install exited nonzero"
 dest="$scratch/home/extensions/pi-cache"
@@ -116,21 +130,28 @@ echo "== install refuses when the package is pinned =="
 guard_home="$scratch/guard-home"
 mkdir -p "$guard_home"
 settings="$guard_home/settings.json"
-printf '{"packages":["git:github.com/ederevx/pi-cache@v9.9.9"]}
-' > "$settings"
+SETTINGS_ENTRY_1="git:github.com/ederevx/pi-cache@v9.9.9" write_settings "$settings"
 PI_CODING_AGENT_DIR="$guard_home" bash "$repo/scripts/install.sh" 2> "$scratch/guard-err"   && fail "guard exit expected"
 grep -q "installed as a pi package" "$scratch/guard-err" || fail "guard message missing"
 [[ ! -e "$guard_home/extensions/pi-cache" ]] || fail "guard must install nothing"
 echo "  ok: pinned install refuses, nothing installed"
 
-echo "== install refuses a local entry that is this checkout =="
+echo "== install refuses a local entry that is this checkout under another name =="
 # Regression: the guard compared the entry's final path component, so a
 # worktree or renamed clone of this checkout slipped through and
-# installed a second extension copy.
+# installed a second extension copy. The checkout here is a physical
+# renamed copy whose own scripts run the installer: its root is the
+# renamed directory, so a comparison by name would allow it and only the
+# canonical comparison refuses. The entry is written in this shell's own
+# spelling, so the case also proves the two spellings of one path compare
+# equal. No link is created to say so.
 renamed="$scratch/renamed-checkout"
-ln -sfn "$repo" "$renamed"
-printf '{"packages":["%s"]}\n' "$renamed" > "$settings"
-PI_CODING_AGENT_DIR="$guard_home" bash "$repo/scripts/install.sh" 2> "$scratch/guard-err"   && fail "guard exit expected"
+mkdir -p "$renamed/src" "$renamed/scripts"
+cp "$repo"/src/*.ts "$renamed/src/"
+cp "$repo"/scripts/*.sh "$repo"/scripts/*.mjs "$repo"/scripts/*.py "$renamed/scripts/"
+cp "$repo"/package.json "$renamed/package.json"
+SETTINGS_ENTRY_1="$renamed" write_settings "$settings"
+PI_CODING_AGENT_DIR="$guard_home" bash "$renamed/scripts/install.sh" 2> "$scratch/guard-err"   && fail "guard exit expected"
 grep -q "installed as a pi package" "$scratch/guard-err" || fail "guard message missing"
 [[ ! -e "$guard_home/extensions/pi-cache" ]] || fail "guard must install nothing"
 echo "  ok: renamed-checkout path refuses, nothing installed"
@@ -138,17 +159,18 @@ echo "  ok: renamed-checkout path refuses, nothing installed"
 echo "== install allows an unrelated local entry =="
 unrelated="$scratch/another-package"
 mkdir -p "$unrelated"
-printf '{"packages":["%s"]}\n' "$unrelated" > "$settings"
+SETTINGS_ENTRY_1="$unrelated" write_settings "$settings"
 PI_CODING_AGENT_DIR="$guard_home" bash "$repo/scripts/install.sh" >/dev/null 2>&1 || fail "an unrelated entry must not refuse"
 [[ -f "$guard_home/extensions/pi-cache/index.ts" ]] || fail "install should have proceeded"
 echo "  ok: unrelated local entry installs"
 
 echo "== postinstall drops a renamed local entry =="
 # The reconciler reads the agent dir this script exported, not the
-# guard-only override above.
+# guard-only override above, and it is the renamed copy's own postinstall
+# that must recognise its root.
 post_settings="$PI_CODING_AGENT_DIR/settings.json"
-printf '{"packages":["git:github.com/ederevx/pi-cache@v9.9.9","%s"]}\n' "$renamed" > "$post_settings"
-node "$repo/scripts/postinstall.mjs" >/dev/null 2>&1 || fail "postinstall exited nonzero"
+SETTINGS_ENTRY_1="git:github.com/ederevx/pi-cache@v9.9.9" SETTINGS_ENTRY_2="$renamed" write_settings "$post_settings"
+node "$renamed/scripts/postinstall.mjs" >/dev/null 2>&1 || fail "postinstall exited nonzero"
 python3 - "$post_settings" <<'PY' || fail "reconciler left the renamed entry"
 import json, sys
 packages = json.load(open(sys.argv[1], encoding="utf-8")).get("packages", [])
@@ -164,8 +186,7 @@ rm -f "$post_settings"
 echo "== postinstall drops manual copies beside the package =="
 rm -f "$settings"
 bash "$repo/scripts/install.sh" >/dev/null 2>&1 || fail "manual reinstall failed"
-printf '{"packages":["git:github.com/ederevx/pi-cache@v9.9.9"]}
-' > "$settings"
+SETTINGS_ENTRY_1="git:github.com/ederevx/pi-cache@v9.9.9" write_settings "$settings"
 node "$repo/scripts/postinstall.mjs" 2> "$scratch/post-err"
 grep -q "removed manual-install copies" "$scratch/post-err" || fail "postinstall cleanup missing"
 [[ ! -e "$dest/index.ts" ]] || fail "manifest-owned copy should be removed"

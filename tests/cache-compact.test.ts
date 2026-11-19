@@ -71,6 +71,14 @@ test("cache-compact: registers the tool with the destructive annotation", () => 
   const { pi } = makeTool();
   const def = pi.tools.get("cache_compact") as Record<string, unknown>;
   assertEq(def.name, "cache_compact", "tool name");
+  const parameters = def.parameters as {
+    type?: string;
+    properties?: Record<string, { minLength?: number; maxLength?: number }>;
+  };
+  assertEq(parameters?.type, "object",
+    "parameters are a TypeBox object schema, so the schema binding resolved");
+  assertEq(parameters?.properties?.reason?.minLength, 1, "reason minimum length");
+  assertEq(parameters?.properties?.reason?.maxLength, 1000, "reason maximum length");
   assertMatches(String(def.description), /pre_cache/, "points at the onboarding gate");
   const annotations = def.annotations as { readOnlyHint?: boolean; destructiveHint?: boolean };
   assertEq(annotations.readOnlyHint, false, "not read-only");

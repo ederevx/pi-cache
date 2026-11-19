@@ -57,6 +57,12 @@ test("pre-cache: registers the tool and the gate", () => {
   new PreCacheTool().register(pi as never);
   assert(pi.tool !== undefined, "pre_cache tool registered");
   assertEq(pi.tool?.name, "pre_cache", "tool name");
+  const parameters = pi.tool?.parameters as {
+    type?: string;
+    properties?: Record<string, unknown>;
+  };
+  assertEq(parameters?.type, "object",
+    "parameters are a TypeBox object schema, so the schema binding resolved");
   assertEq(pi.handlers.get("tool_call")?.length, 1, "one tool_call gate");
   assertEq(pi.handlers.get("session_start")?.length, 1, "one session_start hook");
 });

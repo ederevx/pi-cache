@@ -7,11 +7,15 @@
  *
  * `--experimental-transform-types` is required because the source modules
  * use constructor parameter properties (non-erasable TS). The
- * `@earendil-works/pi-coding-agent` package resolves through the
- * `node_modules` symlink to the pi global install (gitignored).
+ * `@earendil-works/pi-coding-agent` and `typebox` packages resolve from
+ * this checkout's own `node_modules` (gitignored), provisioned with
+ * `npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.0
+ * @earendil-works/pi-ai@1.5.0 typebox@1.3.27` - real directories, never a
+ * link to the global install, so a run proves the deployed package shapes.
  *
  * Order: OOP/format lint (python3 tests/oop_lint.py) first, then the
- * unit/e2e suite, then the installer round-trip — a failure anywhere
+ * installer guard's own cases (python3 tests/install_guard_test.py), then
+ * the unit/e2e suite, then the installer round-trip - a failure anywhere
  * fails the whole run. Scratch lives under ~/tmp/pi-cache-tests-* and
  * the throwaway install home is under ~/tmp as well.
  */
@@ -31,6 +35,18 @@ try {
   });
 } catch {
   console.error("oop lint: FAILED");
+  process.exit(1);
+}
+
+// 1b. The installer guard's decisions, with the resolver injected: an
+// alias case is answered, never staged as a link on the host.
+try {
+  execFileSync("python3", ["tests/install_guard_test.py"], {
+    cwd: repoRoot,
+    stdio: "inherit",
+  });
+} catch {
+  console.error("install guard tests: FAILED");
   process.exit(1);
 }
 
@@ -62,6 +78,7 @@ import "./kept-window.test.ts";
 import "./midterm.test.ts";
 import "./miss-classifier.test.ts";
 import "./settings.test.ts";
+import "./settings-reconciler.test.ts";
 import "./stats.test.ts";
 import "./calibration.test.ts";
 import "./extension.test.ts";
