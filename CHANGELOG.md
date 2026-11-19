@@ -5,7 +5,13 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
-## [0.19.1] - 2026-11-18
+## [0.19.2] - 2026-11-19
+
+### Fixed
+
+- The 0.19.1 section records the day its tag was cut.
+
+## [0.19.1] - 2026-11-19
 
 ### Changed
 
