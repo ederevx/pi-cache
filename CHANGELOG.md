@@ -5,6 +5,14 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-11-18
+
+### Changed
+
+- The test suite asserts each claim once: tests that restated the same check
+  are merged into the file that owns their subject, and `tests/run.ts` lists
+  only the files that remain. Nothing pi loads changes.
+
 ## [0.19.0] - 2026-10-31
 
 ### Changed
