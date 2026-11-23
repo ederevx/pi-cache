@@ -17,8 +17,11 @@ The repo declares its extension in `package.json` under the `pi` key
 (`pi.extensions` -> `./src/index.ts`) and lists the bundled pi core
 packages as `peerDependencies` and marks them optional in
 `peerDependenciesMeta`, so pi's `npm install` in a git clone does not
-vendor the host's bundled packages. There is no build step and no
-third-party runtime dependency; pi loads `src/*.ts` in place.
+vendor the host's bundled packages. The tool schemas take TypeBox's `Type`
+from `typebox`, which the extension loader resolves for an extension just
+as it does for the pi packages; `typebox` is declared as an optional peer
+for the same reason. There is no build step and no third-party runtime
+dependency of its own; pi loads `src/*.ts` in place.
 
 As a flat extension copy, instead of the package:
 
@@ -153,8 +156,22 @@ temp files.
 
 - `src/` — extension wiring and implementation modules
 - `tests/` — zero-dependency validation + OOP/format lint suite
-  (`tests/run.ts`, `tests/oop_lint.py`, per-module tests, the installer
-  round-trip, and the mock-pi wiring test)
+  (`tests/run.ts`, `tests/oop_lint.py`, `tests/link_guard.py`, per-module
+  tests, the installer guard's cases, the installer round-trip, and the
+  mock-pi wiring test)
+
+Run the suite from the repo root:
+
+    npm install --no-save --no-package-lock \
+      @earendil-works/pi-coding-agent@1.5.0 \
+      @earendil-works/pi-ai@1.5.0 typebox@1.3.27
+    node --experimental-strip-types --experimental-transform-types tests/run.ts
+
+The packages land as real directories, never as a link to the global
+install: a run then proves the deployed package shapes, and `typebox`
+resolves exactly as the extension loader resolves it. `tests/link_guard.py`
+fails the lint step if any test source creates a link, so no case needs a
+privilege Windows does not grant by default.
 - `docs/research/` — distilled provider/extension evidence and citations
 - `docs/design.md` — full design
 - `docs/implementation-reference.md` — pi extension API reference

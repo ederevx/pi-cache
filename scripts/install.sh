@@ -45,30 +45,9 @@ if [[ -f "$settings" ]]; then
     if command -v "$candidate" >/dev/null 2>&1; then python_bin="$candidate"; break; fi
   done
   if [[ -n "$python_bin" ]]; then
-    pinned="$($python_bin - "$settings" "$repo_root" <<'PYGUARD'
-import json, os, sys
-try:
-    packages = json.load(open(sys.argv[1], encoding="utf-8")).get("packages", [])
-except Exception:
-    packages = []
-repo = os.path.realpath(sys.argv[2])
-for entry in packages:
-    if not isinstance(entry, str):
-        continue
-    normalized = entry.replace("\\", "/").rstrip("/")
-    if normalized.startswith("git:"):
-        if "pi-cache" in normalized:
-            print(entry)
-            break
-        continue
-    # A local path: this checkout under any directory name, or another
-    # copy of the package directory.
-    if os.path.realpath(normalized) == repo \
-            or normalized.rsplit("/", 1)[-1] == "pi-cache":
-        print(entry)
-        break
-PYGUARD
-)"
+    # The decision itself lives in scripts/install_guard.py, so the tests
+    # ask the same code this installer asks.
+    pinned="$("$python_bin" "$repo_root/scripts/install_guard.py" "$settings" "$repo_root")"
     if [[ -n "$pinned" ]]; then
       echo "install: pi-cache is installed as a pi package ($pinned)." >&2
       echo "  A manual install would load its extension twice and abort every" >&2

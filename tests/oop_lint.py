@@ -27,6 +27,9 @@ import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from link_guard import LinkCreationGuard  # noqa: E402
 FAILURES: list[str] = []
 
 
@@ -170,6 +173,15 @@ def check_extension_format(src_dir: str) -> None:
             fail(index, "entry module must declare a default export")
 
 
+def check_no_link_creation() -> None:
+    """No test source creates a link: symlinks are prohibited here."""
+    guard = LinkCreationGuard(REPO)
+    for problem in guard.self_test():
+        fail("tests/link_guard.py", problem)
+    for finding in guard.check():
+        fail("tests", finding)
+
+
 def main() -> int:
     src_dir = os.path.join(REPO, "src")
     for name in sorted(os.listdir(src_dir)):
@@ -177,6 +189,7 @@ def main() -> int:
             check_typescript(os.path.join(src_dir, name))
     check_extension_format(src_dir)
     check_no_soft_residue(src_dir)
+    check_no_link_creation()
     if FAILURES:
         for item in FAILURES:
             print("OOP-LINT FAIL: " + item)
