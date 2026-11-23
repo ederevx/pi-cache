@@ -5,6 +5,14 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-11-23
+
+### Changed
+
+- This release carries the scaled degradation band and the link-free fixture
+  suite with its tool-schema import together: the band was cut before that
+  series was integrated, so this is the first tree that has both.
+
 ## [0.20.0] - 2026-11-23
 
 ### Changed
