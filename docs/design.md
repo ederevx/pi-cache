@@ -127,14 +127,16 @@ compaction is on, makes the compaction itself prefix-stable:
        finds only a handful of models consistent above 64K, and NoLiMa's
        appendix reaches 64K-128K for two of them). They stay minimums, so a
        wider window never starts degradation earlier than they do.
-       Above 256K the band scales with the window, because the models the
-       1M-era evaluations measure are not the 128K-era ones: the RULER-1M
-       leaderboard (2026) records current instruct models at 87-95% on its
-       synthetic tasks at a million tokens, and ATLAS (arXiv 2605.28079)
-       finds a 128K score cannot separate a model stable through 1M from one
-       that cliffs just after 128K. The 1/8 onset is where the two lengths
-       the 1M-window evidence brackets meet (131 072 / 1 048 576 and 32 768 /
-       262 144); it does not claim degradation starts at 128K. The 1/2
+       Above 256K the band scales with the window: the 1M-window evaluations
+       have points at 128K and at 1M, where RULER-1M scores the top instruct
+       models at 87.7-94.8 on its synthetic tasks and their base counterparts
+       at 51.2-76.8, Gemini 2.5 (arXiv 2507.06261) reports 1M scores well
+       below its 128K ones, and ATLAS (arXiv 2605.28079) finds a 128K score
+       cannot separate a model stable through 1M from one that cliffs just
+       after 128K. The 1/8 onset is the 128K point of those reports
+       (131 072 / 1 048 576), and it is also 32 768 / 262 144, which keeps
+       every window up to 256Ki on the absolute onset; it does not claim
+       degradation starts at 128K. The 1/2
        plateau is an **unvalidated policy default**, chosen as the latest
        plateau that leaves every window below 262 144 on the absolute band,
        and the evidence only bounds it: no cited model stays flat to its
@@ -614,11 +616,11 @@ can never delete a file outside the store.
 The band's 32 768/131 072 absolute ends come from the literature cited above
 (RULER, NoLiMa, Databricks): the length at which most models lose their
 short-context quality, and the largest length those evaluations reach. The
-1/8 and 1/2 window fractions come from the 1M-era evidence (RULER-1M, ATLAS,
-Gemini 2.5) that those models hold much further, and the 1/2 plateau is a
-policy default, not a measurement. The band's height (0.5), the active-age
-half-life (60 min) and the fractional `start`/`full`/`gamma` are policy
-defaults with no measurement behind them,
+1/8 fraction is 131 072 / 1 048 576, the 128K point of the 1M-window reports,
+and 32 768 / 262 144, which keeps every window up to 256Ki on the absolute
+onset. The 1/2 plateau is a policy default, not a measurement. The band's
+height (0.5), the active-age half-life (60 min) and the fractional
+`start`/`full`/`gamma` are policy defaults with no measurement behind them,
 and none of the cited work measures wall-clock age at all. `bench/calibration/` is the measurement: for one pinned
 configuration it runs every task twice from the same repository state, once
 with the whole history and once with the span pi-cache would drop replaced by

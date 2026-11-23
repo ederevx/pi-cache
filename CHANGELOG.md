@@ -5,13 +5,28 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-11-23
+
+### Fixed
+
+- The band's documentation no longer claims that the 1M-era models hold up
+  better than the 128K-era ones: no cited source compares the generations.
+  It states instead what they measured, at the 128K and 1M points, and says
+  plainly that the 1/8 fraction is the identity that keeps windows up to
+  256Ki on the absolute onset as well as the 128K point of the 1M reports.
+- The notes for the band release name the configuration that needs the
+  fractions at 0: a `_FLOOR_START_TOKENS` below an eighth of the window, not
+  one above it.
+
 ## [0.20.1] - 2026-11-23
 
 ### Changed
 
 - This release carries the scaled degradation band and the link-free fixture
   suite with its tool-schema import together: the band was cut before that
-  series was integrated, so this is the first tree that has both.
+  series was integrated, so this is the first tree that has both. Use it, or
+  a later release, rather than the band's own tag, which holds the band alone
+  and lacks that series' changes.
 
 ## [0.20.0] - 2026-11-23
 
@@ -31,8 +46,9 @@ git tag, and the `version` in `package.json` matches the newest tag.
   `PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_FRACTION` (0.5) are new.
   `..._FLOOR_START_TOKENS` and `..._FLOOR_FULL_TOKENS` keep their meaning on
   windows below 256K and become minimums above it, so a value that used to
-  raise the onset on a 1M window now needs the fraction set to 0 as well.
-  Setting both fractions to 0 restores the previous band on every window.
+  pull the onset below an eighth of a large window is now raised by that
+  fraction and needs it set to 0 as well. Setting both fractions to 0
+  restores the previous band on every window.
 
 ## [0.19.4] - 2026-11-19
 

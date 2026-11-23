@@ -220,9 +220,8 @@ export class OptionsLoader {
       // puts eleven of thirteen below half their short-context baseline; the
       // evidence reaches 128K (Databricks, and NoLiMa's two-model appendix),
       // so the plateau claims no more than that. Those ends are also the
-      // band's minimums: a window above 262K scales both later, because the
-      // 1M models RULER-1M and ATLAS measure hold above 128K far better than
-      // the 128K-era ones did.
+      // band's minimums: a window above 262K scales both later, to where the
+      // 1M-window evaluations measure (RULER-1M, Gemini 2.5, ATLAS).
       pressureDegradeFloorStartTokens: this.envInt(
         "PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS",
         32_768,
@@ -231,8 +230,9 @@ export class OptionsLoader {
         "PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_TOKENS",
         131_072,
       ),
-      // 1/8: 131 072 / 1 048 576 and 32 768 / 262 144, the two places the 1M
-      // evidence brackets the onset.
+      // 1/8 = 131 072 / 1 048 576, the 128K point of the 1M-window reports,
+      // and also 32 768 / 262 144, so windows up to 256Ki keep the absolute
+      // onset.
       pressureDegradeFloorStartFraction: this.envFloat(
         "PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_FRACTION",
         0.125,

@@ -21,9 +21,13 @@
  *    it, at height `floor` (default 0.5, clamped to `[0,1]`). The absolute
  *    ends are the lengths the 2024-25 evidence measured, so they stay
  *    minimums: no window can make degradation start earlier than they do.
- *    A wider window scales both ends up, because the models RULER-1M and
- *    ATLAS measure in 2026 hold above 128K far better than the 128K-era
- *    ones. Either way the band is a *minimum* on the pressure, never a
+ *    A wider window scales both ends up: the 1M-window evaluations have
+ *    points at 128K and at 1M, where RULER-1M scores the top instruct models
+ *    at 87.7-94.8 on its synthetic tasks and their base counterparts at
+ *    51.2-76.8, Gemini 2.5 reports 1M scores well below its 128K ones, and
+ *    ATLAS finds a 128K score cannot tell a model stable through 1M from one
+ *    that cliffs just after 128K. Either way the band is a *minimum* on the
+ *    pressure, never a
  *    ceiling, because which count is the real onset differs per model. Only
  *    an explicit `floor = 1` lets length alone saturate.
  *  - *Occupancy.* The fractional `start`/`full` ramp toward the advertised
@@ -73,17 +77,15 @@ export class ContextDegradation {
     full: 0.85,
     gamma: 2,
     // 32 768: the length at which RULER and NoLiMa both put the majority of
-    // models below their short-context quality, so the earliest defensible
+    // models below their short-context quality, so the latest defensible
     // onset for the band's absolute end.
     floorStartTokens: 32_768,
     // 131 072: the largest length the 2024-25 evidence reaches (Databricks at
     // 128K, and NoLiMa's appendix at 64K-128K for the two models it extends
-    // that far), so the earliest defensible plateau of the absolute end.
+    // that far), and so the plateau's absolute end.
     floorFullTokens: 131_072,
-    // 1/8: 131 072 / 1 048 576 and 32 768 / 262 144, the two places the 1M
-    // evidence brackets the band's onset (Gemini 2.5 reports 1M-window scores
-    // well below its 128K ones, and ATLAS finds a 128K score cannot separate a
-    // model stable through 1M from one that cliffs just after 128K).
+    // 1/8 = 131 072 / 1 048 576, the 128K point of the 1M-window reports, and
+    // also 32 768 / 262 144, so windows up to 256Ki keep the absolute onset.
     floorStartFraction: 1 / 8,
     // Unvalidated policy default, as the plateau height is: the latest plateau
     // that leaves windows below 262 144 on the absolute band. The evidence
