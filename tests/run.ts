@@ -16,8 +16,8 @@
  * Order: OOP/format lint (python3 tests/oop_lint.py) first, then the
  * installer guard's own cases (python3 tests/install_guard_test.py), then
  * the unit/e2e suite, then the installer round-trip - a failure anywhere
- * fails the whole run. Scratch lives under ~/tmp/pi-cache-tests-* and
- * the throwaway install home is under ~/tmp as well.
+ * fails the whole run. Scratch lives under ~/.tmp/pi-cache-tests-* and
+ * the throwaway install home is under ~/.tmp as well.
  */
 
 import { registry, cleanupScratch } from "./harness.ts";

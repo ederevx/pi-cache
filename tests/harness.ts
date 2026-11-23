@@ -3,11 +3,11 @@
  *
  * One responsibility: register named tests, run them sequentially, report
  * pass/fail with a non-zero exit on failure, and own the per-run scratch
- * root (always under ~/tmp per the machine's shared rules — never /tmp).
+ * root (always under ~/.tmp per the machine's shared rules — never /tmp).
  * No module-global mutable state outside this registry object.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -106,12 +106,14 @@ export function assertJsonLine(line: string): Record<string, unknown> {
   return parsed;
 }
 
-/** One scratch root for the whole run, under ~/tmp (never /tmp). */
+/** One scratch root for the whole run, under ~/.tmp (never /tmp). */
 let scratchRoot: string | undefined;
 
 export function scratchDir(): string {
   if (scratchRoot === undefined) {
-    scratchRoot = mkdtempSync(join(homedir(), "tmp", "pi-cache-tests-"));
+    const base = join(homedir(), ".tmp");
+    mkdirSync(base, { recursive: true });
+    scratchRoot = mkdtempSync(join(base, "pi-cache-tests-"));
   }
   return scratchRoot;
 }

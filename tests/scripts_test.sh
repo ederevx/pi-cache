@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # pi-cache installer round-trip test: install into a throwaway
 # PI_CODING_AGENT_DIR, verify parity and the manifest, uninstall, and
-# assert nothing is left behind. Scratch lives under ~/tmp (never /tmp).
+# assert nothing is left behind. Scratch lives under ~/.tmp (never /tmp).
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-scratch="$(mktemp -d "$HOME/tmp/pi-cache-scripts-test-XXXXXX")"
+mkdir -p "$HOME/.tmp"
+scratch="$(mktemp -d "$HOME/.tmp/pi-cache-scripts-test-XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 export PI_CODING_AGENT_DIR="$scratch/home"
 mkdir -p "$scratch/home"

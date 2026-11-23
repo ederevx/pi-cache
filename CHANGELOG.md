@@ -5,6 +5,14 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-11-23
+
+### Fixed
+
+- The suite's scratch root and its throwaway install home live under `~/.tmp`
+  instead of the retired `~/tmp`, and the harness creates that base when it is
+  absent, so a run no longer writes under the retired path.
+
 ## [0.20.2] - 2026-11-23
 
 ### Fixed
