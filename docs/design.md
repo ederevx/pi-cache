@@ -104,32 +104,55 @@ compaction is on, makes the compaction itself prefix-stable:
 
 1. `CompactionPressure` (`src/pressure.ts`) blends two independent
    reasons into a `[0,1]` pressure:
-   - *Context degradation* (`src/context-degradation.ts`): three reasons
-     that an either-suffices blend combines, so the pressure is bounded in
-     `[0,1]` and monotone in both arguments:
-     - *A research floor on absolute length.* Degradation is monotone in
-       length and starts well below the advertised window, so an absolute
-       token count is evidence even when the window says nothing:
-       `floor * clamp((x - floorStartTokens) / (floorFullTokens -
-       floorStartTokens))`, `lambda` below. Defaults 32 768 / 131 072 / 0.5.
-       This is a **minimum** on the pressure, never a ceiling: length alone
-       plateaus at `floor`, because the true onset is model- and
-       task-dependent. 32 768 is the length at which RULER (arXiv
-       2404.06654, COLM 2024) leaves only half of seventeen long-context
-       models satisfactory, and at which NoLiMa (arXiv 2502.05167, ICML
-       2025) puts eleven of thirteen below half their short-context
-       baseline; 131 072 is the largest length the evidence reaches, so the
-       floor stops climbing rather than extrapolate (Databricks, arXiv
-       2411.03538, finds only a handful of models consistent above 64K, and
-       Chroma's "Context Rot" finds the decline non-uniform and strongly
-       model- and task-dependent). `floor`, `floorStartTokens` and
-       `floorFullTokens` are
-       `PI_CACHE_PRESSURE_DEGRADE_FLOOR`, `..._FLOOR_START_TOKENS` and
-       `..._FLOOR_FULL_TOKENS`; `floor <= 0` disables the floor, and
-       `floorStartTokens <= 0` disables the length evidence altogether. The
-       rise itself is independent of `floor`: a zero floor removes only the
-       floor's own contribution, never the age term that multiplies the same
-       evidence.
+   - *Context degradation* (`src/context-degradation.ts`): two reasons
+     that an either-suffices blend combines, with the active age of the live
+     context raising the first, so the pressure is bounded in `[0,1]` and
+     monotone in both arguments:
+     - *A research band on token count.* Degradation is monotone in
+       length and starts well below the advertised window, so a token count
+       is evidence even when the window says nothing: `L` rises from the
+       band's start to its plateau and then holds at the height `floor`
+       (below). The band starts at `max(floorStartTokens,
+       floorStartFraction * W)` and plateaus at `max(floorFullTokens,
+       floorFullFraction * W)`; defaults 32 768 and 131 072 for the absolute
+       ends, 1/8 and 1/2 for the window fractions, and 0.5 for `floor`. This is a **minimum** on
+       the pressure, never a ceiling: a token count alone plateaus at
+       `floor`, because the true onset is model- and task-dependent.
+       The absolute ends are the 2024-25 evidence, measured on models
+       evaluated up to 128K. 32 768 is where RULER (arXiv 2404.06654, COLM
+       2024) leaves only half of seventeen long-context models satisfactory
+       and where NoLiMa (arXiv 2502.05167, ICML 2025) puts eleven of
+       thirteen below half their short-context baseline; 131 072 is the
+       largest length those evaluations reach (Databricks, arXiv 2411.03538,
+       finds only a handful of models consistent above 64K, and NoLiMa's
+       appendix reaches 64K-128K for two of them). They stay minimums, so a
+       wider window never starts degradation earlier than they do.
+       Above 256K the band scales with the window, because the models the
+       1M-era evaluations measure are not the 128K-era ones: the RULER-1M
+       leaderboard (2026) records current instruct models at 87-95% on its
+       synthetic tasks at a million tokens, and ATLAS (arXiv 2605.28079)
+       finds a 128K score cannot separate a model stable through 1M from one
+       that cliffs just after 128K. The 1/8 onset is where the two lengths
+       the 1M-window evidence brackets meet (131 072 / 1 048 576 and 32 768 /
+       262 144); it does not claim degradation starts at 128K. The 1/2
+       plateau is an **unvalidated policy default**, chosen as the latest
+       plateau that leaves every window below 262 144 on the absolute band,
+       and the evidence only bounds it: no cited model stays flat to its
+       advertised limit (Chroma's "Context Rot" finds the decline non-uniform
+       and strongly model- and task-dependent, HELMET finds NIAH-style tests
+       overstate long-context ability, "Context Is What You Need" arXiv
+       2509.21361 sizes the maximum effective window far below the advertised
+       one, and "Context Length Alone Hurts" arXiv 2510.05381 reports
+       13.9-85% loss from length alone even with perfect retrieval).
+       Scaling beyond 1M tokens is extrapolation: no cited evaluation goes
+       further.
+       `floorStartTokens`, `floorFullTokens`, `floor`, and the two fractions
+       are `PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS`, `..._FLOOR_FULL_TOKENS`,
+       `..._FLOOR`, `..._FLOOR_START_FRACTION` and `..._FLOOR_FULL_FRACTION`;
+       `floorStartTokens <= 0` disables the length evidence, and setting both
+       fractions to 0 restores the absolute band on every window. The rise
+       itself is independent of `floor`: a zero floor removes only the band's
+       own height, never the age term that raises the same evidence.
      - *The fractional ramp toward the window limit.*
        `clamp((x - start*W) / max(1e-9, (full - start)*W))^gamma` with
        `start`/`full`/`gamma` (default 0.5/0.85/2; `PI_CACHE_PRESSURE_
@@ -142,13 +165,24 @@ compaction is on, makes the compaction itself prefix-stable:
      - *Active context age, for windows too large to trust.* A window counts
        as unlimited when its size is unknown, or when the fractional ramp
        could not start until past `floorFullTokens` (`start*W >=
-       floorFullTokens`, i.e. W >= 262 144 by default). Then
-       `lambda * (1 - 2^(-a/T))` adds pressure with `a` the active age and
-       `T` the half-life (`PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES`,
-       default 60; `<= 0` disables). It is multiplied by `lambda` so time
-       alone cannot create pressure below the length evidence, and it is
-       capped by the inclusion-exclusion blend, so it approaches but never
-       reaches 1 on its own.
+       floorFullTokens`, i.e. W >= 262 144 by default). Then the active age
+       `a` raises the band's plateau height toward 1: `floor + (1 - floor) *
+       (1 - 2^(-a/T))` with `T` the half-life
+       (`PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES`, default 60; `<= 0`
+       disables). It is a modifier on the same length evidence, not a third
+       reason: blended in separately, it counted the length twice, and a 1M
+       window reached certainty at 131K tokens after one active hour. It
+       applies only to unlimited windows, so a trusted window ignores the
+       clock entirely. With the defaults and no economics, per evaluated
+       boundary:
+
+       | window | active age | first nonzero | probability 1/2 | probability 1 |
+       |---|---|---|---|---|
+       | 1 000 000 | none | ~200K | ~466K | ~657K |
+       | 1 000 000 | 1 h | ~176K | ~352K | ~425K |
+       | 1 000 000 | 3 h | ~166K | ~307K | ~365K |
+       | 2 000 000 | none | ~401K | ~931K | ~1.31M |
+       | 2 000 000 | 1 h | ~351K | ~704K | ~850K |
      `a` is the sum of gaps between the timestamps of the branch entries
      from the last compaction's `firstKeptEntryId` to the leaf, each gap
      capped at a short interval (`PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS`,
@@ -165,8 +199,8 @@ compaction is on, makes the compaction itself prefix-stable:
      missing branch or an unparseable timestamp fails closed to an age of 0.
      `floor`, `halfLifeMs`, and the fractional `start`/`full`/`gamma` are
      **unvalidated policy defaults**: the research supports a decline, not
-     these particular numbers; the floor bound and the shape of the curve are
-     ours, and it measures length, not wall-clock age. `bench/calibration/` is where a measured
+     these particular numbers; the band's height and the shape of the curve
+     are ours, and it measures length, not wall-clock age. `bench/calibration/` is where a measured
      answer comes from: it runs paired full-versus-compacted continuations
      for one configuration at a time and reports `inconclusive` rather than
      a number when the evidence does not resolve it.
@@ -204,8 +238,8 @@ compaction is on, makes the compaction itself prefix-stable:
    before a turn. A fourth, mid-run point fires at the `turn_end`
    boundary, but only when the pressure is saturated (probability 1) and
    the window is at least `PI_CACHE_MIDTERM_MIN_PERCENT` (default 50)
-   percent full or past the degradation onset (the research floor on
-   absolute length or the fractional ramp, whichever starts first), so a
+   percent full or past the degradation onset (the research band on
+   token count or the fractional ramp, whichever starts first), so a
    long agentic run can compact
    without waiting to settle (`PI_CACHE_MIDTERM`). It returns a boundary
    `compaction` draft (built by `src/midterm.ts` + `src/midterm-cut.ts`)
@@ -577,11 +611,14 @@ can never delete a file outside the store.
 
 ## Calibrating the degradation onset
 
-The floor's 32 768/131 072 anchors come from the literature cited above
+The band's 32 768/131 072 absolute ends come from the literature cited above
 (RULER, NoLiMa, Databricks): the length at which most models lose their
 short-context quality, and the largest length those evaluations reach. The
-floor's height (0.5), the active-age half-life (60 min) and the fractional
-`start`/`full`/`gamma` are policy defaults with no measurement behind them,
+1/8 and 1/2 window fractions come from the 1M-era evidence (RULER-1M, ATLAS,
+Gemini 2.5) that those models hold much further, and the 1/2 plateau is a
+policy default, not a measurement. The band's height (0.5), the active-age
+half-life (60 min) and the fractional `start`/`full`/`gamma` are policy
+defaults with no measurement behind them,
 and none of the cited work measures wall-clock age at all. `bench/calibration/` is the measurement: for one pinned
 configuration it runs every task twice from the same repository state, once
 with the whole history and once with the span pi-cache would drop replaced by

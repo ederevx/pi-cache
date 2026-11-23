@@ -291,12 +291,13 @@ test("autocompact: midterm fires past the degradation onset below the percent ga
   });
   const c = new AutocompactController({ ...opts, midterm: true, pressure: model });
   c.noteTurn();
-  // 25% of a 1M window is under the 50% gate but past the 32K research floor
-  // onset, and four active hours carry the time term to saturation there.
+  // 43% of a 1M window is under the 50% gate but past the band's 125K onset
+  // (an eighth of the window), and four active hours raise the plateau close
+  // to 1 there.
   const aged = signals({ contextActiveMs: () => 4 * 60 * 60 * 1000 });
-  assertEq(c.midtermEligible({ tokens: 250_000, contextWindow: 1_000_000 }, aged), true);
-  // Without the age the floor alone (0.5) cannot saturate the ramp.
-  assertEq(c.midtermEligible({ tokens: 250_000, contextWindow: 1_000_000 }, signals()), false);
+  assertEq(c.midtermEligible({ tokens: 450_000, contextWindow: 1_000_000 }, aged), true);
+  // Without the age the band's 0.433 alone cannot saturate the ramp.
+  assertEq(c.midtermEligible({ tokens: 450_000, contextWindow: 1_000_000 }, signals()), false);
   // Below the onset the percent gate cannot be satisfied either.
   assertEq(c.midtermEligible({ tokens: 60_000, contextWindow: 1_000_000 }, aged), false);
 
@@ -324,9 +325,9 @@ test("autocompact: the active context age reaches the pressure sample", () => {
   const c = new AutocompactController({ ...opts, midterm: true, pressure: model });
   c.noteTurn();
   const aged = signals({ contextActiveMs: () => 60 * 60 * 1000 });
-  // 1 - (1 - 0.5) * (1 - 0.5) = 0.75 after one half-life at a saturated floor.
+  // 0.5 * 0.75 = 0.375 after one half-life at half the window's band.
   assertEq(
-    c.currentPressure({ tokens: 200_000, contextWindow: 1_000_000 }, baseSignals().lastUsage(), aged)
+    c.currentPressure({ tokens: 500_000, contextWindow: 1_000_000 }, baseSignals().lastUsage(), aged)
       ?.degradation,
     0.75,
   );

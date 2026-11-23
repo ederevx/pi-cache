@@ -172,13 +172,13 @@ test("pressure: either reason alone can saturate the ramp", () => {
 test("pressure: degradationOnset follows the earlier of floor and ramp", () => {
   const p = pressure();
   assertEq(p.degradationOnset(200_000), 32_768, "a 200K window starts at the research floor");
-  assertEq(p.degradationOnset(1_000_000), 32_768, "so does a 1M window");
+  assertEq(p.degradationOnset(1_000_000), 125_000, "a 1M window starts at its share of the band");
   assertEq(
     new CompactionPressure({
       degradation: new ContextDegradation({ floor: 0 }),
       random: () => 0,
     }).degradationOnset(1_000_000),
-    32_768,
+    125_000,
     "a zero floor keeps the length onset: the age term still reads it",
   );
   assertEq(
@@ -201,4 +201,67 @@ test("pressure: zero rates leave degradation as the only reason", () => {
   });
   assertEq(verdict.economics, 0, "no dollars to save");
   assertEq(verdict.probability, 1, "degradation saturates alone");
+});
+test("pressure: a 1M window is no longer saturated by the absolute band", () => {
+  const p = pressure();
+  assertEq(
+    p.probability({ tokens: 190_000, contextWindow: 1_000_000 }),
+    0,
+    "190K is below the band's onset plus the deadband",
+  );
+  assert(
+    p.probability({ tokens: 400_000, contextWindow: 1_000_000 }) < 0.3,
+    "400K is a partial climb, not a saturated one",
+  );
+  assertEq(
+    p.probability({ tokens: 350_000, contextWindow: 2_000_000 }),
+    0,
+    "a 2M window is later still",
+  );
+  assertEq(
+    p.probability({ tokens: 700_000, contextWindow: 1_000_000 }),
+    1,
+    "and it still saturates before the window limit",
+  );
+});
+
+test("pressure: active age cannot saturate a 1M window early", () => {
+  const p = pressure();
+  const hour = 60 * 60 * 1000;
+  assertEq(
+    p.probability({ tokens: 131_072, contextWindow: 1_000_000, contextActiveMs: hour }),
+    0,
+    "the old 131K saturation is gone",
+  );
+  assert(
+    p.probability({ tokens: 200_000, contextWindow: 1_000_000, contextActiveMs: hour }) < 0.05,
+    "200K after an hour stays in the deadband",
+  );
+  assert(
+    p.probability({ tokens: 380_000, contextWindow: 1_000_000, contextActiveMs: hour }) < 1,
+    "380K after an hour is high but not saturated",
+  );
+  assertEq(
+    p.probability({ tokens: 450_000, contextWindow: 1_000_000, contextActiveMs: hour }),
+    1,
+    "450K after an hour saturates",
+  );
+  assert(
+    p.probability({ tokens: 360_000, contextWindow: 1_000_000, contextActiveMs: 3 * hour }) < 1,
+    "three hours is not quite saturated at 360K",
+  );
+  assertEq(
+    p.probability({ tokens: 370_000, contextWindow: 1_000_000, contextActiveMs: 3 * hour }),
+    1,
+    "and saturates just after",
+  );
+  assertEq(
+    p.probability({ tokens: 450_000, contextWindow: 1_000_000, contextActiveMs: hour }),
+    1,
+    "1M at 450K after an hour",
+  );
+  assert(
+    p.probability({ tokens: 450_000, contextWindow: 2_000_000, contextActiveMs: hour }) < 1,
+    "the same count and age on a 2M window is weaker",
+  );
 });

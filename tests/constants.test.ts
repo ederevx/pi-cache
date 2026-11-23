@@ -401,6 +401,8 @@ test("options: the degradation floor and the midterm percent resolve", () => {
     {
       PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS: undefined,
       PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_TOKENS: undefined,
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_FRACTION: undefined,
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_FRACTION: undefined,
       PI_CACHE_PRESSURE_DEGRADE_FLOOR: undefined,
       PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES: undefined,
       PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS: undefined,
@@ -410,6 +412,8 @@ test("options: the degradation floor and the midterm percent resolve", () => {
       const defaults = loadOptions();
       assertEq(defaults.pressureDegradeFloorStartTokens, 32_768, "floor onset default");
       assertEq(defaults.pressureDegradeFloorFullTokens, 131_072, "floor plateau default");
+      assertEq(defaults.pressureDegradeFloorStartFraction, 0.125, "band onset fraction default");
+      assertEq(defaults.pressureDegradeFloorFullFraction, 0.5, "band plateau fraction default");
       assertEq(defaults.pressureDegradeFloor, 0.5, "floor default");
       assertEq(defaults.pressureDegradeHalfLifeMinutes, 60, "half-life default");
       assertEq(defaults.pressureDegradeAgeGapSeconds, 300, "age gap cap default");
@@ -420,6 +424,8 @@ test("options: the degradation floor and the midterm percent resolve", () => {
     {
       PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS: "64000",
       PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_TOKENS: "128000",
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_FRACTION: "0.2",
+      PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_FRACTION: "0.6",
       PI_CACHE_PRESSURE_DEGRADE_FLOOR: "0.25",
       PI_CACHE_PRESSURE_DEGRADE_HALF_LIFE_MINUTES: "30",
       PI_CACHE_PRESSURE_DEGRADE_AGE_GAP_SECONDS: "120",
@@ -429,6 +435,8 @@ test("options: the degradation floor and the midterm percent resolve", () => {
       const overridden = loadOptions();
       assertEq(overridden.pressureDegradeFloorStartTokens, 64_000);
       assertEq(overridden.pressureDegradeFloorFullTokens, 128_000);
+      assertEq(overridden.pressureDegradeFloorStartFraction, 0.2);
+      assertEq(overridden.pressureDegradeFloorFullFraction, 0.6);
       assertEq(overridden.pressureDegradeFloor, 0.25);
       assertEq(overridden.pressureDegradeHalfLifeMinutes, 30);
       assertEq(overridden.pressureDegradeAgeGapSeconds, 120);

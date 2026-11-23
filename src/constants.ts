@@ -108,11 +108,15 @@ export interface PiCacheOptions {
   pressureDegradeStart: number;
   pressureDegradeFull: number;
   pressureDegradeGamma: number;
-  /** Live-token onset of the research floor on absolute length (<=0 off). */
+  /** Live-token onset of the research band's absolute end (<=0 off). */
   pressureDegradeFloorStartTokens: number;
-  /** Live-token plateau of the research floor on absolute length. */
+  /** Live-token plateau of the research band's absolute end. */
   pressureDegradeFloorFullTokens: number;
-  /** The floor's plateau in [0,1): most absolute length alone can claim. */
+  /** Window fraction the band starts at when that is later. */
+  pressureDegradeFloorStartFraction: number;
+  /** Window fraction the band plateaus at when that is later. */
+  pressureDegradeFloorFullFraction: number;
+  /** The band's plateau height in [0,1]: most a token count alone can claim. */
   pressureDegradeFloor: number;
   /** Active-age half-life (minutes) for windows too large to trust (<=0 off). */
   pressureDegradeHalfLifeMinutes: number;
@@ -215,7 +219,10 @@ export class OptionsLoader {
       // leaves half of seventeen long-context models satisfactory and NoLiMa
       // puts eleven of thirteen below half their short-context baseline; the
       // evidence reaches 128K (Databricks, and NoLiMa's two-model appendix),
-      // so the plateau claims no more than that.
+      // so the plateau claims no more than that. Those ends are also the
+      // band's minimums: a window above 262K scales both later, because the
+      // 1M models RULER-1M and ATLAS measure hold above 128K far better than
+      // the 128K-era ones did.
       pressureDegradeFloorStartTokens: this.envInt(
         "PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_TOKENS",
         32_768,
@@ -223,6 +230,18 @@ export class OptionsLoader {
       pressureDegradeFloorFullTokens: this.envInt(
         "PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_TOKENS",
         131_072,
+      ),
+      // 1/8: 131 072 / 1 048 576 and 32 768 / 262 144, the two places the 1M
+      // evidence brackets the onset.
+      pressureDegradeFloorStartFraction: this.envFloat(
+        "PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_FRACTION",
+        0.125,
+      ),
+      // 1/2: an unvalidated policy default, the latest plateau that leaves
+      // windows below 262 144 unchanged.
+      pressureDegradeFloorFullFraction: this.envFloat(
+        "PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_FRACTION",
+        0.5,
       ),
       pressureDegradeFloor: this.envFloat("PI_CACHE_PRESSURE_DEGRADE_FLOOR", 0.5),
       // Active-age half-life for windows too large for occupancy to speak.

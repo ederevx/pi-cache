@@ -12,26 +12,38 @@
  *    thirteen models below half their short-context baseline at 32K, and
  *    Databricks (arXiv 2411.03538) finds only a handful staying consistent
  *    above 64K. Chroma's "Context Rot" (research.trychroma.com/context-rot)
- *    finds the decline non-uniform and strongly model- and task-dependent.
- *    So an absolute token count is evidence of degradation that rises from
- *    `floorStartTokens` to `floorFullTokens` and then plateaus at `floor`
- *    (default 0.5, clamped to `[0,1]`): it is a *minimum* on the pressure,
- *    never a ceiling, because which count is the real onset differs per
- *    model. Only an explicit `floor = 1` lets length alone saturate.
+ *    finds the decline non-uniform and strongly model- and task-dependent,
+ *    and "Context Length Alone Hurts" (arXiv 2510.05381) shows length alone
+ *    costs 13.9-85% even with perfect retrieval. So a token count is
+ *    evidence of degradation across a *band*: it starts at the larger of
+ *    `floorStartTokens` and `floorStartFraction` of the window, and
+ *    plateaus at the larger of `floorFullTokens` and `floorFullFraction` of
+ *    it, at height `floor` (default 0.5, clamped to `[0,1]`). The absolute
+ *    ends are the lengths the 2024-25 evidence measured, so they stay
+ *    minimums: no window can make degradation start earlier than they do.
+ *    A wider window scales both ends up, because the models RULER-1M and
+ *    ATLAS measure in 2026 hold above 128K far better than the 128K-era
+ *    ones. Either way the band is a *minimum* on the pressure, never a
+ *    ceiling, because which count is the real onset differs per model. Only
+ *    an explicit `floor = 1` lets length alone saturate.
  *  - *Occupancy.* The fractional `start`/`full` ramp toward the advertised
  *    window is what carries the pressure the rest of the way to the window
  *    limit. It is unchanged and uncapped: a window small enough to be
  *    trusted keeps exactly the curve it had.
  *
- * For a window so large that the fractional ramp cannot start until after
- * the lengths the research measured (or one whose size is unknown), neither
- * of those says anything useful, and a third reason takes over: *active
- * time*. Content accumulated over hours degrades more than the same content
- * accumulated over minutes, discounted by a half-life so the term saturates
- * slowly instead of becoming a cliff at some age. The three reasons combine
- * by inclusion-exclusion, the same either-reason-suffices rule the pressure
- * blend already uses, which keeps the result bounded in `[0,1]` and monotone
- * in both arguments. Owns only its options; no mutable state.
+ * For a window whose size is unknown, or so large that the fractional ramp
+ * cannot start until after the lengths the research measured, neither of
+ * those says anything useful, and *active time* takes over. Content
+ * accumulated over hours degrades more than the same content accumulated
+ * over minutes, discounted by a half-life so the term saturates slowly
+ * instead of becoming a cliff at some age. Time raises the height of the
+ * band's plateau instead of adding a second reason: `L * (floor + (1 -
+ * floor) * time)`. Both terms come from the same length evidence, so
+ * treating them as independent would count it twice. The plateau height and
+ * the fractional ramp combine by inclusion-exclusion, the same
+ * either-reason-suffices rule the pressure blend already uses, which keeps
+ * the result bounded in `[0,1]` and monotone in both arguments. Owns only its
+ * options; no mutable state.
  */
 
 export interface ContextDegradationOptions {
@@ -41,11 +53,15 @@ export interface ContextDegradationOptions {
   full: number;
   /** Curve exponent (>1 keeps the fractional ramp near 0 through the onset). */
   gamma: number;
-  /** Absolute token count where the research floor starts (<=0 disables it). */
+  /** Absolute token count where the length band starts (<=0 disables it). */
   floorStartTokens: number;
-  /** Absolute token count where the research floor plateaus. */
+  /** Absolute token count where the length band plateaus. */
   floorFullTokens: number;
-  /** Floor plateau in `[0,1]`: the most absolute length alone can claim. */
+  /** Window fraction the band starts at when that is later ([0,1]). */
+  floorStartFraction: number;
+  /** Window fraction the band plateaus at when that is later. */
+  floorFullFraction: number;
+  /** Band plateau height in `[0,1]`: the most a token count alone can claim. */
   floor: number;
   /** Active-age half-life (ms) for windows too large to trust (<=0 disables). */
   halfLifeMs: number;
@@ -57,13 +73,22 @@ export class ContextDegradation {
     full: 0.85,
     gamma: 2,
     // 32 768: the length at which RULER and NoLiMa both put the majority of
-    // models below their short-context quality, so the latest defensible
-    // onset for a *floor* on absolute length.
+    // models below their short-context quality, so the earliest defensible
+    // onset for the band's absolute end.
     floorStartTokens: 32_768,
-    // 131 072: the largest length the evidence reaches (Databricks at 128K,
-    // and NoLiMa's appendix at 64K-128K for the two models it extends that
-    // far). The floor stops climbing there rather than extrapolate past it.
+    // 131 072: the largest length the 2024-25 evidence reaches (Databricks at
+    // 128K, and NoLiMa's appendix at 64K-128K for the two models it extends
+    // that far), so the earliest defensible plateau of the absolute end.
     floorFullTokens: 131_072,
+    // 1/8: 131 072 / 1 048 576 and 32 768 / 262 144, the two places the 1M
+    // evidence brackets the band's onset (Gemini 2.5 reports 1M-window scores
+    // well below its 128K ones, and ATLAS finds a 128K score cannot separate a
+    // model stable through 1M from one that cliffs just after 128K).
+    floorStartFraction: 1 / 8,
+    // Unvalidated policy default, as the plateau height is: the latest plateau
+    // that leaves windows below 262 144 on the absolute band. The evidence
+    // only bounds it, since no cited model stays flat to its advertised limit.
+    floorFullFraction: 0.5,
     // Unvalidated policy default. A floor of 1 would let length alone
     // saturate the pressure, so the default leaves room for the ramp and the
     // age term; the value is clamped to [0,1], and only an explicit 1 makes
@@ -90,6 +115,12 @@ export class ContextDegradation {
     const start = ContextDegradation.clamp(
       ContextDegradation.finite(merged.start, ContextDegradation.DEFAULTS.start),
     );
+    const startFraction = ContextDegradation.clamp(
+      ContextDegradation.finite(
+        merged.floorStartFraction,
+        ContextDegradation.DEFAULTS.floorStartFraction,
+      ),
+    );
     const full = Math.max(
       start,
       ContextDegradation.clamp(
@@ -111,6 +142,18 @@ export class ContextDegradation {
           ContextDegradation.DEFAULTS.floorFullTokens,
         ),
       ),
+      floorStartFraction: startFraction,
+      // The plateau cannot start at a window fraction the band's onset has not
+      // reached, so it is raised to the onset's fraction rather than inverted.
+      floorFullFraction: Math.max(
+        startFraction,
+        ContextDegradation.clamp(
+          ContextDegradation.finite(
+            merged.floorFullFraction,
+            ContextDegradation.DEFAULTS.floorFullFraction,
+          ),
+        ),
+      ),
       floor: ContextDegradation.clamp(
         ContextDegradation.finite(merged.floor, ContextDegradation.DEFAULTS.floor),
       ),
@@ -127,7 +170,7 @@ export class ContextDegradation {
    */
   onset(contextWindow: number): number {
     const floorOnset =
-      this.lengthCounts(contextWindow) ? this.opts.floorStartTokens : Number.POSITIVE_INFINITY;
+      this.lengthCounts(contextWindow) ? this.bandStart(contextWindow) : Number.POSITIVE_INFINITY;
     const rampOnset = ContextDegradation.known(contextWindow)
       ? contextWindow * this.opts.start
       : Number.POSITIVE_INFINITY;
@@ -150,19 +193,17 @@ export class ContextDegradation {
    * with the active age of the live context when it is known.
    */
   pressure(tokens: number, contextWindow: number, activeMs?: number): number {
-    const length = this.lengthEvidence(tokens);
-    const floor = this.opts.floor * length;
+    const length =
+      this.lengthEvidence(tokens, contextWindow) * this.plateau(contextWindow, activeMs);
     const ramp = this.occupancyRamp(tokens, contextWindow);
-    const time = this.timeRamp(contextWindow, activeMs);
-    const combined = 1 - (1 - floor) * (1 - ramp) * (1 - length * time);
-    return ContextDegradation.clamp(combined);
+    return ContextDegradation.clamp(1 - (1 - length) * (1 - ramp));
   }
 
   /**
-   * Whether any reason reads length evidence at all for a window: the floor
-   * needs a plateau above zero, the age term needs its own switch on, and
-   * both share the one onset. Keeping this in `onset` and `lengthEvidence`
-   * together is what makes the two agree.
+   * Whether any reason reads the band at all for a window: the band needs a
+   * height above zero, the age term needs its own switch on, and both share
+   * the one onset. Keeping this in `onset` and `lengthEvidence` together is
+   * what makes the two agree.
    */
   private lengthCounts(contextWindow: number): boolean {
     if (this.opts.floorStartTokens <= 0) return false;
@@ -175,15 +216,46 @@ export class ContextDegradation {
   }
 
   /**
-   * Length evidence in `[0,1]`: 0 at `floorStartTokens`, 1 at the plateau.
-   * Independent of `floor`, which only scales the floor's own contribution:
-   * a zero floor must not also silence the age term that multiplies it.
+   * Where the length band starts: its absolute onset, or the window's share
+   * of it when that is later, so a large window never starts it earlier.
    */
-  private lengthEvidence(tokens: number): number {
-    const { floorStartTokens, floorFullTokens } = this.opts;
-    if (floorStartTokens <= 0) return 0;
-    const span = Math.max(1, floorFullTokens - floorStartTokens);
-    return ContextDegradation.clamp((ContextDegradation.count(tokens) - floorStartTokens) / span);
+  private bandStart(contextWindow: number): number {
+    const scaled = ContextDegradation.known(contextWindow)
+      ? this.opts.floorStartFraction * contextWindow
+      : 0;
+    return Math.max(this.opts.floorStartTokens, scaled);
+  }
+
+  /**
+   * Where the length band plateaus: its absolute plateau, or the window's
+   * share of it when that is later.
+   */
+  private bandFull(contextWindow: number): number {
+    const scaled = ContextDegradation.known(contextWindow)
+      ? this.opts.floorFullFraction * contextWindow
+      : 0;
+    return Math.max(this.opts.floorFullTokens, scaled);
+  }
+
+  /**
+   * Length evidence in `[0,1]`: 0 at the band's start, 1 at its plateau.
+   * Independent of `floor`, which only scales the band's own contribution:
+   * a zero floor must not also silence the age term that raises it.
+   */
+  private lengthEvidence(tokens: number, contextWindow: number): number {
+    if (this.opts.floorStartTokens <= 0) return 0;
+    const start = this.bandStart(contextWindow);
+    const span = Math.max(1, this.bandFull(contextWindow) - start);
+    return ContextDegradation.clamp((ContextDegradation.count(tokens) - start) / span);
+  }
+
+  /**
+   * The band's plateau height: `floor` with no active age, rising toward 1 by
+   * the half-life, so a long session makes the same length claim more.
+   */
+  private plateau(contextWindow: number, activeMs: number | undefined): number {
+    const { floor } = this.opts;
+    return floor + (1 - floor) * this.timeRamp(contextWindow, activeMs);
   }
 
   /** The uncapped fractional ramp toward the advertised window, in `[0,1]`. */

@@ -262,7 +262,7 @@ export class AutocompactController {
   }
 
   /** At the configured occupancy, or past the degradation onset (the research
-   *  floor on absolute length or the fractional ramp, whichever starts first). */
+   *  band on token count or the fractional ramp, whichever starts first). */
   private pastMidtermOnset(view: AutocompactView, sample: PressureSample): boolean {
     const percent = this.opts.midtermMinPercent ?? AutocompactController.DEFAULT_MIDTERM_MIN_PERCENT;
     if (AutocompactController.atLeastPercent(view, percent)) return true;
@@ -426,7 +426,7 @@ export class AutocompactController {
   }
 
   /** The positive TTL and finite touch age the horizon may decay against, and
-   *  the active context age the degradation time component reads. */
+   *  the active context age the degradation plateau reads. */
   private cacheTiming(signals?: AutocompactSignal): CacheTiming {
     const ttlMs = signals?.cacheTtlMs?.();
     const touch = signals?.msSinceCacheTouch?.() ?? signals?.msSinceLastTurn();

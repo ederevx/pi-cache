@@ -150,6 +150,8 @@ export default function piCacheExtension(pi: ExtensionAPI): void {
       gamma: opts.pressureDegradeGamma,
       floorStartTokens: opts.pressureDegradeFloorStartTokens,
       floorFullTokens: opts.pressureDegradeFloorFullTokens,
+      floorStartFraction: opts.pressureDegradeFloorStartFraction,
+      floorFullFraction: opts.pressureDegradeFloorFullFraction,
       floor: opts.pressureDegradeFloor,
       halfLifeMs: opts.pressureDegradeHalfLifeMinutes * 60_000,
     }),

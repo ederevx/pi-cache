@@ -5,6 +5,27 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-23
+
+### Changed
+
+- The research floor on length now scales with the context window: on
+  windows of 256K tokens and more it starts at an eighth of the window and
+  plateaus at half of it, never earlier than the 32K/128K anchors, so a
+  1M-token window first raises the compaction probability at about 200K
+  tokens and saturates near 657K instead of standing at 0.64 from 131K on.
+  Windows below 256K tokens and unknown windows keep their curve exactly.
+- Active context age raises that plateau toward 1 instead of being blended
+  in as a second reason, which counted the same length evidence twice: a 1M
+  window with one active hour now saturates at about 425K tokens instead of
+  at 131K. The pressure at a saturated band is unchanged.
+- `PI_CACHE_PRESSURE_DEGRADE_FLOOR_START_FRACTION` (0.125) and
+  `PI_CACHE_PRESSURE_DEGRADE_FLOOR_FULL_FRACTION` (0.5) are new.
+  `..._FLOOR_START_TOKENS` and `..._FLOOR_FULL_TOKENS` keep their meaning on
+  windows below 256K and become minimums above it, so a value that used to
+  raise the onset on a 1M window now needs the fraction set to 0 as well.
+  Setting both fractions to 0 restores the previous band on every window.
+
 ## [0.19.3] - 2026-11-19
 
 ### Changed

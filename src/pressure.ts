@@ -10,9 +10,11 @@
  * occupancy out of the comparison (see economics.ts), so a warm prefix with
  * few expected requests stays at zero even when large, while a cold prefix
  * or one past the degradation onset rises. Degradation itself blends a
- * research-based floor on absolute length, the fractional ramp toward the
- * window limit, and — for windows too large for either to speak — the
- * active age of the live context (see context-degradation.ts). The
+ * research band on token count that starts at an eighth of a large window
+ * and plateaus at half of it (never earlier than the 32K/128K anchors), the
+ * fractional ramp toward the window limit, and — for windows too large for
+ * either to speak — the active age of the live context raising that band's
+ * plateau (see context-degradation.ts). The
  * economics horizon itself is discounted by the time since the cache was
  * last touched against the model's TTL, so a near-expiry prefix is compared
  * over fewer warm requests. Rates and TTL come from the model in use —
