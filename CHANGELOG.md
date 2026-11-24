@@ -5,6 +5,13 @@ git tag, and the `version` in `package.json` matches the newest tag.
 
 ## [Unreleased]
 
+## [0.20.4] - 2026-11-23
+
+### Fixed
+
+- Remove the obsolete compaction artifact store description from the design
+  document; compaction records contain telemetry only.
+
 ## [0.20.3] - 2026-11-23
 
 ### Fixed
